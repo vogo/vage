@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package router
+package dagagent
 
 import (
 	"context"
@@ -25,45 +25,30 @@ import (
 	"github.com/vogo/vagent/schema"
 )
 
-// Route pairs an Agent with a description used for routing decisions.
-type Route struct {
-	Agent       agent.Agent
-	Description string
+// Node is a single node in a DAG execution graph.
+type Node struct {
+	ID    string      // unique identifier for this node
+	Agent agent.Agent // the agent to execute
+	Deps  []string    // IDs of nodes this node depends on
 }
 
-// Func selects which agent to route a request to.
-type Func func(ctx context.Context, req *schema.RunRequest, routes []Route) (agent.Agent, error)
-
-// Agent routes requests to one of several sub-agents based on a Func.
+// Agent executes a directed acyclic graph of sub-agents.
 type Agent struct {
 	agent.Base
-	routes     []Route
-	routerFunc Func
+	nodes []Node
 }
 
 var _ agent.Agent = (*Agent)(nil)
 
-// Option configures a router Agent.
-type Option func(*Agent)
-
-// WithFunc sets the routing function for a router Agent.
-func WithFunc(fn Func) Option {
-	return func(a *Agent) { a.routerFunc = fn }
-}
-
-// New creates a router Agent with the given routes and options.
-func New(cfg agent.Config, routes []Route, opts ...Option) *Agent {
-	a := &Agent{
-		Base:   agent.NewBase(cfg),
-		routes: routes,
+// New creates a DAG Agent with the given execution nodes.
+func New(cfg agent.Config, nodes []Node) *Agent {
+	return &Agent{
+		Base:  agent.NewBase(cfg),
+		nodes: nodes,
 	}
-	for _, o := range opts {
-		o(a)
-	}
-	return a
 }
 
 // Run is not yet implemented.
 func (a *Agent) Run(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
-	return nil, errors.New("vagent: router.Agent.Run not yet implemented")
+	return nil, errors.New("vagent: dag.Agent.Run not yet implemented")
 }

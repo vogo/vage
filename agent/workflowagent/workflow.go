@@ -15,37 +15,33 @@
  * limitations under the License.
  */
 
-package workflow
+package workflowagent
 
 import (
 	"context"
-	"strings"
-	"testing"
+	"errors"
 
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/schema"
 )
 
-func TestAgent_Config(t *testing.T) {
-	a := New(agent.Config{ID: "wf-1", Name: "workflow", Description: "sequential"})
-	if a.ID() != "wf-1" {
-		t.Errorf("ID = %q, want %q", a.ID(), "wf-1")
-	}
-	if a.Name() != "workflow" {
-		t.Errorf("Name = %q, want %q", a.Name(), "workflow")
-	}
-	if a.Description() != "sequential" {
-		t.Errorf("Description = %q, want %q", a.Description(), "sequential")
+// Agent executes a sequence of sub-agents in order.
+type Agent struct {
+	agent.Base
+	steps []agent.Agent
+}
+
+var _ agent.Agent = (*Agent)(nil)
+
+// New creates a workflow Agent that runs the given steps sequentially.
+func New(cfg agent.Config, steps ...agent.Agent) *Agent {
+	return &Agent{
+		Base:  agent.NewBase(cfg),
+		steps: steps,
 	}
 }
 
-func TestAgent_Run_Stub(t *testing.T) {
-	a := New(agent.Config{ID: "wf-1"})
-	_, err := a.Run(context.Background(), &schema.RunRequest{})
-	if err == nil {
-		t.Fatal("expected error from stub")
-	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error = %q, want 'not yet implemented'", err.Error())
-	}
+// Run is not yet implemented.
+func (a *Agent) Run(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
+	return nil, errors.New("vagent: workflow.Agent.Run not yet implemented")
 }

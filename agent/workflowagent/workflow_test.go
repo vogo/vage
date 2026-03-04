@@ -15,40 +15,37 @@
  * limitations under the License.
  */
 
-package dag
+package workflowagent
 
 import (
 	"context"
-	"errors"
+	"strings"
+	"testing"
 
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/schema"
 )
 
-// Node is a single node in a DAG execution graph.
-type Node struct {
-	ID    string       // unique identifier for this node
-	Agent agent.Agent  // the agent to execute
-	Deps  []string     // IDs of nodes this node depends on
-}
-
-// Agent executes a directed acyclic graph of sub-agents.
-type Agent struct {
-	agent.Base
-	nodes []Node
-}
-
-var _ agent.Agent = (*Agent)(nil)
-
-// New creates a DAG Agent with the given execution nodes.
-func New(cfg agent.Config, nodes []Node) *Agent {
-	return &Agent{
-		Base:  agent.NewBase(cfg),
-		nodes: nodes,
+func TestAgent_Config(t *testing.T) {
+	a := New(agent.Config{ID: "wf-1", Name: "workflow", Description: "sequential"})
+	if a.ID() != "wf-1" {
+		t.Errorf("ID = %q, want %q", a.ID(), "wf-1")
+	}
+	if a.Name() != "workflow" {
+		t.Errorf("Name = %q, want %q", a.Name(), "workflow")
+	}
+	if a.Description() != "sequential" {
+		t.Errorf("Description = %q, want %q", a.Description(), "sequential")
 	}
 }
 
-// Run is not yet implemented.
-func (a *Agent) Run(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
-	return nil, errors.New("vagent: dag.Agent.Run not yet implemented")
+func TestAgent_Run_Stub(t *testing.T) {
+	a := New(agent.Config{ID: "wf-1"})
+	_, err := a.Run(context.Background(), &schema.RunRequest{})
+	if err == nil {
+		t.Fatal("expected error from stub")
+	}
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("error = %q, want 'not yet implemented'", err.Error())
+	}
 }

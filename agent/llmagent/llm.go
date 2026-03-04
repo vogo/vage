@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package llm
+package llmagent
 
 import (
 	"context"
@@ -29,6 +29,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
+	"github.com/vogo/vagent/hook"
 	"github.com/vogo/vagent/memory"
 	"github.com/vogo/vagent/prompt"
 	"github.com/vogo/vagent/schema"
@@ -50,6 +51,7 @@ type Agent struct {
 	temperature      *float64
 	streamBufferSize int
 	middlewares      []agent.StreamMiddleware
+	hookManager      *hook.Manager
 }
 
 var (
@@ -100,6 +102,11 @@ func WithStreamMiddleware(mw ...agent.StreamMiddleware) Option {
 // WithMemory sets the memory manager for multi-turn conversation support.
 func WithMemory(m *memory.Manager) Option {
 	return func(a *Agent) { a.memoryManager = m }
+}
+
+// WithHookManager sets the hook manager for event dispatch.
+func WithHookManager(m *hook.Manager) Option {
+	return func(a *Agent) { a.hookManager = m }
 }
 
 // New creates a new Agent with the given config and options.
@@ -281,6 +288,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc aimodel.ToolCall) schema
 	return tr
 }
 
+// dispatch sends an event to the hook manager if configured.
+func (a *Agent) dispatch(ctx context.Context, event schema.Event) {
+	a.hookManager.Dispatch(ctx, event)
+}
+
 // Run executes the ReAct loop: prompt -> LLM -> tool calls (loop) -> response.
 func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 	if a.chatCompleter == nil {
@@ -289,6 +301,10 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 	start := time.Now()
 	p := a.resolveRunParams(req.Options)
+	agentID := a.ID()
+	sessionID := req.SessionID
+
+	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, sessionID, schema.AgentStartData{}))
 
 	br, err := a.buildInitialMessages(ctx, req.Messages)
 	if err != nil {
@@ -328,21 +344,45 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		messages = append(messages, assistantMsg)
 
 		if choice.FinishReason != aimodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls) == 0 {
-			respMsgs := []schema.Message{schema.NewAssistantMessage(assistantMsg, a.ID())}
+			respMsgs := []schema.Message{schema.NewAssistantMessage(assistantMsg, agentID)}
 			runResp := &schema.RunResponse{
 				Messages:  respMsgs,
-				SessionID: req.SessionID,
+				SessionID: sessionID,
 				Usage:     &totalUsage,
 				Duration:  time.Since(start).Milliseconds(),
 			}
 
-			a.storeAndPromoteMessages(ctx, req.SessionID, req.Messages, respMsgs, br.sessionMsgCount)
+			a.storeAndPromoteMessages(ctx, sessionID, req.Messages, respMsgs, br.sessionMsgCount)
+
+			msg := ""
+			if len(respMsgs) > 0 {
+				msg = respMsgs[0].Content.Text()
+			}
+
+			a.dispatch(ctx, schema.NewEvent(schema.EventAgentEnd, agentID, sessionID, schema.AgentEndData{
+				Duration: runResp.Duration,
+				Message:  msg,
+			}))
 
 			return runResp, nil
 		}
 
 		for _, tc := range assistantMsg.ToolCalls {
+			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallStart, agentID, sessionID, schema.ToolCallStartData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Arguments:  tc.Function.Arguments,
+			}))
+
+			toolStart := time.Now()
 			result := a.executeToolCall(ctx, tc)
+
+			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallEnd, agentID, sessionID, schema.ToolCallEndData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Duration:   time.Since(toolStart).Milliseconds(),
+			}))
+
 			toolMsg := aimodel.Message{
 				Role:       aimodel.RoleTool,
 				ToolCallID: result.ToolCallID,
@@ -390,13 +430,20 @@ func (a *Agent) storeAndPromoteMessages(ctx context.Context, sessionID string, r
 	}
 }
 
-// buildSend builds a send function with the middleware chain applied.
-func (a *Agent) buildSend(raw func(schema.Event) error) func(schema.Event) error {
+// buildSend builds a send function with the middleware chain and hook dispatch applied.
+func (a *Agent) buildSend(ctx context.Context, raw func(schema.Event) error) func(schema.Event) error {
 	send := raw
 	// Apply middlewares in reverse order so the first middleware is outermost.
 	for i := len(a.middlewares) - 1; i >= 0; i-- {
 		send = a.middlewares[i](send)
 	}
+
+	next := send
+	send = func(e schema.Event) error {
+		a.hookManager.Dispatch(ctx, e)
+		return next(e)
+	}
+
 	return send
 }
 
@@ -416,7 +463,7 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 	aiTools := a.prepareAITools(p.toolFilter)
 
 	return schema.NewRunStream(ctx, a.streamBufferSize, func(ctx context.Context, rawSend func(schema.Event) error) error {
-		send := a.buildSend(rawSend)
+		send := a.buildSend(ctx, rawSend)
 		return a.runStreamLoop(ctx, req, p, br, aiTools, send)
 	}), nil
 }

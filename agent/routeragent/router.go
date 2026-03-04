@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package workflow
+package routeragent
 
 import (
 	"context"
@@ -25,23 +25,45 @@ import (
 	"github.com/vogo/vagent/schema"
 )
 
-// Agent executes a sequence of sub-agents in order.
+// Route pairs an Agent with a description used for routing decisions.
+type Route struct {
+	Agent       agent.Agent
+	Description string
+}
+
+// Func selects which agent to route a request to.
+type Func func(ctx context.Context, req *schema.RunRequest, routes []Route) (agent.Agent, error)
+
+// Agent routes requests to one of several sub-agents based on a Func.
 type Agent struct {
 	agent.Base
-	steps []agent.Agent
+	routes     []Route
+	routerFunc Func
 }
 
 var _ agent.Agent = (*Agent)(nil)
 
-// New creates a workflow Agent that runs the given steps sequentially.
-func New(cfg agent.Config, steps ...agent.Agent) *Agent {
-	return &Agent{
-		Base:  agent.NewBase(cfg),
-		steps: steps,
+// Option configures a router Agent.
+type Option func(*Agent)
+
+// WithFunc sets the routing function for a router Agent.
+func WithFunc(fn Func) Option {
+	return func(a *Agent) { a.routerFunc = fn }
+}
+
+// New creates a router Agent with the given routes and options.
+func New(cfg agent.Config, routes []Route, opts ...Option) *Agent {
+	a := &Agent{
+		Base:   agent.NewBase(cfg),
+		routes: routes,
 	}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // Run is not yet implemented.
 func (a *Agent) Run(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
-	return nil, errors.New("vagent: workflow.Agent.Run not yet implemented")
+	return nil, errors.New("vagent: router.Agent.Run not yet implemented")
 }

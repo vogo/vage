@@ -29,7 +29,8 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
-	"github.com/vogo/vagent/agent/llm"
+	"github.com/vogo/vagent/agent/llmagent"
+	"github.com/vogo/vagent/hook"
 	"github.com/vogo/vagent/prompt"
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
@@ -77,17 +78,29 @@ func main() {
 		},
 	}, handleCalculate)
 
+	// Set up hook manager with a logging hook.
+	hm := hook.NewManager()
+	hm.Register(hook.NewHookFunc(func(_ context.Context, e schema.Event) error {
+		if e.Type == schema.EventTextDelta {
+			return nil
+		}
+
+		fmt.Printf("  [hook] %s (agent=%s)\n", e.Type, e.AgentID)
+		return nil
+	}))
+
 	// Build the LLM agent.
-	a := llm.New(agent.Config{
+	a := llmagent.New(agent.Config{
 		ID:   "weather-agent",
 		Name: "Weather Assistant",
 	},
-		llm.WithChatCompleter(client),
-		llm.WithToolRegistry(reg),
-		llm.WithSystemPrompt(prompt.StringPrompt(
+		llmagent.WithChatCompleter(client),
+		llmagent.WithToolRegistry(reg),
+		llmagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant. Use tools to answer questions. Be concise.",
 		)),
-		llm.WithMaxIterations(5),
+		llmagent.WithMaxIterations(5),
+		llmagent.WithHookManager(hm),
 	)
 
 	question := "What's the weather in Beijing and Tokyo? Also, what is 42 * 17?"
@@ -102,7 +115,7 @@ func main() {
 	runStreaming(a, question)
 }
 
-func runText(a *llm.Agent, question string) {
+func runText(a *llmagent.Agent, question string) {
 	resp, err := agent.RunText(context.Background(), a, question)
 	if err != nil {
 		log.Fatal(err)
@@ -116,7 +129,7 @@ func runText(a *llm.Agent, question string) {
 		resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, resp.Duration)
 }
 
-func runStreaming(a *llm.Agent, question string) {
+func runStreaming(a *llmagent.Agent, question string) {
 	rs, err := agent.RunStreamText(context.Background(), a, question)
 	if err != nil {
 		log.Fatal(err)

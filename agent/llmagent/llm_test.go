@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package llm
+package llmagent
 
 import (
 	"context"

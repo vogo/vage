@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package router
+package dagagent
 
 import (
 	"context"
@@ -27,30 +27,21 @@ import (
 )
 
 func TestAgent_Config(t *testing.T) {
-	routes := []Route{
-		{Agent: agent.NewCustomAgent(agent.Config{ID: "sub-1"}, nil), Description: "route one"},
+	nodes := []Node{
+		{ID: "n1", Agent: agent.NewCustomAgent(agent.Config{ID: "sub-1"}, nil)},
+		{ID: "n2", Agent: agent.NewCustomAgent(agent.Config{ID: "sub-2"}, nil), Deps: []string{"n1"}},
 	}
-	a := New(agent.Config{ID: "rt-1", Name: "router"}, routes)
-	if a.ID() != "rt-1" {
-		t.Errorf("ID = %q, want %q", a.ID(), "rt-1")
+	a := New(agent.Config{ID: "dag-1", Name: "dag"}, nodes)
+	if a.ID() != "dag-1" {
+		t.Errorf("ID = %q, want %q", a.ID(), "dag-1")
 	}
-	if a.Name() != "router" {
-		t.Errorf("Name = %q, want %q", a.Name(), "router")
-	}
-}
-
-func TestAgent_WithFunc(t *testing.T) {
-	fn := func(_ context.Context, _ *schema.RunRequest, _ []Route) (agent.Agent, error) {
-		return nil, nil
-	}
-	a := New(agent.Config{}, nil, WithFunc(fn))
-	if a.routerFunc == nil {
-		t.Error("routerFunc should not be nil")
+	if a.Name() != "dag" {
+		t.Errorf("Name = %q, want %q", a.Name(), "dag")
 	}
 }
 
 func TestAgent_Run_Stub(t *testing.T) {
-	a := New(agent.Config{}, nil)
+	a := New(agent.Config{ID: "dag-1"}, nil)
 	_, err := a.Run(context.Background(), &schema.RunRequest{})
 	if err == nil {
 		t.Fatal("expected error from stub")
