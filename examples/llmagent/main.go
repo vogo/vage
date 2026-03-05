@@ -30,6 +30,7 @@ import (
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/agent/llmagent"
 	"github.com/vogo/vagent/hook"
+	"github.com/vogo/vagent/largemodel"
 	"github.com/vogo/vagent/memory"
 	"github.com/vogo/vagent/prompt"
 	"github.com/vogo/vagent/schema"
@@ -101,12 +102,22 @@ func main() {
 		memory.WithCompressor(memory.NewSlidingWindowCompressor(20)),
 	)
 
+	// Build the largemodel with middleware.
+	// MetricsMiddleware dispatches LLM call events to the hook system.
+	model := largemodel.New(client,
+		largemodel.WithMiddleware(
+			largemodel.NewMetricsMiddleware(hm.Dispatch),
+			largemodel.NewLogMiddleware(),
+			largemodel.NewRetryMiddleware(),
+		),
+	)
+
 	// Build the LLM agent.
 	a := llmagent.New(agent.Config{
 		ID:   "weather-agent",
 		Name: "Weather Assistant",
 	},
-		llmagent.WithChatCompleter(client),
+		llmagent.WithChatCompleter(model),
 		llmagent.WithToolRegistry(reg),
 		llmagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant. Use tools to answer questions. Be concise.",

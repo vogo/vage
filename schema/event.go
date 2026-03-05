@@ -29,6 +29,11 @@ const (
 	EventIterationStart = "iteration_start"
 	EventAgentEnd       = "agent_end"
 	EventError          = "error"
+
+	// LLM call events (emitted by largemodel metrics middleware).
+	EventLLMCallStart = "llm_call_start"
+	EventLLMCallEnd   = "llm_call_end"
+	EventLLMCallError = "llm_call_error"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -107,6 +112,38 @@ type ErrorData struct {
 }
 
 func (ErrorData) eventData() {}
+
+// LLMCallStartData carries information when an LLM call begins.
+type LLMCallStartData struct {
+	Model    string `json:"model"`
+	Messages int    `json:"messages"`
+	Tools    int    `json:"tools"`
+	Stream   bool   `json:"stream"`
+}
+
+func (LLMCallStartData) eventData() {}
+
+// LLMCallEndData carries information when an LLM call completes.
+type LLMCallEndData struct {
+	Model            string `json:"model"`
+	Duration         int64  `json:"duration_ms"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	TotalTokens      int    `json:"total_tokens"`
+	Stream           bool   `json:"stream"`
+}
+
+func (LLMCallEndData) eventData() {}
+
+// LLMCallErrorData carries information when an LLM call fails.
+type LLMCallErrorData struct {
+	Model    string `json:"model"`
+	Duration int64  `json:"duration_ms"`
+	Error    string `json:"error"`
+	Stream   bool   `json:"stream"`
+}
+
+func (LLMCallErrorData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {

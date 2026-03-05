@@ -569,24 +569,42 @@ ChatCompleter {
 Agent
   │
   ▼
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌────────────────────┐
-│  Retry MW   │──→│  Cache MW   │──→│ RateLimit MW│──→│ aimodel.Client     │
-│  (重试)     │   │  (缓存)      │   │  (限流)      │   │ 或 ComposeClient   │
-└─────────────┘   └─────────────┘   └─────────────┘   └────────────────────┘
-                                                        (ChatCompleter 实现)
+┌──────────┐  ┌────────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────────────┐
+│  Log MW  │→│ CircuitBreaker │→│ RateLimit MW│→│  Retry MW   │→│ Timeout MW  │→│  Cache MW   │→│ aimodel.Client     │
+│  (日志)  │  │  (熔断)        │  │  (限流)     │  │  (重试)     │  │  (超时)     │  │  (缓存)     │  │ 或 ComposeClient   │
+└──────────┘  └────────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └────────────────────┘
+                                                                                                        (ChatCompleter 实现)
 ```
 
 **内建中间件**
 
-| 中间件           | 说明                                                     |
-| ---------------- | -------------------------------------------------------- |
-| RetryMiddleware  | 自动重试失败的 LLM 调用，利用 `aimodel.APIError` 判断可重试性，支持指数退避 |
-| CacheMiddleware  | 缓存相同输入的 LLM 调用结果，支持 TTL 和缓存键自定义    |
-| RateLimitMiddleware | 限制 LLM 调用频率，支持 token/min 和 request/min     |
-| LogMiddleware    | 记录 LLM 调用的请求/响应/耗时/`aimodel.Usage` 用量      |
-| TimeoutMiddleware| 为 LLM 调用设置独立超时，防止单次调用阻塞过久           |
+| 中间件                   | 说明                                                     |
+| ------------------------ | -------------------------------------------------------- |
+| LogMiddleware            | 记录 LLM 调用的请求/响应/耗时/`aimodel.Usage` 用量      |
+| CircuitBreakerMiddleware | 熔断保护，连续失败时自动断开 LLM 调用，支持半开探测和自动恢复 |
+| RateLimitMiddleware      | 限制 LLM 调用频率，支持 token/min 和 request/min        |
+| RetryMiddleware          | 自动重试失败的 LLM 调用，利用 `aimodel.APIError` 判断可重试性，支持指数退避 |
+| TimeoutMiddleware        | 为 LLM 调用设置独立超时，防止单次调用阻塞过久           |
+| CacheMiddleware          | 缓存相同输入的 LLM 调用结果，支持 TTL 和缓存键自定义    |
+
+> **推荐中间件顺序**：`DefaultChain` 按上表从上到下排列（Log 最外层，Cache 最内层）。可通过 `Chain(base, ...Middleware)` 自定义顺序。
 
 > **多模型降级**：不再需要单独的 FallbackMiddleware。直接使用 `aimodel/composes.ComposeClient`（Failover 策略）作为底层 `ChatCompleter`，内建健康管理和指数退避恢复。
+
+**流式请求（ChatCompletionStream）行为契约**
+
+各中间件对流式请求的处理策略不同于非流式调用，以下明确各中间件的流式行为：
+
+| 中间件                   | 流式行为                                                   |
+| ------------------------ | ---------------------------------------------------------- |
+| LogMiddleware            | 记录流创建的开始和错误，不追踪流内事件                     |
+| CircuitBreakerMiddleware | 通过熔断状态门控流创建，仅观察流创建错误，不观察流中数据错误 |
+| RateLimitMiddleware      | 流创建前检查频率限制，但不追踪流式响应的 token 用量        |
+| RetryMiddleware          | 流创建失败时按指数退避重试，不重试流中途的错误             |
+| TimeoutMiddleware        | 直接透传，不对流式请求施加超时（避免中断进行中的流传输）   |
+| CacheMiddleware          | 直接透传，不缓存流式请求                                   |
+
+> **注意**：由于 `aimodel.Stream` 是具体类型，中间件无法包装流对象以观察流中途的错误或数据。所有中间件仅在流创建阶段介入。
 
 ---
 
