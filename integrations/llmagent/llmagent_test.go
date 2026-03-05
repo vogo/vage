@@ -25,6 +25,7 @@ import (
 	"io"
 	"log"
 	"math/rand/v2"
+	"testing"
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
@@ -37,13 +38,14 @@ import (
 	"github.com/vogo/vagent/tool"
 )
 
-func main() {
+func TestLLMAgentIntegration(t *testing.T) {
 	// Create aimodel client. Reads AI_API_KEY / AI_BASE_URL / AI_MODEL from env.
 	client, err := aimodel.NewClient(
 		aimodel.WithDefaultModel(aimodel.GetEnv("OPENAI_MODEL")),
 	)
 	if err != nil {
-		log.Fatal(err)
+		t.Logf("Failed to create aimodel client: %v", err)
+		return
 	}
 
 	// Register tools.
