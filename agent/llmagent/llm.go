@@ -426,9 +426,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 			return nil, fmt.Errorf("vagent: chat completion: %w", err)
 		}
 
-		totalUsage.PromptTokens += resp.Usage.PromptTokens
-		totalUsage.CompletionTokens += resp.Usage.CompletionTokens
-		totalUsage.TotalTokens += resp.Usage.TotalTokens
+		totalUsage.Add(&resp.Usage)
 
 		if len(resp.Choices) == 0 {
 			return nil, errors.New("vagent: empty response from LLM")
