@@ -19,8 +19,10 @@ package routeragent
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"time"
 
+	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/schema"
 )
@@ -31,28 +33,43 @@ type Route struct {
 	Description string
 }
 
-// Func selects which agent to route a request to.
-type Func func(ctx context.Context, req *schema.RunRequest, routes []Route) (agent.Agent, error)
-
-// Agent routes requests to one of several sub-agents based on a Func.
-type Agent struct {
-	agent.Base
-	routes     []Route
-	routerFunc Func
+// RouteResult holds the result of a routing decision.
+type RouteResult struct {
+	Agent agent.Agent
+	Usage *aimodel.Usage // optional usage from the routing decision itself
 }
 
-var _ agent.Agent = (*Agent)(nil)
+// RouteFunc selects which agent to route a request to.
+type RouteFunc func(ctx context.Context, req *schema.RunRequest, routes []Route) (*RouteResult, error)
+
+// Agent routes requests to one of several sub-agents based on a RouteFunc.
+type Agent struct {
+	agent.Base
+	routes    []Route
+	routeFunc RouteFunc
+}
+
+var (
+	_ agent.Agent       = (*Agent)(nil)
+	_ agent.StreamAgent = (*Agent)(nil)
+)
 
 // Option configures a router Agent.
 type Option func(*Agent)
 
 // WithFunc sets the routing function for a router Agent.
-func WithFunc(fn Func) Option {
-	return func(a *Agent) { a.routerFunc = fn }
+func WithFunc(fn RouteFunc) Option {
+	return func(a *Agent) { a.routeFunc = fn }
 }
 
 // New creates a router Agent with the given routes and options.
 func New(cfg agent.Config, routes []Route, opts ...Option) *Agent {
+	for i, r := range routes {
+		if r.Agent == nil {
+			panic(fmt.Sprintf("routeragent: route[%d] has nil Agent", i))
+		}
+	}
+
 	a := &Agent{
 		Base:   agent.NewBase(cfg),
 		routes: routes,
@@ -63,7 +80,57 @@ func New(cfg agent.Config, routes []Route, opts ...Option) *Agent {
 	return a
 }
 
-// Run is not yet implemented.
-func (a *Agent) Run(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
-	return nil, errors.New("vagent: router.Agent.Run not yet implemented")
+// Run selects one sub-agent via the routing function and delegates execution to it.
+func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
+	start := time.Now()
+
+	if len(a.routes) == 0 {
+		return nil, fmt.Errorf("routeragent: no routes configured")
+	}
+
+	if a.routeFunc == nil {
+		return nil, fmt.Errorf("routeragent: no routing function")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	result, err := a.routeFunc(ctx, req, a.routes)
+	if err != nil {
+		return nil, fmt.Errorf("routeragent: route select: %w", err)
+	}
+
+	if result == nil || result.Agent == nil {
+		return nil, fmt.Errorf("routeragent: route select returned nil agent")
+	}
+
+	resp, err := result.Agent.Run(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp == nil {
+		return nil, fmt.Errorf("routeragent: nil response from agent %s", result.Agent.ID())
+	}
+
+	// Aggregate usage from routing decision and selected agent.
+	if result.Usage != nil {
+		totalUsage := &aimodel.Usage{}
+		totalUsage.Add(result.Usage)
+		if resp.Usage != nil {
+			totalUsage.Add(resp.Usage)
+		}
+		resp.Usage = totalUsage
+	}
+
+	resp.SessionID = req.SessionID
+	resp.Duration = time.Since(start).Milliseconds()
+
+	return resp, nil
+}
+
+// RunStream returns a RunStream that emits lifecycle events as the agent executes.
+func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.RunStream, error) {
+	return agent.RunToStream(ctx, a, req), nil
 }

@@ -327,7 +327,7 @@ func TestAgent_RunStream_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Expect AgentStart event.
 	e, err := stream.Recv()
@@ -370,7 +370,7 @@ func TestAgent_RunStream_Error(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error creating stream: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Expect AgentStart event.
 	e, err := stream.Recv()
@@ -399,7 +399,7 @@ func TestAgent_RunStream_EmptySteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Expect AgentStart.
 	e, err := stream.Recv()

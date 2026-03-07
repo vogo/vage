@@ -438,7 +438,7 @@ func TestIntegration_RunStream_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Event 1: AgentStart
 	e, err := stream.Recv()
@@ -491,7 +491,7 @@ func TestIntegration_RunStream_EmptySteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	e, err := stream.Recv()
 	if err != nil {
@@ -526,7 +526,7 @@ func TestIntegration_RunStream_ErrorSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// AgentStart should still be emitted
 	e, err := stream.Recv()
@@ -615,7 +615,7 @@ func TestIntegration_RunStreamText_Convenience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Drain events
 	var events []schema.Event
