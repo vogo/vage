@@ -23,6 +23,16 @@ import (
 	"github.com/vogo/aimodel"
 )
 
+// StopReason indicates why an agent run terminated.
+type StopReason string
+
+// StopReason constants.
+const (
+	StopReasonComplete        StopReason = "complete"
+	StopReasonBudgetExhausted StopReason = "token_budget_exhausted"
+	StopReasonMaxIterations   StopReason = "max_iterations_exceeded"
+)
+
 // Message wraps aimodel.Message with agent-specific metadata.
 type Message struct {
 	aimodel.Message
@@ -100,12 +110,13 @@ func ErrorResult(toolCallID, errMsg string) ToolResult {
 
 // RunOptions holds optional overrides for a single Run call.
 type RunOptions struct {
-	Model         string   `json:"model,omitempty"`
-	Temperature   *float64 `json:"temperature,omitempty"`
-	MaxIterations int      `json:"max_iterations,omitempty"`
-	MaxTokens     int      `json:"max_tokens,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
-	StopSequences []string `json:"stop_sequences,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	MaxIterations  int      `json:"max_iterations,omitempty"`
+	MaxTokens      int      `json:"max_tokens,omitempty"`
+	RunTokenBudget int      `json:"run_token_budget,omitempty"`
+	Tools          []string `json:"tools,omitempty"`
+	StopSequences  []string `json:"stop_sequences,omitempty"`
 }
 
 // RunRequest is the input to Agent.Run.
@@ -118,9 +129,10 @@ type RunRequest struct {
 
 // RunResponse is the output of Agent.Run.
 type RunResponse struct {
-	Messages  []Message      `json:"messages"`
-	SessionID string         `json:"session_id,omitempty"`
-	Usage     *aimodel.Usage `json:"usage,omitempty"`
-	Duration  int64          `json:"duration_ms,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	Messages   []Message      `json:"messages"`
+	SessionID  string         `json:"session_id,omitempty"`
+	Usage      *aimodel.Usage `json:"usage,omitempty"`
+	Duration   int64          `json:"duration_ms,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	StopReason StopReason     `json:"stop_reason,omitempty"`
 }

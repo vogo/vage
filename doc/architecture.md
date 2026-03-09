@@ -171,7 +171,7 @@ Agent 是核心智能体抽象。
 | Tools          | []ToolDef    | Agent 可使用的工具列表                   |
 | Memory         | Memory       | Agent 关联的内存实例                     |
 | MaxIterations  | int          | 最大推理-行动循环次数                    |
-| MaxTokenBudget | int          | 单次 Run 最大 token 数（0 表示不限制）   |
+| RunTokenBudget | int          | 单次 Run 最大 token 数（0 表示不限制）   |
 | Temperature    | *float64     | 采样温度                                 |
 | InputGuards    | []InputGuard | 输入安全检查链                           |
 | OutputGuards   | []OutputGuard| 输出安全检查链                           |
@@ -1498,7 +1498,7 @@ Trace
 
 | 配置项                 | 类型   | 说明                                         |
 | ---------------------- | ------ | -------------------------------------------- |
-| Agent.MaxTokenBudget   | int    | 单次 Run 调用最大 token 数（0 表示不限制）   |
+| Agent.RunTokenBudget   | int    | 单次 Run 调用最大 token 数（0 表示不限制）   |
 | Service.DailyTokenLimit| int    | 全局每日 token 上限                          |
 | Service.TokenPerMinute | int    | 全局每分钟 token 速率限制                    |
 

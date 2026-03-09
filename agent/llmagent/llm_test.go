@@ -354,14 +354,17 @@ func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
 		WithMaxIterations(2),
 	)
 
-	_, err := a.Run(context.Background(), &schema.RunRequest{
+	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage("loop forever")},
 	})
-	if err == nil {
-		t.Fatal("expected max iterations error")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "exceeded max iterations") {
-		t.Errorf("error = %q, want max iterations error", err.Error())
+	if resp.StopReason != schema.StopReasonMaxIterations {
+		t.Errorf("StopReason = %q, want %q", resp.StopReason, schema.StopReasonMaxIterations)
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage should not be nil")
 	}
 }
 
@@ -805,20 +808,32 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 		t.Fatalf("RunStream error: %v", err)
 	}
 
-	var lastErr error
+	var events []schema.Event
 	for {
-		_, recvErr := rs.Recv()
-		if recvErr != nil {
-			lastErr = recvErr
+		e, recvErr := rs.Recv()
+		if errors.Is(recvErr, io.EOF) {
 			break
 		}
+		if recvErr != nil {
+			t.Fatalf("unexpected stream error: %v", recvErr)
+		}
+		events = append(events, e)
 	}
 
-	if lastErr == nil {
-		t.Fatal("expected max iterations error")
+	// Should end cleanly with AgentEnd event carrying StopReasonMaxIterations.
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
 	}
-	if !strings.Contains(lastErr.Error(), "exceeded max iterations") {
-		t.Errorf("error = %q, want max iterations error", lastErr.Error())
+	last := events[len(events)-1]
+	if last.Type != schema.EventAgentEnd {
+		t.Errorf("last event Type = %q, want %q", last.Type, schema.EventAgentEnd)
+	}
+	endData, ok := last.Data.(schema.AgentEndData)
+	if !ok {
+		t.Fatalf("AgentEnd data type = %T", last.Data)
+	}
+	if endData.StopReason != schema.StopReasonMaxIterations {
+		t.Errorf("StopReason = %q, want %q", endData.StopReason, schema.StopReasonMaxIterations)
 	}
 }
 

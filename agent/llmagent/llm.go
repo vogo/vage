@@ -48,6 +48,7 @@ type Agent struct {
 	toolRegistry     tool.ToolRegistry
 	memoryManager    *memory.Manager
 	maxIterations    int
+	runTokenBudget   int
 	maxTokens        *int
 	temperature      *float64
 	streamBufferSize int
@@ -85,6 +86,10 @@ func WithToolRegistry(r tool.ToolRegistry) Option {
 
 // WithMaxIterations sets the maximum ReAct loop iterations.
 func WithMaxIterations(n int) Option { return func(a *Agent) { a.maxIterations = n } }
+
+// WithRunTokenBudget sets the total token budget for a single run.
+// A value of 0 means unlimited (default).
+func WithRunTokenBudget(n int) Option { return func(a *Agent) { a.runTokenBudget = n } }
 
 // WithMaxTokens sets the max tokens for LLM responses.
 func WithMaxTokens(n int) Option { return func(a *Agent) { a.maxTokens = &n } }
@@ -145,21 +150,23 @@ func (a *Agent) Tools() []schema.ToolDef {
 
 // runParams holds resolved parameters for a single run invocation.
 type runParams struct {
-	model       string
-	temperature *float64
-	maxIter     int
-	maxTokens   *int
-	toolFilter  []string
-	stopSeq     []string
+	model          string
+	temperature    *float64
+	maxIter        int
+	runTokenBudget int
+	maxTokens      *int
+	toolFilter     []string
+	stopSeq        []string
 }
 
 // resolveRunParams merges request options with agent defaults.
 func (a *Agent) resolveRunParams(opts *schema.RunOptions) runParams {
 	p := runParams{
-		model:       a.model,
-		temperature: a.temperature,
-		maxIter:     a.maxIterations,
-		maxTokens:   a.maxTokens,
+		model:          a.model,
+		temperature:    a.temperature,
+		maxIter:        a.maxIterations,
+		runTokenBudget: a.runTokenBudget,
+		maxTokens:      a.maxTokens,
 	}
 
 	if opts == nil {
@@ -179,6 +186,9 @@ func (a *Agent) resolveRunParams(opts *schema.RunOptions) runParams {
 		mt := opts.MaxTokens
 		p.maxTokens = &mt
 	}
+	if opts.RunTokenBudget > 0 {
+		p.runTokenBudget = opts.RunTokenBudget
+	}
 	p.toolFilter = opts.Tools
 	p.stopSeq = opts.StopSequences
 
@@ -189,6 +199,20 @@ func (a *Agent) resolveRunParams(opts *schema.RunOptions) runParams {
 type buildResult struct {
 	messages        []aimodel.Message
 	sessionMsgCount int // original session message count (pre-compression), used as key offset
+}
+
+// runContext holds shared state for a single Run/RunStream invocation,
+// reducing the number of parameters passed between methods.
+type runContext struct {
+	sessionID  string
+	start      time.Time
+	tracker    *budgetTracker
+	totalUsage aimodel.Usage
+	br         buildResult
+	reqMsgs    []schema.Message
+	lastMsg    aimodel.Message
+	iteration  int
+	estimated  bool // true if token tracking is based on heuristic estimation
 }
 
 // buildInitialMessages builds the message list starting with the system prompt,
@@ -383,6 +407,122 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 	return respMsgs, nil
 }
 
+// buildResponseMsgs builds the response message slice from the last assistant message.
+// For partial results (budget/iterations), it includes messages with tool calls.
+// For normal completion, it always includes the message.
+func (a *Agent) buildResponseMsgs(lastMsg aimodel.Message, partial bool) []schema.Message {
+	if partial {
+		if lastMsg.Content.Text() != "" || len(lastMsg.ToolCalls) > 0 {
+			return []schema.Message{schema.NewAssistantMessage(lastMsg, a.ID())}
+		}
+		return []schema.Message{}
+	}
+	return []schema.Message{schema.NewAssistantMessage(lastMsg, a.ID())}
+}
+
+// finalizeRun is the unified termination path for Run(). It runs output guards,
+// stores messages, dispatches events, and builds the RunResponse.
+func (a *Agent) finalizeRun(ctx context.Context, rc *runContext, stopReason schema.StopReason) *schema.RunResponse {
+	partial := stopReason != schema.StopReasonComplete
+	respMsgs := a.buildResponseMsgs(rc.lastMsg, partial)
+
+	// Run output guards. For partial results, log warnings instead of returning errors.
+	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, respMsgs)
+	if err != nil {
+		if partial {
+			slog.Warn("vagent: output guard on partial result", "error", err, "stop_reason", stopReason)
+		}
+		// For normal completion, we still use the unguarded messages rather than failing.
+	} else {
+		respMsgs = guardedMsgs
+	}
+
+	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, respMsgs, rc.br.sessionMsgCount)
+
+	// Emit budget exhaustion event if applicable.
+	if stopReason == schema.StopReasonBudgetExhausted {
+		a.dispatch(ctx, schema.NewEvent(schema.EventTokenBudgetExhausted, a.ID(), rc.sessionID,
+			schema.TokenBudgetExhaustedData{
+				Budget:     rc.tracker.Budget(),
+				Used:       rc.tracker.Consumed(),
+				Iterations: rc.iteration + 1,
+				Estimated:  rc.estimated,
+			}))
+	}
+
+	msg := ""
+	if len(respMsgs) > 0 {
+		msg = respMsgs[0].Content.Text()
+	}
+
+	duration := time.Since(rc.start).Milliseconds()
+
+	a.dispatch(ctx, schema.NewEvent(schema.EventAgentEnd, a.ID(), rc.sessionID, schema.AgentEndData{
+		Duration:   duration,
+		Message:    msg,
+		StopReason: stopReason,
+	}))
+
+	return &schema.RunResponse{
+		Messages:   respMsgs,
+		SessionID:  rc.sessionID,
+		Usage:      &rc.totalUsage,
+		Duration:   duration,
+		StopReason: stopReason,
+	}
+}
+
+// finalizeStream is the unified termination path for RunStream(). It runs output guards,
+// stores messages, dispatches events via send, and returns nil for clean stream close.
+func (a *Agent) finalizeStream(
+	ctx context.Context,
+	send func(schema.Event) error,
+	rc *runContext,
+	req *schema.RunRequest,
+	stopReason schema.StopReason,
+) error {
+	partial := stopReason != schema.StopReasonComplete
+	respMsgs := a.buildResponseMsgs(rc.lastMsg, partial)
+
+	// Run output guards. For partial results, log warnings instead of returning errors.
+	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, respMsgs)
+	if err != nil {
+		if partial {
+			slog.Warn("vagent: output guard on partial stream result", "error", err, "stop_reason", stopReason)
+		} else {
+			return err
+		}
+	} else {
+		respMsgs = guardedMsgs
+	}
+
+	a.storeAndPromoteMessages(ctx, rc.sessionID, req.Messages, respMsgs, rc.br.sessionMsgCount)
+
+	// Emit budget exhaustion event if applicable.
+	if stopReason == schema.StopReasonBudgetExhausted {
+		if err := send(schema.NewEvent(schema.EventTokenBudgetExhausted, a.ID(), rc.sessionID,
+			schema.TokenBudgetExhaustedData{
+				Budget:     rc.tracker.Budget(),
+				Used:       rc.tracker.Consumed(),
+				Iterations: rc.iteration + 1,
+				Estimated:  rc.estimated,
+			})); err != nil {
+			return err
+		}
+	}
+
+	msg := ""
+	if len(respMsgs) > 0 {
+		msg = respMsgs[0].Content.Text()
+	}
+
+	return send(schema.NewEvent(schema.EventAgentEnd, a.ID(), rc.sessionID, schema.AgentEndData{
+		Duration:   time.Since(rc.start).Milliseconds(),
+		Message:    msg,
+		StopReason: stopReason,
+	}))
+}
+
 // Run executes the ReAct loop: prompt -> LLM -> tool calls (loop) -> response.
 func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 	if a.chatCompleter == nil {
@@ -394,24 +534,36 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		return nil, err
 	}
 
-	start := time.Now()
 	p := a.resolveRunParams(req.Options)
 	agentID := a.ID()
-	sessionID := req.SessionID
 
-	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, sessionID, schema.AgentStartData{}))
+	rc := &runContext{
+		sessionID: req.SessionID,
+		start:     time.Now(),
+		tracker:   newBudgetTracker(p.runTokenBudget),
+		br:        buildResult{},
+		reqMsgs:   req.Messages,
+	}
+
+	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, rc.sessionID, schema.AgentStartData{}))
 
 	br, err := a.buildInitialMessages(ctx, req.Messages)
 	if err != nil {
 		return nil, err
 	}
 
+	rc.br = br
 	messages := br.messages
 	aiTools := a.prepareAITools(p.toolFilter)
 
-	var totalUsage aimodel.Usage
+	for iter := 0; iter < p.maxIter; iter++ {
+		rc.iteration = iter
 
-	for range p.maxIter {
+		// Pre-call budget check.
+		if rc.tracker.Exhausted() {
+			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
+		}
+
 		chatReq := &aimodel.ChatRequest{
 			Model:       p.model,
 			Messages:    messages,
@@ -426,7 +578,8 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 			return nil, fmt.Errorf("vagent: chat completion: %w", err)
 		}
 
-		totalUsage.Add(&resp.Usage)
+		rc.totalUsage.Add(&resp.Usage)
+		rc.tracker.Add(resp.Usage.TotalTokens)
 
 		if len(resp.Choices) == 0 {
 			return nil, errors.New("vagent: empty response from LLM")
@@ -434,41 +587,20 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 		choice := resp.Choices[0]
 		assistantMsg := choice.Message
+		rc.lastMsg = assistantMsg
 		messages = append(messages, assistantMsg)
 
 		if choice.FinishReason != aimodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls) == 0 {
-			respMsgs := []schema.Message{schema.NewAssistantMessage(assistantMsg, agentID)}
+			return a.finalizeRun(ctx, rc, schema.StopReasonComplete), nil
+		}
 
-			// Run output guards before returning response.
-			respMsgs, err = a.runOutputGuards(ctx, sessionID, respMsgs)
-			if err != nil {
-				return nil, err
-			}
-
-			runResp := &schema.RunResponse{
-				Messages:  respMsgs,
-				SessionID: sessionID,
-				Usage:     &totalUsage,
-				Duration:  time.Since(start).Milliseconds(),
-			}
-
-			a.storeAndPromoteMessages(ctx, sessionID, req.Messages, respMsgs, br.sessionMsgCount)
-
-			msg := ""
-			if len(respMsgs) > 0 {
-				msg = respMsgs[0].Content.Text()
-			}
-
-			a.dispatch(ctx, schema.NewEvent(schema.EventAgentEnd, agentID, sessionID, schema.AgentEndData{
-				Duration: runResp.Duration,
-				Message:  msg,
-			}))
-
-			return runResp, nil
+		// Post-call budget check before executing tool calls.
+		if rc.tracker.Exhausted() {
+			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
 		}
 
 		for _, tc := range assistantMsg.ToolCalls {
-			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallStart, agentID, sessionID, schema.ToolCallStartData{
+			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Arguments:  tc.Function.Arguments,
@@ -477,7 +609,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 			toolStart := time.Now()
 			result := a.executeToolCall(ctx, tc)
 
-			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallEnd, agentID, sessionID, schema.ToolCallEndData{
+			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Duration:   time.Since(toolStart).Milliseconds(),
@@ -492,7 +624,9 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		}
 	}
 
-	return nil, fmt.Errorf("vagent: exceeded max iterations (%d)", p.maxIter)
+	// Max iterations exceeded.
+	rc.iteration = p.maxIter - 1
+	return a.finalizeRun(ctx, rc, schema.StopReasonMaxIterations), nil
 }
 
 // storeAndPromoteMessages stores request and response messages in working memory
@@ -583,17 +717,31 @@ func (a *Agent) runStreamLoop(
 	send func(schema.Event) error,
 ) error {
 	messages := br.messages
-	start := time.Now()
 	agentID := a.ID()
-	sessionID := req.SessionID
 
-	if err := send(schema.NewEvent(schema.EventAgentStart, agentID, sessionID, schema.AgentStartData{})); err != nil {
+	rc := &runContext{
+		sessionID: req.SessionID,
+		start:     time.Now(),
+		tracker:   newBudgetTracker(p.runTokenBudget),
+		br:        br,
+		reqMsgs:   req.Messages,
+		estimated: true, // streaming path uses heuristic token estimation
+	}
+
+	if err := send(schema.NewEvent(schema.EventAgentStart, agentID, rc.sessionID, schema.AgentStartData{})); err != nil {
 		return err
 	}
 
-	for iter := range p.maxIter {
+	for iter := 0; iter < p.maxIter; iter++ {
+		rc.iteration = iter
+
+		// Pre-call budget check.
+		if rc.tracker.Exhausted() {
+			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonBudgetExhausted)
+		}
+
 		// Emit iteration start event.
-		if err := send(schema.NewEvent(schema.EventIterationStart, agentID, sessionID, schema.IterationStartData{
+		if err := send(schema.NewEvent(schema.EventIterationStart, agentID, rc.sessionID, schema.IterationStartData{
 			Iteration: iter,
 		})); err != nil {
 			return err
@@ -616,6 +764,7 @@ func (a *Agent) runStreamLoop(
 		var accumulated aimodel.Message
 		accumulated.Role = aimodel.RoleAssistant
 		var finishReason aimodel.FinishReason
+		var streamBytes int
 
 		for {
 			chunk, recvErr := stream.Recv()
@@ -636,7 +785,8 @@ func (a *Agent) runStreamLoop(
 
 			// Emit text delta if present.
 			if text := delta.Content.Text(); text != "" {
-				if err := send(schema.NewEvent(schema.EventTextDelta, agentID, sessionID, schema.TextDeltaData{Delta: text})); err != nil {
+				streamBytes += len(text)
+				if err := send(schema.NewEvent(schema.EventTextDelta, agentID, rc.sessionID, schema.TextDeltaData{Delta: text})); err != nil {
 					_ = stream.Close()
 					return err
 				}
@@ -651,35 +801,28 @@ func (a *Agent) runStreamLoop(
 
 		_ = stream.Close()
 
+		// Estimate token usage from stream bytes (4 bytes per token heuristic).
+		estimatedTokens := (streamBytes + 3) / 4
+		if estimatedTokens < 1 && streamBytes > 0 {
+			estimatedTokens = 1
+		}
+		rc.tracker.Add(estimatedTokens)
+
+		rc.lastMsg = accumulated
 		messages = append(messages, accumulated)
 
 		if finishReason != aimodel.FinishReasonToolCalls || len(accumulated.ToolCalls) == 0 {
-			// Store messages in memory (same as Run path).
-			assistantMsg := schema.NewAssistantMessage(accumulated, agentID)
-			respMsgs := []schema.Message{assistantMsg}
+			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonComplete)
+		}
 
-			// Run output guards before returning response.
-			respMsgs, err = a.runOutputGuards(ctx, sessionID, respMsgs)
-			if err != nil {
-				return err
-			}
-
-			a.storeAndPromoteMessages(ctx, sessionID, req.Messages, respMsgs, br.sessionMsgCount)
-
-			finalText := ""
-			if len(respMsgs) > 0 {
-				finalText = respMsgs[0].Content.Text()
-			}
-
-			return send(schema.NewEvent(schema.EventAgentEnd, agentID, sessionID, schema.AgentEndData{
-				Duration: time.Since(start).Milliseconds(),
-				Message:  finalText,
-			}))
+		// Post-call budget check before executing tool calls.
+		if rc.tracker.Exhausted() {
+			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonBudgetExhausted)
 		}
 
 		// Execute tool calls.
 		for _, tc := range accumulated.ToolCalls {
-			if err := send(schema.NewEvent(schema.EventToolCallStart, agentID, sessionID, schema.ToolCallStartData{
+			if err := send(schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Arguments:  tc.Function.Arguments,
@@ -690,7 +833,7 @@ func (a *Agent) runStreamLoop(
 			toolStart := time.Now()
 			result := a.executeToolCall(ctx, tc)
 
-			if err := send(schema.NewEvent(schema.EventToolCallEnd, agentID, sessionID, schema.ToolCallEndData{
+			if err := send(schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Duration:   time.Since(toolStart).Milliseconds(),
@@ -698,7 +841,7 @@ func (a *Agent) runStreamLoop(
 				return err
 			}
 
-			if err := send(schema.NewEvent(schema.EventToolResult, agentID, sessionID, schema.ToolResultData{
+			if err := send(schema.NewEvent(schema.EventToolResult, agentID, rc.sessionID, schema.ToolResultData{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Result:     result,
@@ -715,7 +858,9 @@ func (a *Agent) runStreamLoop(
 		}
 	}
 
-	return fmt.Errorf("vagent: exceeded max iterations (%d)", p.maxIter)
+	// Max iterations exceeded.
+	rc.iteration = p.maxIter - 1
+	return a.finalizeStream(ctx, send, rc, req, schema.StopReasonMaxIterations)
 }
 
 // toolResultText extracts the text content from a ToolResult.

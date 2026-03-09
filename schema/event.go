@@ -34,6 +34,8 @@ const (
 	EventLLMCallStart = "llm_call_start"
 	EventLLMCallEnd   = "llm_call_end"
 	EventLLMCallError = "llm_call_error"
+
+	EventTokenBudgetExhausted = "token_budget_exhausted"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -100,9 +102,20 @@ func (IterationStartData) eventData() {}
 
 // AgentEndData carries summary information when the agent finishes.
 type AgentEndData struct {
-	Duration int64  `json:"duration_ms"`
-	Message  string `json:"message,omitempty"`
+	Duration   int64      `json:"duration_ms"`
+	Message    string     `json:"message,omitempty"`
+	StopReason StopReason `json:"stop_reason,omitempty"`
 }
+
+// TokenBudgetExhaustedData carries information when the token budget is exhausted.
+type TokenBudgetExhaustedData struct {
+	Budget     int  `json:"budget"`
+	Used       int  `json:"used"`
+	Iterations int  `json:"iterations"`
+	Estimated  bool `json:"estimated,omitempty"`
+}
+
+func (TokenBudgetExhaustedData) eventData() {}
 
 func (AgentEndData) eventData() {}
 
