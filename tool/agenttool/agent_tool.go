@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package tool
+package agenttool
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/schema"
+	"github.com/vogo/vagent/tool"
 )
 
 // ArgExtractor extracts the input string from parsed tool arguments.
@@ -47,44 +48,43 @@ func defaultArgExtractor(parsed map[string]any) (string, error) {
 	return input, nil
 }
 
-// agentToolConfig holds configuration for registering an agent as a tool.
-type agentToolConfig struct {
+// config holds configuration for registering an agent as a tool.
+type config struct {
 	name         string
 	description  string
 	parameters   any
 	argExtractor ArgExtractor
 }
 
-// AgentToolOption is a functional option for configuring agent-as-tool registration.
-type AgentToolOption func(*agentToolConfig)
+// Option is a functional option for configuring agent-as-tool registration.
+type Option func(*config)
 
-// WithAgentToolName overrides the tool name (defaults to agent.Name()).
-func WithAgentToolName(name string) AgentToolOption {
-	return func(c *agentToolConfig) { c.name = name }
+// WithName overrides the tool name (defaults to agent.Name()).
+func WithName(name string) Option {
+	return func(c *config) { c.name = name }
 }
 
-// WithAgentToolDescription overrides the tool description (defaults to agent.Description()).
-func WithAgentToolDescription(desc string) AgentToolOption {
-	return func(c *agentToolConfig) { c.description = desc }
+// WithDescription overrides the tool description (defaults to agent.Description()).
+func WithDescription(desc string) Option {
+	return func(c *config) { c.description = desc }
 }
 
-// WithAgentToolParameters overrides the JSON Schema parameters.
-// When using a custom schema, also provide WithAgentToolArgExtractor to
+// WithParameters overrides the JSON Schema parameters.
+// When using a custom schema, also provide WithArgExtractor to
 // match the new schema, otherwise the default extractor (which reads "input") is used.
-func WithAgentToolParameters(params any) AgentToolOption {
-	return func(c *agentToolConfig) { c.parameters = params }
+func WithParameters(params any) Option {
+	return func(c *config) { c.parameters = params }
 }
 
-// WithAgentToolArgExtractor overrides how raw JSON arguments are converted
+// WithArgExtractor overrides how raw JSON arguments are converted
 // to the input string sent to the agent. This is useful when the parameter
 // schema contains fields beyond the default "input" property.
-func WithAgentToolArgExtractor(fn ArgExtractor) AgentToolOption {
-	return func(c *agentToolConfig) { c.argExtractor = fn }
+func WithArgExtractor(fn ArgExtractor) Option {
+	return func(c *config) { c.argExtractor = fn }
 }
 
-// defaultAgentToolParams returns the default JSON Schema for agent tool parameters.
-// A function is used (not a package-level variable) to prevent accidental mutation of shared state.
-func defaultAgentToolParams() map[string]any {
+// defaultParams returns the default JSON Schema for agent tool parameters.
+func defaultParams() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -97,12 +97,12 @@ func defaultAgentToolParams() map[string]any {
 	}
 }
 
-// RegisterAgentAsTool registers an Agent as a callable tool in the registry.
-func (r *Registry) RegisterAgentAsTool(ag agent.Agent, opts ...AgentToolOption) error {
-	cfg := agentToolConfig{
+// Register registers an Agent as a callable tool in the registry.
+func Register(registry *tool.Registry, ag agent.Agent, opts ...Option) error {
+	cfg := config{
 		name:         ag.Name(),
 		description:  ag.Description(),
-		parameters:   defaultAgentToolParams(),
+		parameters:   defaultParams(),
 		argExtractor: defaultArgExtractor,
 	}
 
@@ -118,9 +118,9 @@ func (r *Registry) RegisterAgentAsTool(ag agent.Agent, opts ...AgentToolOption) 
 		AgentID:     ag.ID(),
 	}
 
-	handler := newAgentToolHandler(ag, cfg.argExtractor)
+	handler := newHandler(ag, cfg.argExtractor)
 
-	return r.registerIfAbsent(def, handler)
+	return registry.RegisterIfAbsent(def, handler)
 }
 
 // agentToolError is a sentinel type for agent tool argument errors.
@@ -130,26 +130,23 @@ func (e *agentToolError) Error() string { return e.msg }
 
 var errMissingInput = &agentToolError{msg: "agent tool: 'input' field must be a non-empty string"}
 
-// newAgentToolHandler creates a ToolHandler closure that delegates to the given agent.
+// newHandler creates a ToolHandler closure that delegates to the given agent.
 //
 // Error policy: agent execution errors are returned as ToolResult with IsError=true
 // rather than as Go errors. This keeps the error visible to the LLM in a tool-calling
 // loop so it can retry or inform the user, instead of aborting the entire chain.
-func newAgentToolHandler(ag agent.Agent, extract ArgExtractor) ToolHandler {
+func newHandler(ag agent.Agent, extract ArgExtractor) tool.ToolHandler {
 	return func(ctx context.Context, _, args string) (schema.ToolResult, error) {
-		// Parse args.
 		var parsed map[string]any
 		if err := json.Unmarshal([]byte(args), &parsed); err != nil {
 			return schema.ErrorResult("", "agent tool: invalid arguments: "+err.Error()), nil
 		}
 
-		// Extract input using the configured extractor.
 		input, err := extract(parsed)
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
 
-		// Build request and call agent.
 		req := schema.RunRequest{
 			Messages: []schema.Message{schema.NewUserMessage(input)},
 		}
@@ -159,7 +156,6 @@ func newAgentToolHandler(ag agent.Agent, extract ArgExtractor) ToolHandler {
 			return schema.ErrorResult("", "agent tool: execution failed: "+err.Error()), nil
 		}
 
-		// Convert response: filter to assistant messages, extract text, skip empty.
 		var parts []string
 		for _, msg := range resp.Messages {
 			if msg.Role == aimodel.RoleAssistant {

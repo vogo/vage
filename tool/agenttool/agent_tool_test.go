@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package tool
+package agenttool
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vagent/agent"
 	"github.com/vogo/vagent/schema"
+	"github.com/vogo/vagent/tool"
 )
 
 // mockAgent implements agent.Agent for testing.
@@ -45,7 +46,7 @@ func newMockAgent(id, name, desc string, runFunc func(ctx context.Context, req *
 	}
 }
 
-func TestRegisterAgentAsTool(t *testing.T) {
+func TestRegister(t *testing.T) {
 	t.Run("DefaultExecution", func(t *testing.T) {
 		ag := newMockAgent("agent-1", "test-agent", "A test agent", func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 			input := req.Messages[0].Content.Text()
@@ -61,9 +62,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		result, err := r.Execute(context.Background(), "test-agent", `{"input":"hello"}`)
@@ -85,13 +86,13 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		regErr := r.RegisterAgentAsTool(ag,
-			WithAgentToolName("custom-name"),
-			WithAgentToolDescription("custom description"),
+		r := tool.NewRegistry()
+		regErr := Register(r, ag,
+			WithName("custom-name"),
+			WithDescription("custom description"),
 		)
 		if regErr != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", regErr)
+			t.Fatalf("Register error: %v", regErr)
 		}
 
 		def, ok := r.Get("custom-name")
@@ -107,7 +108,6 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			t.Errorf("Description = %q, want %q", def.Description, "custom description")
 		}
 
-		// Original name should not be registered.
 		_, ok = r.Get("original-name")
 		if ok {
 			t.Error("Get returned true for original-name, expected false")
@@ -119,9 +119,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		defs := r.List()
@@ -143,9 +143,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		result, err := r.Execute(context.Background(), "json-agent", "not json")
@@ -167,9 +167,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		result, err := r.Execute(context.Background(), "missing-input-agent", `{"other":"value"}`)
@@ -191,9 +191,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return nil, errors.New("something went wrong")
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		result, err := r.Execute(context.Background(), "error-agent", `{"input":"test"}`)
@@ -215,9 +215,9 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag); err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag); err != nil {
+			t.Fatalf("Register error: %v", err)
 		}
 
 		result, err := r.Execute(context.Background(), "empty-agent", `{"input":"test"}`)
@@ -254,10 +254,10 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			"required": []any{"input"},
 		}
 
-		r := NewRegistry()
-		err := r.RegisterAgentAsTool(ag, WithAgentToolParameters(customParams))
+		r := tool.NewRegistry()
+		err := Register(r, ag, WithParameters(customParams))
 		if err != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", err)
+			t.Fatalf("Register error: %v", err)
 		}
 
 		def, ok := r.Get("params-agent")
@@ -295,19 +295,18 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			}, nil
 		})
 
-		// Custom extractor that concatenates "query" and "lang" fields.
 		extractor := func(parsed map[string]any) (string, error) {
 			query, _ := parsed["query"].(string)
 			lang, _ := parsed["lang"].(string)
 			return query + " [" + lang + "]", nil
 		}
 
-		r := NewRegistry()
-		regErr := r.RegisterAgentAsTool(ag,
-			WithAgentToolArgExtractor(extractor),
+		r := tool.NewRegistry()
+		regErr := Register(r, ag,
+			WithArgExtractor(extractor),
 		)
 		if regErr != nil {
-			t.Fatalf("RegisterAgentAsTool error: %v", regErr)
+			t.Fatalf("Register error: %v", regErr)
 		}
 
 		result, err := r.Execute(context.Background(), "extractor-agent", `{"query":"hello","lang":"fr"}`)
@@ -333,12 +332,12 @@ func TestRegisterAgentAsTool(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		})
 
-		r := NewRegistry()
-		if err := r.RegisterAgentAsTool(ag1); err != nil {
-			t.Fatalf("first RegisterAgentAsTool error: %v", err)
+		r := tool.NewRegistry()
+		if err := Register(r, ag1); err != nil {
+			t.Fatalf("first Register error: %v", err)
 		}
 
-		dupErr := r.RegisterAgentAsTool(ag2)
+		dupErr := Register(r, ag2)
 		if dupErr == nil {
 			t.Fatal("expected error for duplicate agent name")
 		}

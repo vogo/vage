@@ -30,6 +30,7 @@ import (
 	"github.com/vogo/vagent/prompt"
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/agenttool"
 )
 
 // TestAgentAsToolIntegration verifies that a coordinator TaskAgent can delegate
@@ -80,7 +81,7 @@ func TestAgentAsToolIntegration(t *testing.T) {
 
 	// Create tool registry and register the sub-agent as a tool.
 	reg := tool.NewRegistry()
-	if err := reg.RegisterAgentAsTool(translatorAgent); err != nil {
+	if err := agenttool.Register(reg, translatorAgent); err != nil {
 		t.Fatalf("RegisterAgentAsTool error: %v", err)
 	}
 
@@ -174,7 +175,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("RegisterAndList", func(t *testing.T) {
 		// Register the agent as a tool and verify List() metadata.
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(echoAgent); err != nil {
+		if err := agenttool.Register(reg, echoAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -204,9 +205,9 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("CustomNameAndDescription", func(t *testing.T) {
 		// Register with overridden name and description.
 		reg := tool.NewRegistry()
-		err := reg.RegisterAgentAsTool(echoAgent,
-			tool.WithAgentToolName("custom_echo"),
-			tool.WithAgentToolDescription("A custom echo tool"),
+		err := agenttool.Register(reg, echoAgent,
+			agenttool.WithName("custom_echo"),
+			agenttool.WithDescription("A custom echo tool"),
 		)
 		if err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
@@ -234,11 +235,11 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("DuplicateRegistrationError", func(t *testing.T) {
 		// Register the same agent twice; second should fail.
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(echoAgent); err != nil {
+		if err := agenttool.Register(reg, echoAgent); err != nil {
 			t.Fatalf("first RegisterAgentAsTool error: %v", err)
 		}
 
-		err := reg.RegisterAgentAsTool(echoAgent)
+		err := agenttool.Register(reg, echoAgent)
 		if err == nil {
 			t.Fatal("expected error for duplicate registration, got nil")
 		}
@@ -251,7 +252,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("DirectExecution", func(t *testing.T) {
 		// Execute the agent tool directly via the registry and verify the result.
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(echoAgent); err != nil {
+		if err := agenttool.Register(reg, echoAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -273,7 +274,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("MalformedJSONExecution", func(t *testing.T) {
 		// Execute with malformed JSON; should return IsError=true.
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(echoAgent); err != nil {
+		if err := agenttool.Register(reg, echoAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -294,7 +295,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("MissingInputField", func(t *testing.T) {
 		// Execute with valid JSON but missing 'input' field.
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(echoAgent); err != nil {
+		if err := agenttool.Register(reg, echoAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -322,7 +323,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 		)
 
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(errorAgent); err != nil {
+		if err := agenttool.Register(reg, errorAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -350,7 +351,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 		)
 
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(emptyAgent); err != nil {
+		if err := agenttool.Register(reg, emptyAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 
@@ -400,7 +401,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 		)
 
 		reg := tool.NewRegistry()
-		if err := reg.RegisterAgentAsTool(multiAgent); err != nil {
+		if err := agenttool.Register(reg, multiAgent); err != nil {
 			t.Fatalf("RegisterAgentAsTool error: %v", err)
 		}
 

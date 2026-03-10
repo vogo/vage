@@ -65,9 +65,9 @@ func (r *Registry) Register(def schema.ToolDef, handler ToolHandler) error {
 	return nil
 }
 
-// registerIfAbsent atomically checks for duplicates and registers under a single write lock
+// RegisterIfAbsent atomically checks for duplicates and registers under a single write lock
 // to avoid a TOCTOU race between a separate read-lock check and Register().
-func (r *Registry) registerIfAbsent(def schema.ToolDef, handler ToolHandler) error {
+func (r *Registry) RegisterIfAbsent(def schema.ToolDef, handler ToolHandler) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
