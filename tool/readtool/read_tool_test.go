@@ -1,0 +1,570 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package readtool
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/vogo/vagent/schema"
+	"github.com/vogo/vagent/tool"
+)
+
+func resultText(r schema.ToolResult) string {
+	for _, p := range r.Content {
+		if p.Type == "text" {
+			return p.Text
+		}
+	}
+
+	return ""
+}
+
+func writeTestFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	return path
+}
+
+func TestReadTool_Success(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "test.txt", "hello\nworld\n")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "hello\nworld" {
+		t.Errorf("expected %q, got %q", "hello\nworld", got)
+	}
+}
+
+func TestReadTool_OffsetAndLimit(t *testing.T) {
+	dir := t.TempDir()
+
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+
+	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"offset":3,"limit":3}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "line3\nline4\nline5" {
+		t.Errorf("expected %q, got %q", "line3\nline4\nline5", got)
+	}
+}
+
+func TestReadTool_OffsetOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	var lines []string
+	for i := 1; i <= 5; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+
+	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"offset":4}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "line4\nline5" {
+		t.Errorf("expected %q, got %q", "line4\nline5", got)
+	}
+}
+
+func TestReadTool_LimitOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+
+	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"limit":3}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "line1\nline2\nline3" {
+		t.Errorf("expected %q, got %q", "line1\nline2\nline3", got)
+	}
+}
+
+func TestReadTool_OffsetBeyondFileLength(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "test.txt", "line1\nline2\n")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"offset":100}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestReadTool_FileNotFound(t *testing.T) {
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", `{"file_path":"/tmp/nonexistent_readtool_test_file.txt"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "file does not exist") {
+		t.Errorf("expected 'file does not exist' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_DirectoryPath(t *testing.T) {
+	dir := t.TempDir()
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, dir))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "directory") {
+		t.Errorf("expected 'directory' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_EmptyPath(t *testing.T) {
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", `{"file_path":""}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "must not be empty") {
+		t.Errorf("expected 'must not be empty' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_RelativePath(t *testing.T) {
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", `{"file_path":"relative/path.txt"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "must be absolute") {
+		t.Errorf("expected 'must be absolute' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_MalformedJSON(t *testing.T) {
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", `not json`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "invalid arguments") {
+		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_NegativeOffset(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "test.txt", "hello\n")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"offset":-1}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "offset must be >= 1") {
+		t.Errorf("expected 'offset must be >= 1' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_NegativeLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "test.txt", "hello\n")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"limit":-1}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "limit must be >= 1") {
+		t.Errorf("expected 'limit must be >= 1' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_LargeFileTruncation(t *testing.T) {
+	dir := t.TempDir()
+
+	maxBytes := 100
+	content := strings.Repeat("A", 200)
+	path := writeTestFile(t, dir, "large.txt", content)
+
+	rt := New(WithMaxReadBytes(maxBytes))
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "output truncated") {
+		t.Errorf("expected 'output truncated' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, fmt.Sprintf("first %d bytes", maxBytes)) {
+		t.Errorf("expected truncation size in output, got: %s", text)
+	}
+}
+
+func TestReadTool_ContextCancel(t *testing.T) {
+	rt := New()
+	handler := rt.Handler()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := handler(ctx, "", `{"file_path":"/tmp/whatever.txt"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "context canceled") {
+		t.Errorf("expected 'context canceled' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_ToolDef(t *testing.T) {
+	rt := New()
+	def := rt.ToolDef()
+
+	if def.Name != "file_read" {
+		t.Errorf("expected name 'file_read', got %q", def.Name)
+	}
+
+	if def.Description == "" {
+		t.Error("expected non-empty description")
+	}
+
+	if def.Source != schema.ToolSourceLocal {
+		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
+	}
+
+	params, ok := def.Parameters.(map[string]any)
+	if !ok {
+		t.Fatal("expected Parameters to be map[string]any")
+	}
+
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in parameters")
+	}
+
+	if _, ok := props["file_path"]; !ok {
+		t.Error("expected 'file_path' property in parameters")
+	}
+
+	if _, ok := props["offset"]; !ok {
+		t.Error("expected 'offset' property in parameters")
+	}
+
+	if _, ok := props["limit"]; !ok {
+		t.Error("expected 'limit' property in parameters")
+	}
+}
+
+func TestReadTool_Register(t *testing.T) {
+	reg := tool.NewRegistry()
+
+	if err := Register(reg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	def, ok := reg.Get("file_read")
+	if !ok {
+		t.Fatal("file_read tool not found in registry")
+	}
+
+	if def.Name != "file_read" {
+		t.Errorf("expected name 'file_read', got %q", def.Name)
+	}
+
+	if def.Source != schema.ToolSourceLocal {
+		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
+	}
+}
+
+func TestReadTool_RegisterDuplicate(t *testing.T) {
+	reg := tool.NewRegistry()
+
+	if err := Register(reg); err != nil {
+		t.Fatalf("first registration failed: %v", err)
+	}
+
+	err := Register(reg)
+	if err == nil {
+		t.Fatal("expected error on duplicate registration")
+	}
+
+	if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("expected 'already registered' error, got: %v", err)
+	}
+}
+
+func TestReadTool_AllowedDirs(t *testing.T) {
+	dir := t.TempDir()
+	otherDir := t.TempDir()
+	path := writeTestFile(t, otherDir, "secret.txt", "secret data")
+
+	rt := New(WithAllowedDirs(dir))
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "path not allowed") {
+		t.Errorf("expected 'path not allowed' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_AllowedDirsSymlink(t *testing.T) {
+	allowedDir := t.TempDir()
+	outsideDir := t.TempDir()
+	writeTestFile(t, outsideDir, "secret.txt", "secret data")
+
+	symlinkPath := filepath.Join(allowedDir, "escape")
+	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	targetPath := filepath.Join(symlinkPath, "secret.txt")
+
+	rt := New(WithAllowedDirs(allowedDir))
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, targetPath))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for symlink escape")
+	}
+
+	text := resultText(result)
+	if !strings.Contains(text, "path not allowed") {
+		t.Errorf("expected 'path not allowed' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_Concurrent(t *testing.T) {
+	dir := t.TempDir()
+
+	const n = 10
+
+	paths := make([]string, n)
+	for i := range n {
+		paths[i] = writeTestFile(t, dir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("content%d", i))
+	}
+
+	rt := New()
+	handler := rt.Handler()
+
+	var wg sync.WaitGroup
+
+	errs := make([]error, n)
+	results := make([]schema.ToolResult, n)
+
+	for i := range n {
+		wg.Add(1)
+
+		go func(idx int) {
+			defer wg.Done()
+
+			args := fmt.Sprintf(`{"file_path":%q}`, paths[idx])
+			results[idx], errs[idx] = handler(context.Background(), "", args)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range n {
+		if errs[i] != nil {
+			t.Errorf("read %d returned error: %v", i, errs[i])
+		}
+
+		if results[i].IsError {
+			t.Errorf("read %d returned IsError=true: %s", i, resultText(results[i]))
+		}
+
+		expected := fmt.Sprintf("content%d", i)
+		if got := resultText(results[i]); got != expected {
+			t.Errorf("read %d: expected %q, got %q", i, expected, got)
+		}
+	}
+}
+
+func TestReadTool_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestFile(t, dir, "empty.txt", "")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	got := resultText(result)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}

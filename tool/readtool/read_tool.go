@@ -1,0 +1,223 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package readtool
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/vogo/vagent/schema"
+	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/pathutil"
+)
+
+const (
+	toolName        = "file_read"
+	toolDescription = "Read the contents of a file from the filesystem. Returns the file content as text. Supports optional line offset and limit for reading portions of large files."
+
+	defaultMaxReadBytes = 256 * 1024 // 256KB
+)
+
+// ReadTool holds configuration for the built-in file read tool.
+type ReadTool struct {
+	allowedDirs  []string
+	maxReadBytes int
+}
+
+// Option is a functional option for configuring a ReadTool.
+type Option func(*ReadTool)
+
+// WithMaxReadBytes sets the maximum number of bytes to read.
+func WithMaxReadBytes(n int) Option {
+	return func(rt *ReadTool) { rt.maxReadBytes = n }
+}
+
+// WithAllowedDirs sets the allowed base directories for the read tool.
+func WithAllowedDirs(dirs ...string) Option {
+	return func(rt *ReadTool) {
+		rt.allowedDirs = pathutil.CleanAllowedDirs(dirs)
+	}
+}
+
+// New creates a ReadTool with the given options.
+func New(opts ...Option) *ReadTool {
+	rt := &ReadTool{maxReadBytes: defaultMaxReadBytes}
+	for _, o := range opts {
+		o(rt)
+	}
+
+	return rt
+}
+
+// ToolDef returns the schema.ToolDef for registration.
+func (rt *ReadTool) ToolDef() schema.ToolDef {
+	return schema.ToolDef{
+		Name:        toolName,
+		Description: toolDescription,
+		Source:      schema.ToolSourceLocal,
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"file_path": map[string]any{
+					"type":        "string",
+					"description": "Absolute path to the file to read.",
+				},
+				"offset": map[string]any{
+					"type":        "integer",
+					"description": "1-based line number to start reading from. Defaults to 1.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum number of lines to return. Defaults to reading the entire file.",
+				},
+			},
+			"required":             []string{"file_path"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+// Handler returns the ToolHandler closure for this read tool.
+func (rt *ReadTool) Handler() tool.ToolHandler {
+	return func(ctx context.Context, _, args string) (schema.ToolResult, error) {
+		if err := ctx.Err(); err != nil {
+			return schema.ErrorResult("", "read tool: "+err.Error()), nil
+		}
+
+		var parsed struct {
+			FilePath string `json:"file_path"`
+			Offset   *int   `json:"offset"`
+			Limit    *int   `json:"limit"`
+		}
+
+		if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+			return schema.ErrorResult("", "read tool: invalid arguments: "+err.Error()), nil
+		}
+
+		cleaned, err := pathutil.ValidatePath("read", parsed.FilePath, rt.allowedDirs)
+		if err != nil {
+			return schema.ErrorResult("", err.Error()), nil
+		}
+
+		offset := 1
+		if parsed.Offset != nil {
+			offset = *parsed.Offset
+			if offset < 1 {
+				return schema.ErrorResult("", "read tool: offset must be >= 1"), nil
+			}
+		}
+
+		limitSet := false
+		limit := 0
+
+		if parsed.Limit != nil {
+			limit = *parsed.Limit
+			if limit < 1 {
+				return schema.ErrorResult("", "read tool: limit must be >= 1"), nil
+			}
+
+			limitSet = true
+		}
+
+		info, err := os.Stat(cleaned)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return schema.ErrorResult("", fmt.Sprintf("read tool: file does not exist: %s", cleaned)), nil
+			}
+
+			return schema.ErrorResult("", "read tool: "+err.Error()), nil
+		}
+
+		if info.IsDir() {
+			return schema.ErrorResult("", fmt.Sprintf("read tool: path is a directory, not a file: %s", cleaned)), nil
+		}
+
+		f, err := os.Open(cleaned)
+		if err != nil {
+			return schema.ErrorResult("", "read tool: "+err.Error()), nil
+		}
+		defer func() { _ = f.Close() }()
+
+		scanner := bufio.NewScanner(f)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, rt.maxReadBytes)
+
+		var result []byte
+
+		lineNum := 0
+		linesRead := 0
+		totalBytes := 0
+
+		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return schema.ErrorResult("", "read tool: "+err.Error()), nil
+			}
+
+			lineNum++
+
+			if lineNum < offset {
+				continue
+			}
+
+			line := scanner.Bytes()
+			lineLen := len(line) + 1 // +1 for newline
+
+			if totalBytes+lineLen > rt.maxReadBytes {
+				remaining := rt.maxReadBytes - totalBytes
+				if remaining > 0 {
+					if len(result) > 0 {
+						result = append(result, '\n')
+					}
+
+					result = append(result, line[:remaining]...)
+				}
+
+				result = fmt.Appendf(result, "\n... [output truncated, showing first %d bytes]", rt.maxReadBytes)
+
+				return schema.TextResult("", string(result)), nil
+			}
+
+			if len(result) > 0 {
+				result = append(result, '\n')
+			}
+
+			result = append(result, line...)
+			totalBytes += lineLen
+			linesRead++
+
+			if limitSet && linesRead >= limit {
+				break
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return schema.ErrorResult("", "read tool: error reading file: "+err.Error()), nil
+		}
+
+		return schema.TextResult("", string(result)), nil
+	}
+}
+
+// Register creates a ReadTool and registers it in the given registry.
+func Register(registry *tool.Registry, opts ...Option) error {
+	rt := New(opts...)
+	return registry.RegisterIfAbsent(rt.ToolDef(), rt.Handler())
+}
