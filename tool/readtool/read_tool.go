@@ -26,14 +26,15 @@ import (
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
-	"github.com/vogo/vagent/tool/pathutil"
+	"github.com/vogo/vagent/tool/toolkit"
 )
 
 const (
 	toolName        = "file_read"
-	toolDescription = "Read the contents of a file from the filesystem. Returns the file content as text. Supports optional line offset and limit for reading portions of large files."
+	toolDescription = "Read the contents of a file from the filesystem. Returns the file content as text. Supports optional line offset and limit for reading portions of large files. Set show_line_numbers to true to include line numbers in the output."
 
-	defaultMaxReadBytes = 256 * 1024 // 256KB
+	defaultMaxReadBytes = 256 * 1024  // 256KB
+	maxScanLineBytes    = 1024 * 1024 // 1MB max single line (separate from total read limit)
 )
 
 // ReadTool holds configuration for the built-in file read tool.
@@ -53,7 +54,7 @@ func WithMaxReadBytes(n int) Option {
 // WithAllowedDirs sets the allowed base directories for the read tool.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(rt *ReadTool) {
-		rt.allowedDirs = pathutil.CleanAllowedDirs(dirs)
+		rt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
 }
 
@@ -88,6 +89,10 @@ func (rt *ReadTool) ToolDef() schema.ToolDef {
 					"type":        "integer",
 					"description": "Maximum number of lines to return. Defaults to reading the entire file.",
 				},
+				"show_line_numbers": map[string]any{
+					"type":        "boolean",
+					"description": "When true, prefix each line with its line number and a tab character (e.g. '42\\tcontent'). Defaults to false.",
+				},
 			},
 			"required":             []string{"file_path"},
 			"additionalProperties": false,
@@ -103,16 +108,17 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 		}
 
 		var parsed struct {
-			FilePath string `json:"file_path"`
-			Offset   *int   `json:"offset"`
-			Limit    *int   `json:"limit"`
+			FilePath        string `json:"file_path"`
+			Offset          *int   `json:"offset"`
+			Limit           *int   `json:"limit"`
+			ShowLineNumbers bool   `json:"show_line_numbers"`
 		}
 
 		if err := json.Unmarshal([]byte(args), &parsed); err != nil {
 			return schema.ErrorResult("", "read tool: invalid arguments: "+err.Error()), nil
 		}
 
-		cleaned, err := pathutil.ValidatePath("read", parsed.FilePath, rt.allowedDirs)
+		cleaned, err := toolkit.ValidatePath("read", parsed.FilePath, rt.allowedDirs)
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
@@ -158,7 +164,7 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 
 		scanner := bufio.NewScanner(f)
 		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, rt.maxReadBytes)
+		scanner.Buffer(buf, maxScanLineBytes)
 
 		var result []byte
 
@@ -187,7 +193,12 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 						result = append(result, '\n')
 					}
 
-					result = append(result, line[:remaining]...)
+					truncLine := line[:remaining]
+					if parsed.ShowLineNumbers {
+						result = fmt.Appendf(result, "%d\t%s", lineNum, truncLine)
+					} else {
+						result = append(result, truncLine...)
+					}
 				}
 
 				result = fmt.Appendf(result, "\n... [output truncated, showing first %d bytes]", rt.maxReadBytes)
@@ -199,7 +210,12 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 				result = append(result, '\n')
 			}
 
-			result = append(result, line...)
+			if parsed.ShowLineNumbers {
+				result = fmt.Appendf(result, "%d\t%s", lineNum, line)
+			} else {
+				result = append(result, line...)
+			}
+
 			totalBytes += lineLen
 			linesRead++
 

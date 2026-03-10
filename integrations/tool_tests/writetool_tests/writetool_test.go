@@ -27,33 +27,9 @@ import (
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/toolkit"
 	"github.com/vogo/vagent/tool/writetool"
 )
-
-// ---------- Helper ----------
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-// resolveDir resolves symlinks in a directory path (needed on macOS where
-// /var -> /private/var).
-func resolveDir(t *testing.T, dir string) string {
-	t.Helper()
-
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("failed to resolve dir: %v", err)
-	}
-
-	return resolved
-}
 
 // ---------- Registration Integration Tests ----------
 
@@ -95,10 +71,6 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 		t.Errorf("expected name 'file_write', got %q", def.Name)
 	}
 
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
-	}
-
 	if def.Description == "" {
 		t.Error("expected non-empty description")
 	}
@@ -111,10 +83,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "wrote 11 bytes") {
 		t.Errorf("expected 'wrote 11 bytes' in output, got: %s", text)
 	}
@@ -151,8 +123,8 @@ func TestRegisterDuplicatePrevented(t *testing.T) {
 // TestRegisterWithAllowedDirs verifies that the AllowedDirs option is correctly
 // applied when executing through the registry.
 func TestRegisterWithAllowedDirs(t *testing.T) {
-	allowedDir := resolveDir(t, t.TempDir())
-	otherDir := resolveDir(t, t.TempDir())
+	allowedDir := toolkit.ResolveDir(t, t.TempDir())
+	otherDir := toolkit.ResolveDir(t, t.TempDir())
 	forbiddenPath := filepath.Join(otherDir, "forbidden.txt")
 
 	reg := tool.NewRegistry()
@@ -172,7 +144,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -187,7 +159,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 }
 
@@ -211,7 +183,7 @@ func TestWriteCreateNewFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -246,7 +218,7 @@ func TestWriteOverwriteExistingFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -277,7 +249,7 @@ func TestWriteCreateParentDirectories(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -307,7 +279,7 @@ func TestWriteEmptyContent(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -339,7 +311,7 @@ func TestWriteEmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -362,7 +334,7 @@ func TestWriteRelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true for relative path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -384,7 +356,7 @@ func TestWriteMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -411,7 +383,7 @@ func TestWriteExceedsMaxWriteBytes(t *testing.T) {
 		t.Fatal("expected IsError=true for content exceeding max")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -438,7 +410,7 @@ func TestWriteContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -457,11 +429,6 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Errorf("expected name 'file_write', got %q", def.Name)
 	}
 
-	// Verify source.
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
-	}
-
 	// Verify parameters structure.
 	params, ok := def.Parameters.(map[string]any)
 	if !ok {
@@ -478,7 +445,7 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Fatal("expected 'properties' in parameters")
 	}
 
-	for _, prop := range []string{"file_path", "content"} {
+	for _, prop := range []string{"file_path", "content", "create_only"} {
 		if _, ok := props[prop]; !ok {
 			t.Errorf("expected %q property in parameters", prop)
 		}
@@ -548,7 +515,7 @@ func TestWriteErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second write to succeed, got error: %s", resultText(result2))
+		t.Fatalf("expected second write to succeed, got error: %s", toolkit.ResultText(result2))
 	}
 
 	content, err := os.ReadFile(path)

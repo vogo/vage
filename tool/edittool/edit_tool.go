@@ -22,12 +22,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
-	"github.com/vogo/vagent/tool/pathutil"
+	"github.com/vogo/vagent/tool/toolkit"
 )
 
 const (
@@ -35,6 +34,7 @@ const (
 	toolDescription = "Edit a file by performing exact string replacements. Finds old_string in the file and replaces it with new_string. By default, requires a unique match; set replace_all to true to replace all occurrences."
 
 	defaultMaxEditFileBytes = 1024 * 1024 // 1MB
+	snippetContextLines     = 3
 )
 
 // EditTool holds configuration for the built-in file edit tool.
@@ -54,7 +54,7 @@ func WithMaxFileBytes(n int) Option {
 // WithAllowedDirs sets the allowed base directories for the edit tool.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(et *EditTool) {
-		et.allowedDirs = pathutil.CleanAllowedDirs(dirs)
+		et.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
 }
 
@@ -118,7 +118,7 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", "edit tool: invalid arguments: "+err.Error()), nil
 		}
 
-		cleaned, err := pathutil.ValidatePath("edit", parsed.FilePath, et.allowedDirs)
+		cleaned, err := toolkit.ValidatePath("edit", parsed.FilePath, et.allowedDirs)
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
@@ -130,6 +130,11 @@ func (et *EditTool) Handler() tool.ToolHandler {
 		if parsed.OldString == parsed.NewString {
 			return schema.ErrorResult("", "edit tool: old_string and new_string must differ"), nil
 		}
+
+		// Acquire a process-level lock for this file to prevent concurrent
+		// read-modify-write races (TOCTOU).
+		unlock := toolkit.LockPath(cleaned)
+		defer unlock()
 
 		info, err := os.Stat(cleaned)
 		if err != nil {
@@ -167,6 +172,9 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			)), nil
 		}
 
+		// Record position of first change for the snippet.
+		changePos := strings.Index(contentStr, parsed.OldString)
+
 		var newContent string
 		if parsed.ReplaceAll {
 			newContent = strings.ReplaceAll(contentStr, parsed.OldString, parsed.NewString)
@@ -175,44 +183,17 @@ func (et *EditTool) Handler() tool.ToolHandler {
 		}
 
 		// Atomic write-back: write to temp file then rename.
-		dir := filepath.Dir(cleaned)
-
-		tmpFile, err := os.CreateTemp(dir, ".edit-*.tmp")
-		if err != nil {
-			return schema.ErrorResult("", "edit tool: failed to create temp file: "+err.Error()), nil
+		if writeErr := toolkit.AtomicWriteFile(cleaned, []byte(newContent), info.Mode().Perm()); writeErr != nil {
+			return schema.ErrorResult("", "edit tool: "+writeErr.Error()), nil
 		}
 
-		tmpPath := tmpFile.Name()
+		msg := fmt.Sprintf("replaced %d occurrence(s) in %s", count, cleaned)
 
-		_, writeErr := tmpFile.WriteString(newContent)
-		closeErr := tmpFile.Close()
-
-		if writeErr != nil {
-			_ = os.Remove(tmpPath)
-
-			return schema.ErrorResult("", "edit tool: failed to write temp file: "+writeErr.Error()), nil
+		if snippet := toolkit.GenerateEditSnippet(newContent, changePos, snippetContextLines); snippet != "" {
+			msg += "\n--- snippet ---\n" + snippet
 		}
 
-		if closeErr != nil {
-			_ = os.Remove(tmpPath)
-
-			return schema.ErrorResult("", "edit tool: failed to close temp file: "+closeErr.Error()), nil
-		}
-
-		// Preserve original file permissions.
-		if chmodErr := os.Chmod(tmpPath, info.Mode().Perm()); chmodErr != nil {
-			_ = os.Remove(tmpPath)
-
-			return schema.ErrorResult("", "edit tool: failed to set file permissions: "+chmodErr.Error()), nil
-		}
-
-		if renameErr := os.Rename(tmpPath, cleaned); renameErr != nil {
-			_ = os.Remove(tmpPath)
-
-			return schema.ErrorResult("", "edit tool: failed to rename temp file: "+renameErr.Error()), nil
-		}
-
-		return schema.TextResult("", fmt.Sprintf("replaced %d occurrence(s) in %s", count, cleaned)), nil
+		return schema.TextResult("", msg), nil
 	}
 }
 

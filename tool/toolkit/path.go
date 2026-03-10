@@ -15,8 +15,9 @@
  * limitations under the License.
  */
 
-// Package pathutil provides shared path validation helpers for file tools.
-package pathutil
+// Package toolkit provides shared utilities for file tools, including path
+// validation, atomic file writes, file locking, and edit snippet generation.
+package toolkit
 
 import (
 	"fmt"

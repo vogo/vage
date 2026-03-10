@@ -22,20 +22,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
-	"github.com/vogo/vagent/tool/pathutil"
+	"github.com/vogo/vagent/tool/toolkit"
 )
 
 const (
 	toolName        = "file_write"
-	toolDescription = "Write content to a file on the filesystem. Creates the file if it does not exist, or overwrites it if it does. Parent directories are created automatically."
+	toolDescription = "Write content to a file on the filesystem. Creates the file if it does not exist, or overwrites it if it does. Parent directories are created automatically. Set create_only to true to prevent overwriting existing files."
 
-	defaultMaxWriteBytes  = 1024 * 1024 // 1MB
-	defaultFilePermission = 0o644
-	defaultDirPermission  = 0o755
+	defaultMaxWriteBytes = 1024 * 1024 // 1MB
 )
 
 // WriteTool holds configuration for the built-in file write tool.
@@ -55,7 +52,7 @@ func WithMaxWriteBytes(n int) Option {
 // WithAllowedDirs sets the allowed base directories for the write tool.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(wt *WriteTool) {
-		wt.allowedDirs = pathutil.CleanAllowedDirs(dirs)
+		wt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
 }
 
@@ -86,6 +83,10 @@ func (wt *WriteTool) ToolDef() schema.ToolDef {
 					"type":        "string",
 					"description": "The full content to write to the file.",
 				},
+				"create_only": map[string]any{
+					"type":        "boolean",
+					"description": "When true, fail if the file already exists instead of overwriting. Defaults to false.",
+				},
 			},
 			"required":             []string{"file_path", "content"},
 			"additionalProperties": false,
@@ -101,15 +102,16 @@ func (wt *WriteTool) Handler() tool.ToolHandler {
 		}
 
 		var parsed struct {
-			FilePath string `json:"file_path"`
-			Content  string `json:"content"`
+			FilePath   string `json:"file_path"`
+			Content    string `json:"content"`
+			CreateOnly bool   `json:"create_only"`
 		}
 
 		if err := json.Unmarshal([]byte(args), &parsed); err != nil {
 			return schema.ErrorResult("", "write tool: invalid arguments: "+err.Error()), nil
 		}
 
-		cleaned, err := pathutil.ValidatePath("write", parsed.FilePath, wt.allowedDirs)
+		cleaned, err := toolkit.ValidatePath("write", parsed.FilePath, wt.allowedDirs)
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
@@ -118,13 +120,19 @@ func (wt *WriteTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", fmt.Sprintf("write tool: content exceeds maximum size (%d bytes)", wt.maxWriteBytes)), nil
 		}
 
-		dir := filepath.Dir(cleaned)
-		if err := os.MkdirAll(dir, defaultDirPermission); err != nil {
-			return schema.ErrorResult("", fmt.Sprintf("write tool: failed to create directories: %s", err.Error())), nil
+		// Determine file permissions: preserve existing or use default.
+		var perm os.FileMode = toolkit.DefaultFilePermission
+
+		if info, statErr := os.Stat(cleaned); statErr == nil {
+			if parsed.CreateOnly {
+				return schema.ErrorResult("", fmt.Sprintf("write tool: file already exists (create_only=true): %s", cleaned)), nil
+			}
+
+			perm = info.Mode().Perm()
 		}
 
-		if err := os.WriteFile(cleaned, []byte(parsed.Content), defaultFilePermission); err != nil {
-			return schema.ErrorResult("", "write tool: "+err.Error()), nil
+		if writeErr := toolkit.AtomicWriteFile(cleaned, []byte(parsed.Content), perm); writeErr != nil {
+			return schema.ErrorResult("", "write tool: "+writeErr.Error()), nil
 		}
 
 		return schema.TextResult("", fmt.Sprintf("wrote %d bytes to %s", len(parsed.Content), cleaned)), nil

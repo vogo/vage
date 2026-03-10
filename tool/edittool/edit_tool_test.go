@@ -21,39 +21,18 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/toolkit"
 )
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	return path
-}
 
 func TestEditTool_SingleReplace(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	et := New()
 	handler := et.Handler()
@@ -65,12 +44,17 @@ func TestEditTool_SingleReplace(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "replaced 1 occurrence(s)") {
 		t.Errorf("expected 'replaced 1 occurrence(s)' in output, got: %s", text)
+	}
+
+	// Verify snippet is included.
+	if !strings.Contains(text, "--- snippet ---") {
+		t.Errorf("expected snippet in output, got: %s", text)
 	}
 
 	content, err := os.ReadFile(path)
@@ -85,7 +69,7 @@ func TestEditTool_SingleReplace(t *testing.T) {
 
 func TestEditTool_ReplaceAll(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "foo bar foo baz foo")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "foo bar foo baz foo")
 
 	et := New()
 	handler := et.Handler()
@@ -97,10 +81,10 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "replaced 3 occurrence(s)") {
 		t.Errorf("expected 'replaced 3 occurrence(s)' in output, got: %s", text)
 	}
@@ -117,7 +101,7 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 
 func TestEditTool_ReplaceWithEmpty(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	et := New()
 	handler := et.Handler()
@@ -129,7 +113,7 @@ func TestEditTool_ReplaceWithEmpty(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -144,7 +128,7 @@ func TestEditTool_ReplaceWithEmpty(t *testing.T) {
 
 func TestEditTool_MultilineStrings(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "line1\nline2\nline3\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "line1\nline2\nline3\n")
 
 	et := New()
 	handler := et.Handler()
@@ -156,7 +140,7 @@ func TestEditTool_MultilineStrings(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -171,7 +155,7 @@ func TestEditTool_MultilineStrings(t *testing.T) {
 
 func TestEditTool_NotFound(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	et := New()
 	handler := et.Handler()
@@ -186,7 +170,7 @@ func TestEditTool_NotFound(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "old_string not found in file") {
 		t.Errorf("expected 'old_string not found in file' in output, got: %s", text)
 	}
@@ -194,7 +178,7 @@ func TestEditTool_NotFound(t *testing.T) {
 
 func TestEditTool_AmbiguousMatch(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "foo bar foo baz foo")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "foo bar foo baz foo")
 
 	et := New()
 	handler := et.Handler()
@@ -209,7 +193,7 @@ func TestEditTool_AmbiguousMatch(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "matches 3 locations") {
 		t.Errorf("expected 'matches 3 locations' in output, got: %s", text)
 	}
@@ -221,7 +205,7 @@ func TestEditTool_AmbiguousMatch(t *testing.T) {
 
 func TestEditTool_SameStrings(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello")
 
 	et := New()
 	handler := et.Handler()
@@ -236,7 +220,7 @@ func TestEditTool_SameStrings(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must differ") {
 		t.Errorf("expected 'must differ' in output, got: %s", text)
 	}
@@ -244,7 +228,7 @@ func TestEditTool_SameStrings(t *testing.T) {
 
 func TestEditTool_EmptyOldString(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello")
 
 	et := New()
 	handler := et.Handler()
@@ -259,7 +243,7 @@ func TestEditTool_EmptyOldString(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "old_string must not be empty") {
 		t.Errorf("expected 'old_string must not be empty' in output, got: %s", text)
 	}
@@ -278,7 +262,7 @@ func TestEditTool_FileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -299,7 +283,7 @@ func TestEditTool_DirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "directory") {
 		t.Errorf("expected 'directory' in output, got: %s", text)
 	}
@@ -318,7 +302,7 @@ func TestEditTool_EmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -337,7 +321,7 @@ func TestEditTool_RelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -356,7 +340,7 @@ func TestEditTool_MalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -365,7 +349,7 @@ func TestEditTool_MalformedJSON(t *testing.T) {
 func TestEditTool_ExceedsMaxFileBytes(t *testing.T) {
 	dir := t.TempDir()
 	content := strings.Repeat("A", 200)
-	path := writeTestFile(t, dir, "big.txt", content)
+	path := toolkit.WriteTestFile(t, dir, "big.txt", content)
 
 	et := New(WithMaxFileBytes(100))
 	handler := et.Handler()
@@ -380,7 +364,7 @@ func TestEditTool_ExceedsMaxFileBytes(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -456,7 +440,7 @@ func TestEditTool_RegisterDuplicate(t *testing.T) {
 func TestEditTool_AllowedDirs(t *testing.T) {
 	allowedDir := t.TempDir()
 	otherDir := t.TempDir()
-	path := writeTestFile(t, otherDir, "forbidden.txt", "content")
+	path := toolkit.WriteTestFile(t, otherDir, "forbidden.txt", "content")
 
 	et := New(WithAllowedDirs(allowedDir))
 	handler := et.Handler()
@@ -471,7 +455,7 @@ func TestEditTool_AllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -484,7 +468,7 @@ func TestEditTool_Concurrent(t *testing.T) {
 
 	paths := make([]string, n)
 	for i := range n {
-		paths[i] = writeTestFile(t, dir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("old%d content", i))
+		paths[i] = toolkit.WriteTestFile(t, dir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("old%d content", i))
 	}
 
 	et := New()
@@ -516,7 +500,7 @@ func TestEditTool_Concurrent(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("edit %d returned IsError=true: %s", i, resultText(results[i]))
+			t.Errorf("edit %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
 		}
 
 		content, readErr := os.ReadFile(paths[i])
@@ -549,8 +533,112 @@ func TestEditTool_ContextCancel(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
+	}
+}
+
+func TestEditTool_ConcurrentSameFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a file with 10 distinct markers.
+	var lines []string
+	for i := range 10 {
+		lines = append(lines, fmt.Sprintf("marker_%d_value", i))
+	}
+
+	path := toolkit.WriteTestFile(t, dir, "shared.txt", strings.Join(lines, "\n"))
+
+	et := New()
+	handler := et.Handler()
+
+	// Edit each marker concurrently. Because of the file lock, each edit
+	// will see the result of previous edits (no lost updates).
+	var wg sync.WaitGroup
+
+	errs := make([]error, 10)
+	results := make([]schema.ToolResult, 10)
+
+	for i := range 10 {
+		wg.Add(1)
+
+		go func(idx int) {
+			defer wg.Done()
+
+			args := fmt.Sprintf(
+				`{"file_path":%q,"old_string":"marker_%d_value","new_string":"marker_%d_done"}`,
+				path, idx, idx)
+			results[idx], errs[idx] = handler(context.Background(), "", args)
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range 10 {
+		if errs[i] != nil {
+			t.Errorf("edit %d returned error: %v", i, errs[i])
+		}
+
+		if results[i].IsError {
+			t.Errorf("edit %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+		}
+	}
+
+	// Verify all markers were replaced.
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	for i := range 10 {
+		expected := fmt.Sprintf("marker_%d_done", i)
+		if !strings.Contains(string(content), expected) {
+			t.Errorf("expected %q in file content", expected)
+		}
+	}
+}
+
+func TestEditTool_SnippetInResult(t *testing.T) {
+	dir := t.TempDir()
+
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+
+	path := toolkit.WriteTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+
+	et := New()
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"line5","new_string":"REPLACED"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	text := toolkit.ResultText(result)
+
+	// The snippet should contain surrounding lines.
+	if !strings.Contains(text, "--- snippet ---") {
+		t.Errorf("expected snippet header in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "REPLACED") {
+		t.Errorf("expected 'REPLACED' in snippet, got: %s", text)
+	}
+
+	// Context lines should include neighbors.
+	if !strings.Contains(text, "line4") {
+		t.Errorf("expected 'line4' in snippet context, got: %s", text)
+	}
+
+	if !strings.Contains(text, "line6") {
+		t.Errorf("expected 'line6' in snippet context, got: %s", text)
 	}
 }

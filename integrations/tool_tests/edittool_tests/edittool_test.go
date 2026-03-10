@@ -29,44 +29,9 @@ import (
 	"github.com/vogo/vagent/tool"
 	"github.com/vogo/vagent/tool/edittool"
 	"github.com/vogo/vagent/tool/readtool"
+	"github.com/vogo/vagent/tool/toolkit"
 	"github.com/vogo/vagent/tool/writetool"
 )
-
-// ---------- Helper ----------
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	return path
-}
-
-// resolveDir resolves symlinks in a directory path (needed on macOS where
-// /var -> /private/var).
-func resolveDir(t *testing.T, dir string) string {
-	t.Helper()
-
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("failed to resolve dir: %v", err)
-	}
-
-	return resolved
-}
 
 // ---------- Registration Integration Tests ----------
 
@@ -74,7 +39,7 @@ func resolveDir(t *testing.T, dir string) string {
 // execution path: Register -> List -> Get -> Execute through the tool.Registry.
 func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	reg := tool.NewRegistry()
 
@@ -108,10 +73,6 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 		t.Errorf("expected name 'file_edit', got %q", def.Name)
 	}
 
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
-	}
-
 	if def.Description == "" {
 		t.Error("expected non-empty description")
 	}
@@ -124,10 +85,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "replaced 1 occurrence(s)") {
 		t.Errorf("expected 'replaced 1 occurrence(s)' in output, got: %s", text)
 	}
@@ -164,9 +125,9 @@ func TestRegisterDuplicatePrevented(t *testing.T) {
 // TestRegisterWithAllowedDirs verifies that the AllowedDirs option is correctly
 // applied when executing through the registry.
 func TestRegisterWithAllowedDirs(t *testing.T) {
-	allowedDir := resolveDir(t, t.TempDir())
-	otherDir := resolveDir(t, t.TempDir())
-	forbiddenPath := writeTestFile(t, otherDir, "forbidden.txt", "content")
+	allowedDir := toolkit.ResolveDir(t, t.TempDir())
+	otherDir := toolkit.ResolveDir(t, t.TempDir())
+	forbiddenPath := toolkit.WriteTestFile(t, otherDir, "forbidden.txt", "content")
 
 	reg := tool.NewRegistry()
 
@@ -185,13 +146,13 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
 
 	// Editing inside allowed dir should succeed.
-	allowedPath := writeTestFile(t, allowedDir, "allowed.txt", "old text")
+	allowedPath := toolkit.WriteTestFile(t, allowedDir, "allowed.txt", "old text")
 
 	result, err = reg.Execute(context.Background(), "file_edit",
 		fmt.Sprintf(`{"file_path":%q,"old_string":"old text","new_string":"new text"}`, allowedPath))
@@ -200,7 +161,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(allowedPath)
@@ -219,7 +180,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 // through the registry.
 func TestEditSingleReplace(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "the quick brown fox")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "the quick brown fox")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -233,7 +194,7 @@ func TestEditSingleReplace(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -250,7 +211,7 @@ func TestEditSingleReplace(t *testing.T) {
 // replace_all is set to true.
 func TestEditReplaceAll(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "foo bar foo baz foo")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "foo bar foo baz foo")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -264,10 +225,10 @@ func TestEditReplaceAll(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "replaced 3 occurrence(s)") {
 		t.Errorf("expected 'replaced 3 occurrence(s)' in output, got: %s", text)
 	}
@@ -286,7 +247,7 @@ func TestEditReplaceAll(t *testing.T) {
 // effectively deletes the matched text.
 func TestEditReplaceWithEmpty(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -300,7 +261,7 @@ func TestEditReplaceWithEmpty(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -317,7 +278,7 @@ func TestEditReplaceWithEmpty(t *testing.T) {
 // newlines work correctly.
 func TestEditMultilineStrings(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "line1\nline2\nline3\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "line1\nline2\nline3\n")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -331,7 +292,7 @@ func TestEditMultilineStrings(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -349,7 +310,7 @@ func TestEditMultilineStrings(t *testing.T) {
 func TestEditAtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	original := "line1\nline2\nline3"
-	path := writeTestFile(t, dir, "atomic.txt", original)
+	path := toolkit.WriteTestFile(t, dir, "atomic.txt", original)
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -363,7 +324,7 @@ func TestEditAtomicWrite(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	// Verify no temp files are left behind.
@@ -373,7 +334,7 @@ func TestEditAtomicWrite(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".edit-") && strings.HasSuffix(e.Name(), ".tmp") {
+		if strings.HasPrefix(e.Name(), ".atomic-") && strings.HasSuffix(e.Name(), ".tmp") {
 			t.Errorf("temp file left behind: %s", e.Name())
 		}
 	}
@@ -394,7 +355,7 @@ func TestEditAtomicWrite(t *testing.T) {
 // returns an ErrorResult with the match count.
 func TestEditAmbiguousMatch(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "foo bar foo baz foo")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "foo bar foo baz foo")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -411,7 +372,7 @@ func TestEditAmbiguousMatch(t *testing.T) {
 		t.Fatal("expected IsError=true for ambiguous match")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "matches 3 locations") {
 		t.Errorf("expected 'matches 3 locations' in output, got: %s", text)
 	}
@@ -435,7 +396,7 @@ func TestEditAmbiguousMatch(t *testing.T) {
 // an ErrorResult.
 func TestEditNotFound(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -452,7 +413,7 @@ func TestEditNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true for not found")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "old_string not found in file") {
 		t.Errorf("expected 'old_string not found in file' in output, got: %s", text)
 	}
@@ -461,7 +422,7 @@ func TestEditNotFound(t *testing.T) {
 // TestEditSameStrings verifies that old_string == new_string returns an ErrorResult.
 func TestEditSameStrings(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -478,7 +439,7 @@ func TestEditSameStrings(t *testing.T) {
 		t.Fatal("expected IsError=true for same strings")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must differ") {
 		t.Errorf("expected 'must differ' in output, got: %s", text)
 	}
@@ -487,7 +448,7 @@ func TestEditSameStrings(t *testing.T) {
 // TestEditEmptyOldString verifies that an empty old_string returns an ErrorResult.
 func TestEditEmptyOldString(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -504,7 +465,7 @@ func TestEditEmptyOldString(t *testing.T) {
 		t.Fatal("expected IsError=true for empty old_string")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "old_string must not be empty") {
 		t.Errorf("expected 'old_string must not be empty' in output, got: %s", text)
 	}
@@ -528,7 +489,7 @@ func TestEditFileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true for non-existent file")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -553,7 +514,7 @@ func TestEditDirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=true for directory path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "directory") {
 		t.Errorf("expected 'directory' in output, got: %s", text)
 	}
@@ -576,7 +537,7 @@ func TestEditEmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -599,7 +560,7 @@ func TestEditRelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true for relative path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -621,7 +582,7 @@ func TestEditMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -632,7 +593,7 @@ func TestEditMalformedJSON(t *testing.T) {
 func TestEditExceedsMaxFileBytes(t *testing.T) {
 	dir := t.TempDir()
 	content := strings.Repeat("A", 200)
-	path := writeTestFile(t, dir, "big.txt", content)
+	path := toolkit.WriteTestFile(t, dir, "big.txt", content)
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg, edittool.WithMaxFileBytes(100)); err != nil {
@@ -649,7 +610,7 @@ func TestEditExceedsMaxFileBytes(t *testing.T) {
 		t.Fatal("expected IsError=true for file exceeding max size")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -676,7 +637,7 @@ func TestEditContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -693,11 +654,6 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 	// Verify name.
 	if def.Name != "file_edit" {
 		t.Errorf("expected name 'file_edit', got %q", def.Name)
-	}
-
-	// Verify source.
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
 	}
 
 	// Verify parameters structure.
@@ -759,7 +715,7 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 // subsequent successful edits through the same registry.
 func TestEditErrorThenSuccess(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "good.txt", "original content")
+	path := toolkit.WriteTestFile(t, dir, "good.txt", "original content")
 
 	reg := tool.NewRegistry()
 	if err := edittool.Register(reg); err != nil {
@@ -785,7 +741,7 @@ func TestEditErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second edit to succeed, got error: %s", resultText(result2))
+		t.Fatalf("expected second edit to succeed, got error: %s", toolkit.ResultText(result2))
 	}
 
 	content, err := os.ReadFile(path)
@@ -825,7 +781,7 @@ func TestCombinedReadWriteEditWorkflow(t *testing.T) {
 	}
 
 	if writeResult.IsError {
-		t.Fatalf("write failed: %s", resultText(writeResult))
+		t.Fatalf("write failed: %s", toolkit.ResultText(writeResult))
 	}
 
 	// Step 2: Read the file using read tool handler directly.
@@ -839,10 +795,10 @@ func TestCombinedReadWriteEditWorkflow(t *testing.T) {
 	}
 
 	if readResult.IsError {
-		t.Fatalf("read failed: %s", resultText(readResult))
+		t.Fatalf("read failed: %s", toolkit.ResultText(readResult))
 	}
 
-	if got := resultText(readResult); got != "hello world from workflow" {
+	if got := toolkit.ResultText(readResult); got != "hello world from workflow" {
 		t.Errorf("expected 'hello world from workflow', got %q", got)
 	}
 
@@ -854,7 +810,7 @@ func TestCombinedReadWriteEditWorkflow(t *testing.T) {
 	}
 
 	if editResult.IsError {
-		t.Fatalf("edit failed: %s", resultText(editResult))
+		t.Fatalf("edit failed: %s", toolkit.ResultText(editResult))
 	}
 
 	// Step 4: Read the file again to verify the edit.
@@ -865,10 +821,10 @@ func TestCombinedReadWriteEditWorkflow(t *testing.T) {
 	}
 
 	if readResult2.IsError {
-		t.Fatalf("second read failed: %s", resultText(readResult2))
+		t.Fatalf("second read failed: %s", toolkit.ResultText(readResult2))
 	}
 
-	if got := resultText(readResult2); got != "goodbye world from workflow" {
+	if got := toolkit.ResultText(readResult2); got != "goodbye world from workflow" {
 		t.Errorf("expected 'goodbye world from workflow', got %q", got)
 	}
 }

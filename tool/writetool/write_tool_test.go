@@ -28,28 +28,8 @@ import (
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/toolkit"
 )
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	return path
-}
 
 func TestWriteTool_CreateNew(t *testing.T) {
 	dir := t.TempDir()
@@ -64,10 +44,10 @@ func TestWriteTool_CreateNew(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "wrote 11 bytes") {
 		t.Errorf("expected 'wrote 11 bytes' in output, got: %s", text)
 	}
@@ -84,7 +64,7 @@ func TestWriteTool_CreateNew(t *testing.T) {
 
 func TestWriteTool_Overwrite(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "existing.txt", "old content")
+	path := toolkit.WriteTestFile(t, dir, "existing.txt", "old content")
 
 	wt := New()
 	handler := wt.Handler()
@@ -95,7 +75,7 @@ func TestWriteTool_Overwrite(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -121,7 +101,7 @@ func TestWriteTool_CreateParentDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -147,7 +127,7 @@ func TestWriteTool_EmptyContent(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
 	content, err := os.ReadFile(path)
@@ -157,6 +137,64 @@ func TestWriteTool_EmptyContent(t *testing.T) {
 
 	if len(content) != 0 {
 		t.Errorf("expected empty file, got %d bytes", len(content))
+	}
+}
+
+func TestWriteTool_CreateOnly_NewFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.txt")
+
+	wt := New()
+	handler := wt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"content":"data","create_only":true}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read written file: %v", err)
+	}
+
+	if string(content) != "data" {
+		t.Errorf("expected %q, got %q", "data", string(content))
+	}
+}
+
+func TestWriteTool_CreateOnly_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "existing.txt", "original")
+
+	wt := New()
+	handler := wt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"content":"new data","create_only":true}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for create_only with existing file")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "file already exists") {
+		t.Errorf("expected 'file already exists' in output, got: %s", text)
+	}
+
+	// Verify original file was not modified.
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	if string(content) != "original" {
+		t.Errorf("file should not have been modified, got %q", string(content))
 	}
 }
 
@@ -173,7 +211,7 @@ func TestWriteTool_EmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -192,7 +230,7 @@ func TestWriteTool_RelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -211,7 +249,7 @@ func TestWriteTool_MalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -233,7 +271,7 @@ func TestWriteTool_ExceedsMaxWriteBytes(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -265,12 +303,10 @@ func TestWriteTool_ToolDef(t *testing.T) {
 		t.Fatal("expected properties in parameters")
 	}
 
-	if _, ok := props["file_path"]; !ok {
-		t.Error("expected 'file_path' property in parameters")
-	}
-
-	if _, ok := props["content"]; !ok {
-		t.Error("expected 'content' property in parameters")
+	for _, prop := range []string{"file_path", "content", "create_only"} {
+		if _, ok := props[prop]; !ok {
+			t.Errorf("expected %q property in parameters", prop)
+		}
 	}
 }
 
@@ -325,7 +361,7 @@ func TestWriteTool_AllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -365,7 +401,7 @@ func TestWriteTool_Concurrent(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("write %d returned IsError=true: %s", i, resultText(results[i]))
+			t.Errorf("write %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
 		}
 
 		path := filepath.Join(dir, fmt.Sprintf("file%d.txt", i))
@@ -400,8 +436,46 @@ func TestWriteTool_ContextCancel(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
+	}
+}
+
+func TestWriteTool_AtomicWrite_NoTempFilesLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "atomic.txt")
+
+	wt := New()
+	handler := wt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"content":"atomic content"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	// Verify no temp files are left behind.
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("failed to read directory: %v", readErr)
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".atomic-") && strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+
+	content, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("failed to read file: %v", readErr)
+	}
+
+	if string(content) != "atomic content" {
+		t.Errorf("expected %q, got %q", "atomic content", string(content))
 	}
 }

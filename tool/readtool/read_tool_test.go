@@ -28,32 +28,12 @@ import (
 
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
+	"github.com/vogo/vagent/tool/toolkit"
 )
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	return path
-}
 
 func TestReadTool_Success(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello\nworld\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\nworld\n")
 
 	rt := New()
 	handler := rt.Handler()
@@ -64,10 +44,10 @@ func TestReadTool_Success(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "hello\nworld" {
 		t.Errorf("expected %q, got %q", "hello\nworld", got)
 	}
@@ -81,7 +61,7 @@ func TestReadTool_OffsetAndLimit(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line%d", i))
 	}
 
-	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+	path := toolkit.WriteTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
 
 	rt := New()
 	handler := rt.Handler()
@@ -92,10 +72,10 @@ func TestReadTool_OffsetAndLimit(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "line3\nline4\nline5" {
 		t.Errorf("expected %q, got %q", "line3\nline4\nline5", got)
 	}
@@ -109,7 +89,7 @@ func TestReadTool_OffsetOnly(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line%d", i))
 	}
 
-	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+	path := toolkit.WriteTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
 
 	rt := New()
 	handler := rt.Handler()
@@ -120,10 +100,10 @@ func TestReadTool_OffsetOnly(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "line4\nline5" {
 		t.Errorf("expected %q, got %q", "line4\nline5", got)
 	}
@@ -137,7 +117,7 @@ func TestReadTool_LimitOnly(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line%d", i))
 	}
 
-	path := writeTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+	path := toolkit.WriteTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
 
 	rt := New()
 	handler := rt.Handler()
@@ -148,10 +128,10 @@ func TestReadTool_LimitOnly(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "line1\nline2\nline3" {
 		t.Errorf("expected %q, got %q", "line1\nline2\nline3", got)
 	}
@@ -159,7 +139,7 @@ func TestReadTool_LimitOnly(t *testing.T) {
 
 func TestReadTool_OffsetBeyondFileLength(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "line1\nline2\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "line1\nline2\n")
 
 	rt := New()
 	handler := rt.Handler()
@@ -170,10 +150,10 @@ func TestReadTool_OffsetBeyondFileLength(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
@@ -192,7 +172,7 @@ func TestReadTool_FileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -212,7 +192,7 @@ func TestReadTool_DirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "directory") {
 		t.Errorf("expected 'directory' in output, got: %s", text)
 	}
@@ -231,7 +211,7 @@ func TestReadTool_EmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -250,7 +230,7 @@ func TestReadTool_RelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -269,7 +249,7 @@ func TestReadTool_MalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -277,7 +257,7 @@ func TestReadTool_MalformedJSON(t *testing.T) {
 
 func TestReadTool_NegativeOffset(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\n")
 
 	rt := New()
 	handler := rt.Handler()
@@ -291,7 +271,7 @@ func TestReadTool_NegativeOffset(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "offset must be >= 1") {
 		t.Errorf("expected 'offset must be >= 1' in output, got: %s", text)
 	}
@@ -299,7 +279,7 @@ func TestReadTool_NegativeOffset(t *testing.T) {
 
 func TestReadTool_NegativeLimit(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\n")
 
 	rt := New()
 	handler := rt.Handler()
@@ -313,7 +293,7 @@ func TestReadTool_NegativeLimit(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "limit must be >= 1") {
 		t.Errorf("expected 'limit must be >= 1' in output, got: %s", text)
 	}
@@ -324,7 +304,7 @@ func TestReadTool_LargeFileTruncation(t *testing.T) {
 
 	maxBytes := 100
 	content := strings.Repeat("A", 200)
-	path := writeTestFile(t, dir, "large.txt", content)
+	path := toolkit.WriteTestFile(t, dir, "large.txt", content)
 
 	rt := New(WithMaxReadBytes(maxBytes))
 	handler := rt.Handler()
@@ -335,10 +315,10 @@ func TestReadTool_LargeFileTruncation(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "output truncated") {
 		t.Errorf("expected 'output truncated' in output, got: %s", text)
 	}
@@ -364,9 +344,61 @@ func TestReadTool_ContextCancel(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
+	}
+}
+
+func TestReadTool_ShowLineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "alpha\nbeta\ngamma")
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"show_line_numbers":true}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	got := toolkit.ResultText(result)
+	expected := "1\talpha\n2\tbeta\n3\tgamma"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestReadTool_ShowLineNumbersWithOffset(t *testing.T) {
+	dir := t.TempDir()
+
+	var lines []string
+	for i := 1; i <= 5; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+
+	path := toolkit.WriteTestFile(t, dir, "test.txt", strings.Join(lines, "\n"))
+
+	rt := New()
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q,"offset":3,"limit":2,"show_line_numbers":true}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	got := toolkit.ResultText(result)
+	expected := "3\tline3\n4\tline4"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
 	}
 }
 
@@ -396,16 +428,10 @@ func TestReadTool_ToolDef(t *testing.T) {
 		t.Fatal("expected properties in parameters")
 	}
 
-	if _, ok := props["file_path"]; !ok {
-		t.Error("expected 'file_path' property in parameters")
-	}
-
-	if _, ok := props["offset"]; !ok {
-		t.Error("expected 'offset' property in parameters")
-	}
-
-	if _, ok := props["limit"]; !ok {
-		t.Error("expected 'limit' property in parameters")
+	for _, prop := range []string{"file_path", "offset", "limit", "show_line_numbers"} {
+		if _, ok := props[prop]; !ok {
+			t.Errorf("expected %q property in parameters", prop)
+		}
 	}
 }
 
@@ -450,7 +476,7 @@ func TestReadTool_RegisterDuplicate(t *testing.T) {
 func TestReadTool_AllowedDirs(t *testing.T) {
 	dir := t.TempDir()
 	otherDir := t.TempDir()
-	path := writeTestFile(t, otherDir, "secret.txt", "secret data")
+	path := toolkit.WriteTestFile(t, otherDir, "secret.txt", "secret data")
 
 	rt := New(WithAllowedDirs(dir))
 	handler := rt.Handler()
@@ -464,7 +490,7 @@ func TestReadTool_AllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -473,7 +499,7 @@ func TestReadTool_AllowedDirs(t *testing.T) {
 func TestReadTool_AllowedDirsSymlink(t *testing.T) {
 	allowedDir := t.TempDir()
 	outsideDir := t.TempDir()
-	writeTestFile(t, outsideDir, "secret.txt", "secret data")
+	toolkit.WriteTestFile(t, outsideDir, "secret.txt", "secret data")
 
 	symlinkPath := filepath.Join(allowedDir, "escape")
 	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
@@ -494,7 +520,7 @@ func TestReadTool_AllowedDirsSymlink(t *testing.T) {
 		t.Fatal("expected IsError=true for symlink escape")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -507,7 +533,7 @@ func TestReadTool_Concurrent(t *testing.T) {
 
 	paths := make([]string, n)
 	for i := range n {
-		paths[i] = writeTestFile(t, dir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("content%d", i))
+		paths[i] = toolkit.WriteTestFile(t, dir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("content%d", i))
 	}
 
 	rt := New()
@@ -537,11 +563,11 @@ func TestReadTool_Concurrent(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("read %d returned IsError=true: %s", i, resultText(results[i]))
+			t.Errorf("read %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
 		}
 
 		expected := fmt.Sprintf("content%d", i)
-		if got := resultText(results[i]); got != expected {
+		if got := toolkit.ResultText(results[i]); got != expected {
 			t.Errorf("read %d: expected %q, got %q", i, expected, got)
 		}
 	}
@@ -549,7 +575,7 @@ func TestReadTool_Concurrent(t *testing.T) {
 
 func TestReadTool_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "empty.txt", "")
+	path := toolkit.WriteTestFile(t, dir, "empty.txt", "")
 
 	rt := New()
 	handler := rt.Handler()
@@ -560,10 +586,10 @@ func TestReadTool_EmptyFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	got := resultText(result)
+	got := toolkit.ResultText(result)
 	if got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}

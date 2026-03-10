@@ -28,43 +28,8 @@ import (
 	"github.com/vogo/vagent/schema"
 	"github.com/vogo/vagent/tool"
 	"github.com/vogo/vagent/tool/readtool"
+	"github.com/vogo/vagent/tool/toolkit"
 )
-
-// ---------- Helper ----------
-
-func resultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
-}
-
-func writeTestFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	return path
-}
-
-// resolveDir resolves symlinks in a directory path (needed on macOS where
-// /var -> /private/var).
-func resolveDir(t *testing.T, dir string) string {
-	t.Helper()
-
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("failed to resolve dir: %v", err)
-	}
-
-	return resolved
-}
 
 // ---------- Registration Integration Tests ----------
 
@@ -72,7 +37,7 @@ func resolveDir(t *testing.T, dir string) string {
 // execution path: Register -> List -> Get -> Execute through the tool.Registry.
 func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello world")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello world")
 
 	reg := tool.NewRegistry()
 
@@ -106,10 +71,6 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 		t.Errorf("expected name 'file_read', got %q", def.Name)
 	}
 
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
-	}
-
 	if def.Description == "" {
 		t.Error("expected non-empty description")
 	}
@@ -121,10 +82,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != "hello world" {
+	if got := toolkit.ResultText(result); got != "hello world" {
 		t.Errorf("expected 'hello world', got %q", got)
 	}
 }
@@ -151,9 +112,9 @@ func TestRegisterDuplicatePrevented(t *testing.T) {
 // TestRegisterWithAllowedDirs verifies that the AllowedDirs option is correctly
 // applied when executing through the registry.
 func TestRegisterWithAllowedDirs(t *testing.T) {
-	allowedDir := resolveDir(t, t.TempDir())
-	otherDir := resolveDir(t, t.TempDir())
-	path := writeTestFile(t, otherDir, "secret.txt", "secret data")
+	allowedDir := toolkit.ResolveDir(t, t.TempDir())
+	otherDir := toolkit.ResolveDir(t, t.TempDir())
+	path := toolkit.WriteTestFile(t, otherDir, "secret.txt", "secret data")
 
 	reg := tool.NewRegistry()
 
@@ -171,13 +132,13 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
 
 	// Reading from inside allowed dir should succeed.
-	_ = writeTestFile(t, allowedDir, "allowed.txt", "allowed content")
+	_ = toolkit.WriteTestFile(t, allowedDir, "allowed.txt", "allowed content")
 	allowedPath := filepath.Join(allowedDir, "allowed.txt")
 
 	result, err = reg.Execute(context.Background(), "file_read", fmt.Sprintf(`{"file_path":%q}`, allowedPath))
@@ -186,10 +147,10 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != "allowed content" {
+	if got := toolkit.ResultText(result); got != "allowed content" {
 		t.Errorf("expected 'allowed content', got %q", got)
 	}
 }
@@ -202,7 +163,7 @@ func TestReadEntireFile(t *testing.T) {
 	dir := t.TempDir()
 
 	content := "line1\nline2\nline3"
-	path := writeTestFile(t, dir, "full.txt", content)
+	path := toolkit.WriteTestFile(t, dir, "full.txt", content)
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -215,10 +176,10 @@ func TestReadEntireFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != content {
+	if got := toolkit.ResultText(result); got != content {
 		t.Errorf("expected %q, got %q", content, got)
 	}
 }
@@ -233,7 +194,7 @@ func TestReadWithOffsetAndLimit(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line%d", i))
 	}
 
-	path := writeTestFile(t, dir, "lines.txt", strings.Join(lines, "\n"))
+	path := toolkit.WriteTestFile(t, dir, "lines.txt", strings.Join(lines, "\n"))
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -248,10 +209,10 @@ func TestReadWithOffsetAndLimit(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != "line3\nline4\nline5" {
+	if got := toolkit.ResultText(result); got != "line3\nline4\nline5" {
 		t.Errorf("expected 'line3\\nline4\\nline5', got %q", got)
 	}
 }
@@ -260,7 +221,7 @@ func TestReadWithOffsetAndLimit(t *testing.T) {
 // TextResult (not an error).
 func TestReadEmptyFile(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "empty.txt", "")
+	path := toolkit.WriteTestFile(t, dir, "empty.txt", "")
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -273,10 +234,10 @@ func TestReadEmptyFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != "" {
+	if got := toolkit.ResultText(result); got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
 }
@@ -285,7 +246,7 @@ func TestReadEmptyFile(t *testing.T) {
 // returns an empty TextResult (not an error).
 func TestReadOffsetBeyondEnd(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "short.txt", "line1\nline2")
+	path := toolkit.WriteTestFile(t, dir, "short.txt", "line1\nline2")
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -299,10 +260,10 @@ func TestReadOffsetBeyondEnd(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	if got := resultText(result); got != "" {
+	if got := toolkit.ResultText(result); got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
 }
@@ -313,7 +274,7 @@ func TestReadLargeFileTruncation(t *testing.T) {
 	dir := t.TempDir()
 	maxBytes := 100
 	content := strings.Repeat("A", 200)
-	path := writeTestFile(t, dir, "large.txt", content)
+	path := toolkit.WriteTestFile(t, dir, "large.txt", content)
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg, readtool.WithMaxReadBytes(maxBytes)); err != nil {
@@ -326,10 +287,10 @@ func TestReadLargeFileTruncation(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", resultText(result))
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "output truncated") {
 		t.Errorf("expected 'output truncated' in output, got: %s", text)
 	}
@@ -359,7 +320,7 @@ func TestReadFileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true for non-existent file")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -384,7 +345,7 @@ func TestReadDirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=true for directory path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "directory") {
 		t.Errorf("expected 'directory' in output, got: %s", text)
 	}
@@ -406,7 +367,7 @@ func TestReadEmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -429,7 +390,7 @@ func TestReadRelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true for relative path")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -451,7 +412,7 @@ func TestReadMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -460,7 +421,7 @@ func TestReadMalformedJSON(t *testing.T) {
 // TestReadNegativeOffset verifies that a negative offset returns an ErrorResult.
 func TestReadNegativeOffset(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\n")
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -477,7 +438,7 @@ func TestReadNegativeOffset(t *testing.T) {
 		t.Fatal("expected IsError=true for negative offset")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "offset must be >= 1") {
 		t.Errorf("expected 'offset must be >= 1' in output, got: %s", text)
 	}
@@ -486,7 +447,7 @@ func TestReadNegativeOffset(t *testing.T) {
 // TestReadNegativeLimit verifies that a negative limit returns an ErrorResult.
 func TestReadNegativeLimit(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "test.txt", "hello\n")
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\n")
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -503,7 +464,7 @@ func TestReadNegativeLimit(t *testing.T) {
 		t.Fatal("expected IsError=true for negative limit")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "limit must be >= 1") {
 		t.Errorf("expected 'limit must be >= 1' in output, got: %s", text)
 	}
@@ -529,7 +490,7 @@ func TestReadContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -538,9 +499,9 @@ func TestReadContextCancellation(t *testing.T) {
 // TestReadSymlinkOutsideAllowedDirs verifies that a symlink pointing outside
 // allowed directories is rejected.
 func TestReadSymlinkOutsideAllowedDirs(t *testing.T) {
-	allowedDir := resolveDir(t, t.TempDir())
-	outsideDir := resolveDir(t, t.TempDir())
-	writeTestFile(t, outsideDir, "secret.txt", "secret data")
+	allowedDir := toolkit.ResolveDir(t, t.TempDir())
+	outsideDir := toolkit.ResolveDir(t, t.TempDir())
+	toolkit.WriteTestFile(t, outsideDir, "secret.txt", "secret data")
 
 	symlinkPath := filepath.Join(allowedDir, "escape")
 	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
@@ -564,7 +525,7 @@ func TestReadSymlinkOutsideAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for symlink escape")
 	}
 
-	text := resultText(result)
+	text := toolkit.ResultText(result)
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -584,11 +545,6 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Errorf("expected name 'file_read', got %q", def.Name)
 	}
 
-	// Verify source.
-	if def.Source != schema.ToolSourceLocal {
-		t.Errorf("expected source %q, got %q", schema.ToolSourceLocal, def.Source)
-	}
-
 	// Verify parameters structure.
 	params, ok := def.Parameters.(map[string]any)
 	if !ok {
@@ -605,7 +561,7 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Fatal("expected 'properties' in parameters")
 	}
 
-	for _, prop := range []string{"file_path", "offset", "limit"} {
+	for _, prop := range []string{"file_path", "offset", "limit", "show_line_numbers"} {
 		if _, ok := props[prop]; !ok {
 			t.Errorf("expected %q property in parameters", prop)
 		}
@@ -643,7 +599,7 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 // subsequent successful reads through the same registry.
 func TestReadErrorThenSuccess(t *testing.T) {
 	dir := t.TempDir()
-	path := writeTestFile(t, dir, "good.txt", "good content")
+	path := toolkit.WriteTestFile(t, dir, "good.txt", "good content")
 
 	reg := tool.NewRegistry()
 	if err := readtool.Register(reg); err != nil {
@@ -669,10 +625,10 @@ func TestReadErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second read to succeed, got error: %s", resultText(result2))
+		t.Fatalf("expected second read to succeed, got error: %s", toolkit.ResultText(result2))
 	}
 
-	if got := resultText(result2); got != "good content" {
+	if got := toolkit.ResultText(result2); got != "good content" {
 		t.Errorf("expected 'good content', got %q", got)
 	}
 }
