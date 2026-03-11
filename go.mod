@@ -2,7 +2,7 @@ module github.com/vogo/vagent
 
 go 1.26.0
 
-require github.com/vogo/aimodel v0.0.0-20260306095411-519cea96f7ea
+require github.com/vogo/aimodel v0.1.0
 
 require gopkg.in/yaml.v3 v3.0.1
 

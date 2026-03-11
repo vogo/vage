@@ -1,0 +1,159 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v0.1.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (only generate changelog, do not create release)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: ${{ inputs.version }}. Expected format: v0.1.0"
+            exit 1
+          fi
+
+      - name: Check tag does not exist
+        run: |
+          if git rev-parse "${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install mvdan.cc/gofumpt@latest
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          go install github.com/vogo/license-header-checker/cmd/license-header-checker@latest
+          make build
+
+      - name: Determine previous tag
+        id: prev_tag
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, changelog will include all commits."
+          else
+            echo "Previous tag: ${PREV_TAG}"
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG="${{ steps.prev_tag.outputs.tag }}"
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+
+          # Categorize commits
+          declare -A categories
+          categories=(
+            ["feat"]="Features"
+            ["fix"]="Bug Fixes"
+            ["refactor"]="Refactoring"
+            ["docs"]="Documentation"
+            ["test"]="Tests"
+            ["build"]="Build"
+            ["ci"]="CI"
+            ["chore"]="Chores"
+          )
+
+          has_content=false
+
+          for prefix in feat fix refactor docs test build ci chore; do
+            commits=$(git log "$RANGE" --oneline --grep="^${prefix}" --format="- %s (%h)" 2>/dev/null || true)
+            if [ -n "$commits" ]; then
+              echo "### ${categories[$prefix]}" >> changelog.md
+              echo "" >> changelog.md
+              echo "$commits" >> changelog.md
+              echo "" >> changelog.md
+              has_content=true
+            fi
+          done
+
+          # Collect uncategorized commits
+          all_categorized=$(for prefix in feat fix refactor docs test build ci chore; do
+            git log "$RANGE" --oneline --grep="^${prefix}" --format="%H" 2>/dev/null || true
+          done | sort -u)
+
+          all_commits=$(git log "$RANGE" --format="%H" 2>/dev/null || true)
+
+          uncategorized=""
+          for hash in $all_commits; do
+            if ! echo "$all_categorized" | grep -q "$hash"; then
+              msg=$(git log -1 --format="- %s (%h)" "$hash")
+              uncategorized="${uncategorized}${msg}\n"
+            fi
+          done
+
+          if [ -n "$uncategorized" ]; then
+            echo "### Other Changes" >> changelog.md
+            echo "" >> changelog.md
+            echo -e "$uncategorized" >> changelog.md
+            echo "" >> changelog.md
+            has_content=true
+          fi
+
+          if [ "$has_content" = false ]; then
+            echo "No changes since last release." >> changelog.md
+          fi
+
+          # Summary
+          COMMIT_COUNT=$(git rev-list --count "$RANGE" 2>/dev/null || echo "0")
+          FILE_COUNT=$(git diff --name-only "$RANGE" 2>/dev/null | wc -l | tr -d ' ')
+          CONTRIBUTORS=$(git log "$RANGE" --format="%aN" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+
+          echo "" >> changelog.md
+          echo "---" >> changelog.md
+          echo "**${COMMIT_COUNT}** commits, **${FILE_COUNT}** files changed, **${CONTRIBUTORS}** contributors" >> changelog.md
+
+          echo "::group::Changelog"
+          cat changelog.md
+          echo "::endgroup::"
+
+      - name: Create release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+          gh release create "${{ inputs.version }}" \
+            --title "${{ inputs.version }}" \
+            --notes-file changelog.md
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "::notice::Dry run complete. No tag or release was created."
+          echo "## Changelog Preview" >> "$GITHUB_STEP_SUMMARY"
+          cat changelog.md >> "$GITHUB_STEP_SUMMARY"
