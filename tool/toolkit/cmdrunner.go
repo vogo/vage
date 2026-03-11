@@ -70,12 +70,9 @@ func RunCommand(cmd *exec.Cmd, cancel context.CancelFunc, parentCtx, childCtx co
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = io.Copy(&stderrBuf, stderrPipe)
-	}()
+	})
 
 	limitReader := &io.LimitedReader{R: stdoutPipe, N: int64(maxOutputBytes) + 1}
 

@@ -106,9 +106,7 @@ func ExecuteDynamicSpawn(ctx context.Context, dsn *DynamicSpawnNode, req *schema
 
 	for i := range children {
 		child := &children[i]
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			childReq := &schema.RunRequest{
 				Messages:  output.Messages,
 				SessionID: req.SessionID,
@@ -117,7 +115,7 @@ func ExecuteDynamicSpawn(ctx context.Context, dsn *DynamicSpawnNode, req *schema
 			}
 			resp, err := child.Runner.Run(childCtx, childReq)
 			resultCh <- childResult{id: child.ID, resp: resp, err: err}
-		}()
+		})
 	}
 
 	go func() {

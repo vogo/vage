@@ -354,8 +354,21 @@ func TestGlobMaxResults(t *testing.T) {
 	text := toolkit.ResultText(result)
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 
-	if len(lines) > 3 {
-		t.Errorf("expected at most 3 results, got %d", len(lines))
+	// Filter out truncation notice lines (starting with "...").
+	var fileLines []string
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "...") {
+			fileLines = append(fileLines, line)
+		}
+	}
+
+	if len(fileLines) > 3 {
+		t.Errorf("expected at most 3 results, got %d", len(fileLines))
+	}
+
+	// Verify truncation notice is present since we have more files than maxResults.
+	if !strings.Contains(text, "results limited to") {
+		t.Error("expected truncation notice in output")
 	}
 }
 
