@@ -37,6 +37,12 @@ const (
 
 	EventTokenBudgetExhausted = "token_budget_exhausted"
 
+	// Orchestration lifecycle events.
+	EventPhaseStart    = "phase_start"
+	EventPhaseEnd      = "phase_end"
+	EventSubAgentStart = "sub_agent_start"
+	EventSubAgentEnd   = "sub_agent_end"
+
 	// Skill lifecycle events.
 	EventSkillDiscover     = "skill_discover"
 	EventSkillActivate     = "skill_activate"
@@ -163,6 +169,45 @@ type LLMCallErrorData struct {
 }
 
 func (LLMCallErrorData) eventData() {}
+
+// PhaseStartData carries information when an orchestration phase begins.
+type PhaseStartData struct {
+	Phase      string `json:"phase"`       // e.g. "explore", "plan", "dispatch"
+	PhaseIndex int    `json:"phase_index"` // 1-based index
+	TotalPhase int    `json:"total_phase"` // total number of phases
+}
+
+func (PhaseStartData) eventData() {}
+
+// PhaseEndData carries information when an orchestration phase completes.
+type PhaseEndData struct {
+	Phase    string `json:"phase"`
+	Duration int64  `json:"duration_ms"`
+}
+
+func (PhaseEndData) eventData() {}
+
+// SubAgentStartData carries information when a sub-agent begins execution.
+type SubAgentStartData struct {
+	AgentName   string `json:"agent_name"`
+	StepID      string `json:"step_id,omitempty"`     // for plan mode
+	Description string `json:"description,omitempty"` // step description
+	StepIndex   int    `json:"step_index,omitempty"`  // 1-based step index
+	TotalSteps  int    `json:"total_steps,omitempty"` // total steps in plan
+}
+
+func (SubAgentStartData) eventData() {}
+
+// SubAgentEndData carries information when a sub-agent finishes execution.
+type SubAgentEndData struct {
+	AgentName  string `json:"agent_name"`
+	StepID     string `json:"step_id,omitempty"`
+	Duration   int64  `json:"duration_ms"`
+	ToolCalls  int    `json:"tool_calls"`
+	TokensUsed int    `json:"tokens_used"`
+}
+
+func (SubAgentEndData) eventData() {}
 
 // SkillDiscoverData carries information about skill discovery.
 type SkillDiscoverData struct {
