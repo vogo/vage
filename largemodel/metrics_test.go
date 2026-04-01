@@ -20,6 +20,10 @@ package largemodel
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/vogo/aimodel"
@@ -200,6 +204,173 @@ func TestMetricsMiddleware_Stream_Success(t *testing.T) {
 
 	if !endData.Stream {
 		t.Error("endData.Stream should be true")
+	}
+}
+
+func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		chunks := []string{
+			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}`,
+			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+		}
+
+		for _, chunk := range chunks {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+			flusher.Flush()
+		}
+
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	c, err := aimodel.NewClient(aimodel.WithAPIKey("sk-test"), aimodel.WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	var events []schema.Event
+	dispatch := func(_ context.Context, e schema.Event) {
+		events = append(events, e)
+	}
+
+	mw := NewMetricsMiddleware(dispatch)
+	wrapped := mw.Wrap(c)
+
+	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
+		Model:    "gpt-4o",
+		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream: %v", err)
+	}
+
+	// Only EventLLMCallStart should have fired so far.
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event before close, got %d", len(events))
+	}
+
+	// Drain the stream to populate usage.
+	for {
+		_, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			t.Fatalf("Recv: %v", recvErr)
+		}
+	}
+
+	_ = stream.Close()
+
+	// Now EventLLMCallEnd should have been emitted.
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events after close, got %d", len(events))
+	}
+
+	if events[1].Type != schema.EventLLMCallEnd {
+		t.Errorf("events[1].Type = %q, want %q", events[1].Type, schema.EventLLMCallEnd)
+	}
+
+	endData, ok := events[1].Data.(schema.LLMCallEndData)
+	if !ok {
+		t.Fatalf("events[1].Data type = %T, want LLMCallEndData", events[1].Data)
+	}
+
+	if !endData.Stream {
+		t.Error("endData.Stream should be true")
+	}
+
+	if endData.PromptTokens != 10 {
+		t.Errorf("endData.PromptTokens = %d, want 10", endData.PromptTokens)
+	}
+
+	if endData.CompletionTokens != 5 {
+		t.Errorf("endData.CompletionTokens = %d, want 5", endData.CompletionTokens)
+	}
+
+	if endData.TotalTokens != 15 {
+		t.Errorf("endData.TotalTokens = %d, want 15", endData.TotalTokens)
+	}
+}
+
+func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		// Stream without usage data in any chunk.
+		chunks := []string{
+			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}`,
+			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		}
+
+		for _, chunk := range chunks {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+			flusher.Flush()
+		}
+
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	c, err := aimodel.NewClient(aimodel.WithAPIKey("sk-test"), aimodel.WithBaseURL(srv.URL))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	var events []schema.Event
+	dispatch := func(_ context.Context, e schema.Event) {
+		events = append(events, e)
+	}
+
+	mw := NewMetricsMiddleware(dispatch)
+	wrapped := mw.Wrap(c)
+
+	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
+		Model:    "gpt-4o",
+		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream: %v", err)
+	}
+
+	for {
+		_, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			t.Fatalf("Recv: %v", recvErr)
+		}
+	}
+
+	_ = stream.Close()
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	endData, ok := events[1].Data.(schema.LLMCallEndData)
+	if !ok {
+		t.Fatalf("events[1].Data type = %T, want LLMCallEndData", events[1].Data)
+	}
+
+	if !endData.Stream {
+		t.Error("endData.Stream should be true")
+	}
+
+	// Without usage in stream, tokens should be zero.
+	if endData.PromptTokens != 0 {
+		t.Errorf("endData.PromptTokens = %d, want 0", endData.PromptTokens)
+	}
+
+	if endData.TotalTokens != 0 {
+		t.Errorf("endData.TotalTokens = %d, want 0", endData.TotalTokens)
 	}
 }
 

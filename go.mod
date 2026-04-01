@@ -2,7 +2,7 @@ module github.com/vogo/vage
 
 go 1.26.0
 
-require github.com/vogo/aimodel v0.1.0
+require github.com/vogo/aimodel v0.2.0
 
 require gopkg.in/yaml.v3 v3.0.1
 

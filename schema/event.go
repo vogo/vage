@@ -181,9 +181,12 @@ func (PhaseStartData) eventData() {}
 
 // PhaseEndData carries information when an orchestration phase completes.
 type PhaseEndData struct {
-	Phase    string `json:"phase"`
-	Duration int64  `json:"duration_ms"`
-	Summary  string `json:"summary,omitempty"` // optional phase summary (e.g., plan overview)
+	Phase            string `json:"phase"`
+	Duration         int64  `json:"duration_ms"`
+	Summary          string `json:"summary,omitempty"`           // optional phase summary (e.g., plan overview)
+	ToolCalls        int    `json:"tool_calls,omitempty"`        // total tool calls in the phase
+	PromptTokens     int    `json:"prompt_tokens,omitempty"`     // total prompt tokens in the phase
+	CompletionTokens int    `json:"completion_tokens,omitempty"` // total completion tokens in the phase
 }
 
 func (PhaseEndData) eventData() {}
@@ -201,11 +204,13 @@ func (SubAgentStartData) eventData() {}
 
 // SubAgentEndData carries information when a sub-agent finishes execution.
 type SubAgentEndData struct {
-	AgentName  string `json:"agent_name"`
-	StepID     string `json:"step_id,omitempty"`
-	Duration   int64  `json:"duration_ms"`
-	ToolCalls  int    `json:"tool_calls"`
-	TokensUsed int    `json:"tokens_used"`
+	AgentName        string `json:"agent_name"`
+	StepID           string `json:"step_id,omitempty"`
+	Duration         int64  `json:"duration_ms"`
+	ToolCalls        int    `json:"tool_calls"`
+	TokensUsed       int    `json:"tokens_used"`                 // kept for backward compat (prompt + completion)
+	PromptTokens     int    `json:"prompt_tokens,omitempty"`     // prompt tokens used by this sub-agent
+	CompletionTokens int    `json:"completion_tokens,omitempty"` // completion tokens used by this sub-agent
 }
 
 func (SubAgentEndData) eventData() {}

@@ -80,4 +80,77 @@ func TestEventData_SealedInterface(t *testing.T) {
 	var _ EventData = IterationStartData{}
 	var _ EventData = AgentEndData{}
 	var _ EventData = ErrorData{}
+	var _ EventData = LLMCallStartData{}
+	var _ EventData = LLMCallEndData{}
+	var _ EventData = LLMCallErrorData{}
+	var _ EventData = TokenBudgetExhaustedData{}
+	var _ EventData = PhaseStartData{}
+	var _ EventData = PhaseEndData{}
+	var _ EventData = SubAgentStartData{}
+	var _ EventData = SubAgentEndData{}
+	var _ EventData = SkillDiscoverData{}
+	var _ EventData = SkillActivateData{}
+	var _ EventData = SkillDeactivateData{}
+	var _ EventData = SkillResourceLoadData{}
+}
+
+func TestPhaseEndData_NewFields(t *testing.T) {
+	d := PhaseEndData{
+		Phase:            "explore",
+		Duration:         1500,
+		Summary:          "gathered context",
+		ToolCalls:        5,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+	}
+
+	if d.ToolCalls != 5 {
+		t.Errorf("ToolCalls = %d, want 5", d.ToolCalls)
+	}
+	if d.PromptTokens != 100 {
+		t.Errorf("PromptTokens = %d, want 100", d.PromptTokens)
+	}
+	if d.CompletionTokens != 50 {
+		t.Errorf("CompletionTokens = %d, want 50", d.CompletionTokens)
+	}
+
+	e := NewEvent(EventPhaseEnd, "a", "s", d)
+	got, ok := e.Data.(PhaseEndData)
+	if !ok {
+		t.Fatalf("Data type = %T, want PhaseEndData", e.Data)
+	}
+	if got.Phase != "explore" || got.ToolCalls != 5 {
+		t.Errorf("unexpected data: %+v", got)
+	}
+}
+
+func TestSubAgentEndData_NewFields(t *testing.T) {
+	d := SubAgentEndData{
+		AgentName:        "coder",
+		StepID:           "step-1",
+		Duration:         2000,
+		ToolCalls:        3,
+		TokensUsed:       150,
+		PromptTokens:     100,
+		CompletionTokens: 50,
+	}
+
+	if d.PromptTokens != 100 {
+		t.Errorf("PromptTokens = %d, want 100", d.PromptTokens)
+	}
+	if d.CompletionTokens != 50 {
+		t.Errorf("CompletionTokens = %d, want 50", d.CompletionTokens)
+	}
+	if d.TokensUsed != 150 {
+		t.Errorf("TokensUsed = %d, want 150", d.TokensUsed)
+	}
+
+	e := NewEvent(EventSubAgentEnd, "a", "s", d)
+	got, ok := e.Data.(SubAgentEndData)
+	if !ok {
+		t.Fatalf("Data type = %T, want SubAgentEndData", e.Data)
+	}
+	if got.AgentName != "coder" || got.PromptTokens != 100 {
+		t.Errorf("unexpected data: %+v", got)
+	}
 }

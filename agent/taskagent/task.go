@@ -910,14 +910,23 @@ func (a *Agent) runStreamLoop(
 			}
 		}
 
+		// Read actual usage from stream before closing (populated from final chunk).
+		streamUsage := stream.Usage()
+
 		_ = stream.Close()
 
-		// Estimate token usage from stream bytes (4 bytes per token heuristic).
-		estimatedTokens := (streamBytes + 3) / 4
-		if estimatedTokens < 1 && streamBytes > 0 {
-			estimatedTokens = 1
+		if streamUsage != nil {
+			rc.totalUsage.Add(streamUsage)
+			rc.tracker.Add(streamUsage.TotalTokens)
+		} else {
+			// Estimate token usage from stream bytes (4 bytes per token heuristic).
+			estimatedTokens := (streamBytes + 3) / 4
+			if estimatedTokens < 1 && streamBytes > 0 {
+				estimatedTokens = 1
+			}
+
+			rc.tracker.Add(estimatedTokens)
 		}
-		rc.tracker.Add(estimatedTokens)
 
 		rc.lastMsg = accumulated
 		messages = append(messages, accumulated)

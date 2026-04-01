@@ -88,13 +88,11 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 				Stream:   true,
 			}))
 
-			// Duration measures stream connection setup only, not total streaming time.
 			start := time.Now()
 
 			s, err := next.ChatCompletionStream(ctx, req)
-			duration := time.Since(start).Milliseconds()
-
 			if err != nil {
+				duration := time.Since(start).Milliseconds()
 				m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallError, "", "", schema.LLMCallErrorData{
 					Model:    req.Model,
 					Duration: duration,
@@ -105,15 +103,23 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 				return nil, err
 			}
 
-			// Token usage is not available at stream-open time; consumers should
-			// derive token counts from the final stream chunk if needed.
-			m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallEnd, "", "", schema.LLMCallEndData{
-				Model:    req.Model,
-				Duration: duration,
-				Stream:   true,
-			}))
+			// Return a wrapped stream that emits EventLLMCallEnd with usage on close.
+			return aimodel.WrapStream(s, func(usage *aimodel.Usage) {
+				duration := time.Since(start).Milliseconds()
+				data := schema.LLMCallEndData{
+					Model:    req.Model,
+					Duration: duration,
+					Stream:   true,
+				}
 
-			return s, nil
+				if usage != nil {
+					data.PromptTokens = usage.PromptTokens
+					data.CompletionTokens = usage.CompletionTokens
+					data.TotalTokens = usage.TotalTokens
+				}
+
+				m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallEnd, "", "", data))
+			}), nil
 		},
 	}
 }
