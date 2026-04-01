@@ -183,6 +183,7 @@ func (PhaseStartData) eventData() {}
 type PhaseEndData struct {
 	Phase    string `json:"phase"`
 	Duration int64  `json:"duration_ms"`
+	Summary  string `json:"summary,omitempty"` // optional phase summary (e.g., plan overview)
 }
 
 func (PhaseEndData) eventData() {}
