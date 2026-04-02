@@ -48,6 +48,9 @@ const (
 	EventSkillActivate     = "skill_activate"
 	EventSkillDeactivate   = "skill_deactivate"
 	EventSkillResourceLoad = "skill_resource_load"
+
+	// Interaction events.
+	EventPendingInteraction = "pending_interaction"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -247,6 +250,15 @@ type SkillResourceLoadData struct {
 }
 
 func (SkillResourceLoadData) eventData() {}
+
+// PendingInteractionData carries information about a pending user interaction.
+type PendingInteractionData struct {
+	InteractionID  string `json:"interaction_id"`
+	Question       string `json:"question"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+func (PendingInteractionData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
