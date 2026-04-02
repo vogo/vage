@@ -52,6 +52,18 @@ func resolveFindCommand() (string, bool, error) {
 	return findCmdPath, findHasPrintf, findCmdErr
 }
 
+// defaultExcludeDirs lists directories that are excluded from glob results by default.
+// These are version-control internals, dependency caches, and build artifacts that
+// almost never contain files the caller is looking for.
+var defaultExcludeDirs = []string{
+	".git",
+	".svn",
+	".hg",
+	"node_modules",
+	"__pycache__",
+	".DS_Store",
+}
+
 func buildGlobCommand(ctx context.Context, dir, pattern string) (*exec.Cmd, error) {
 	cmdPath, hasPrintf, err := resolveFindCommand()
 	if err != nil {
@@ -60,19 +72,40 @@ func buildGlobCommand(ctx context.Context, dir, pattern string) (*exec.Cmd, erro
 
 	fullPattern := filepath.Join(dir, pattern)
 
+	// Build exclusion arguments: -not -path '*/<dir>/*' for each default exclude dir.
+	excludeArgs := buildExcludeArgs()
+
 	if hasPrintf {
 		// GNU find: -printf outputs "mtime_epoch\tpath\n" so Go can sort
 		// by mtime without extra stat calls.
-		cmd := exec.CommandContext(ctx, cmdPath, dir, "-path", fullPattern, "-type", "f",
-			"-printf", "%T@\t%p\n")
+		args := []string{dir}
+		args = append(args, excludeArgs...)
+		args = append(args, "-path", fullPattern, "-type", "f", "-printf", "%T@\t%p\n")
+
+		cmd := exec.CommandContext(ctx, cmdPath, args...)
 
 		return cmd, nil
 	}
 
 	// BSD find (macOS): no -printf, output plain paths.
-	cmd := exec.CommandContext(ctx, cmdPath, dir, "-path", fullPattern, "-type", "f")
+	args := []string{dir}
+	args = append(args, excludeArgs...)
+	args = append(args, "-path", fullPattern, "-type", "f")
+
+	cmd := exec.CommandContext(ctx, cmdPath, args...)
 
 	return cmd, nil
+}
+
+// buildExcludeArgs generates find arguments to exclude default directories.
+func buildExcludeArgs() []string {
+	var args []string
+
+	for _, d := range defaultExcludeDirs {
+		args = append(args, "-not", "-path", fmt.Sprintf("*/%s/*", d))
+	}
+
+	return args
 }
 
 func setProcAttr(cmd *exec.Cmd) {

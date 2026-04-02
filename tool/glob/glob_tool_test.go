@@ -575,6 +575,58 @@ func TestGlobTool_WorkingDirFallback(t *testing.T) {
 	}
 }
 
+func TestGlobTool_ExcludesHiddenDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create files in normal dirs and in .git-like hidden dirs.
+	createTempFiles(t, dir, []string{
+		"src/main.go",
+		"src/util.go",
+		".git/objects/abc123",
+		".git/refs/heads/main",
+		"node_modules/pkg/index.js",
+		".svn/entries",
+	})
+
+	gt := New()
+	handler := gt.Handler()
+
+	args, _ := json.Marshal(map[string]string{"pattern": "**/*", "path": dir})
+
+	result, err := handler(context.Background(), "glob", string(args))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(result))
+	}
+
+	text := resultText(result)
+
+	// Normal files should be present.
+	if !strings.Contains(text, "main.go") {
+		t.Errorf("expected main.go in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "util.go") {
+		t.Errorf("expected util.go in output, got: %s", text)
+	}
+
+	// Hidden/excluded directory files should NOT be present.
+	if strings.Contains(text, ".git/") {
+		t.Errorf("did not expect .git files in output, got: %s", text)
+	}
+
+	if strings.Contains(text, "node_modules/") {
+		t.Errorf("did not expect node_modules files in output, got: %s", text)
+	}
+
+	if strings.Contains(text, ".svn/") {
+		t.Errorf("did not expect .svn files in output, got: %s", text)
+	}
+}
+
 func TestGlobTool_NonexistentPath(t *testing.T) {
 	gt := New()
 	handler := gt.Handler()

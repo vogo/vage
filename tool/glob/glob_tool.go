@@ -213,9 +213,31 @@ func (gt *GlobTool) Handler() tool.ToolHandler {
 }
 
 // execute runs the glob command and returns the result.
+// In git repositories, it prefers "git ls-files" which automatically respects
+// .gitignore rules. Falls back to platform-specific find/PowerShell otherwise.
 func (gt *GlobTool) execute(parentCtx context.Context, dir, pattern string) (toolkit.RunResult, error) {
 	childCtx, cancel := context.WithTimeout(parentCtx, gt.timeout)
 	defer cancel()
+
+	// Try git ls-files first if inside a git repo.
+	if isGitRepo(dir) {
+		if cmd := buildGitCommand(childCtx, dir, pattern); cmd != nil {
+			cmd.Dir = dir
+
+			setProcAttr(cmd)
+			setCancelFunc(cmd)
+
+			result, err := toolkit.RunCommand(cmd, cancel, parentCtx, childCtx, gt.maxOutputBytes, gt.timeout)
+			if err == nil && result.ExitCode == 0 {
+				// git ls-files returns relative paths; convert to absolute.
+				result.Stdout = gt.toAbsolutePaths(dir, result.Stdout)
+
+				return result, nil
+			}
+
+			// git ls-files failed — fall through to find/PowerShell.
+		}
+	}
 
 	cmd, err := buildGlobCommand(childCtx, dir, pattern)
 	if err != nil {
@@ -241,6 +263,28 @@ func (gt *GlobTool) execute(parentCtx context.Context, dir, pattern string) (too
 	}
 
 	return result, nil
+}
+
+// toAbsolutePaths converts newline-separated relative paths to absolute paths.
+func (gt *GlobTool) toAbsolutePaths(dir, output string) string {
+	lines := strings.Split(output, "\n")
+
+	var result []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if filepath.IsAbs(line) {
+			result = append(result, line)
+		} else {
+			result = append(result, filepath.Join(dir, line))
+		}
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // containsDotDot checks if a pattern contains ".." path components.
