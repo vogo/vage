@@ -76,6 +76,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 				PromptTokens:     resp.Usage.PromptTokens,
 				CompletionTokens: resp.Usage.CompletionTokens,
 				TotalTokens:      resp.Usage.TotalTokens,
+				CacheReadTokens:  resp.Usage.CacheReadTokens,
 			}))
 
 			return resp, nil
@@ -116,6 +117,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 					data.PromptTokens = usage.PromptTokens
 					data.CompletionTokens = usage.CompletionTokens
 					data.TotalTokens = usage.TotalTokens
+					data.CacheReadTokens = usage.CacheReadTokens
 				}
 
 				m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallEnd, "", "", data))

@@ -158,6 +158,7 @@ type LLMCallEndData struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
 	Stream           bool   `json:"stream"`
 }
 
@@ -190,6 +191,7 @@ type PhaseEndData struct {
 	ToolCalls        int    `json:"tool_calls,omitempty"`        // total tool calls in the phase
 	PromptTokens     int    `json:"prompt_tokens,omitempty"`     // total prompt tokens in the phase
 	CompletionTokens int    `json:"completion_tokens,omitempty"` // total completion tokens in the phase
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"` // total cache-read tokens in the phase
 }
 
 func (PhaseEndData) eventData() {}
@@ -214,6 +216,7 @@ type SubAgentEndData struct {
 	TokensUsed       int    `json:"tokens_used"`                 // kept for backward compat (prompt + completion)
 	PromptTokens     int    `json:"prompt_tokens,omitempty"`     // prompt tokens used by this sub-agent
 	CompletionTokens int    `json:"completion_tokens,omitempty"` // completion tokens used by this sub-agent
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"` // cache-read tokens used by this sub-agent
 }
 
 func (SubAgentEndData) eventData() {}

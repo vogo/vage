@@ -931,6 +931,7 @@ func (a *Agent) runStreamLoop(
 				PromptTokens:     streamUsage.PromptTokens,
 				CompletionTokens: streamUsage.CompletionTokens,
 				TotalTokens:      streamUsage.TotalTokens,
+				CacheReadTokens:  streamUsage.CacheReadTokens,
 				Stream:           true,
 			}))
 		} else {
