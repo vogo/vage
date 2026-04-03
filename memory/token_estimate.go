@@ -25,6 +25,21 @@ import (
 // Implementations can use simple heuristics or real tokenizers depending on accuracy needs.
 type TokenEstimator func(msg schema.Message) int
 
+// EstimateTextTokens returns the estimated token count for a plain text string.
+// Uses the same heuristic as DefaultTokenEstimator: len(text) / 4.
+func EstimateTextTokens(text string) int {
+	if len(text) == 0 {
+		return 0
+	}
+
+	tokens := len(text) / 4
+	if tokens == 0 {
+		tokens = 1
+	}
+
+	return tokens
+}
+
 // DefaultTokenEstimator returns an approximate token count for a message.
 // Uses a simple heuristic: len(text) / 4, with a minimum of 1 for non-empty content.
 //

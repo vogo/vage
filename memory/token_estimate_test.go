@@ -24,6 +24,32 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
+func TestEstimateTextTokens(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected int
+	}{
+		{name: "empty", text: "", expected: 0},
+		{name: "single char", text: "a", expected: 1},
+		{name: "3 chars", text: "abc", expected: 1},
+		{name: "4 chars", text: "abcd", expected: 1},
+		{name: "5 chars", text: "abcde", expected: 1},
+		{name: "8 chars", text: "abcdefgh", expected: 2},
+		{name: "40 chars", text: strings.Repeat("a", 40), expected: 10},
+		{name: "100 chars", text: strings.Repeat("x", 100), expected: 25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EstimateTextTokens(tt.text)
+			if got != tt.expected {
+				t.Errorf("EstimateTextTokens(%q) = %d, want %d", tt.text, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestEstimateTokens(t *testing.T) {
 	tests := []struct {
 		name     string
