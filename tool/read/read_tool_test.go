@@ -593,6 +593,69 @@ func TestReadTool_Concurrent(t *testing.T) {
 	}
 }
 
+func TestReadTool_ReadTrackerRecords(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "hello\n")
+
+	tracker := toolkit.NewMemoryReadTracker(0)
+	rt := New(WithReadTracker(tracker))
+	handler := rt.Handler()
+
+	// Before reading, tracker should not have the file.
+	cleanedPath, err := toolkit.ValidatePath("test", path, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tracker.HasRead(cleanedPath) {
+		t.Error("expected HasRead to return false before reading")
+	}
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	// After reading, tracker should have the file.
+	if !tracker.HasRead(cleanedPath) {
+		t.Error("expected HasRead to return true after reading")
+	}
+}
+
+func TestReadTool_ReadTrackerNotCalledForDir(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a file so the directory is not empty.
+	toolkit.WriteTestFile(t, dir, "file.txt", "content")
+
+	tracker := toolkit.NewMemoryReadTracker(0)
+	rt := New(WithReadTracker(tracker))
+	handler := rt.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(`{"file_path":%q}`, dir))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+
+	// Directory listing should not record a read.
+	cleanedDir, err := toolkit.ValidatePath("test", dir, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tracker.HasRead(cleanedDir) {
+		t.Error("expected HasRead to return false for directory listing")
+	}
+}
+
 func TestReadTool_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := toolkit.WriteTestFile(t, dir, "empty.txt", "")

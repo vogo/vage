@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vogo/vage/schema"
@@ -33,22 +34,38 @@ const (
 	toolName        = "edit"
 	toolDescription = "Edit a file by performing exact string replacements. Finds old_string in the file and replaces it with new_string. By default, requires a unique match; set replace_all to true to replace all occurrences."
 
-	defaultMaxEditFileBytes = 1024 * 1024 // 1MB
-	snippetContextLines     = 3
+	defaultMaxEditFileBytes int64 = 10 * 1024 * 1024 // 10 MB
+	snippetContextLines           = 3
 )
 
 // EditTool holds configuration for the built-in file edit tool.
 type EditTool struct {
 	allowedDirs  []string
-	maxFileBytes int
+	maxFileBytes int64
+	denyRules    []string
+	readTracker  toolkit.ReadTracker
 }
 
 // Option is a functional option for configuring an EditTool.
 type Option func(*EditTool)
 
 // WithMaxFileBytes sets the maximum file size in bytes that can be edited.
-func WithMaxFileBytes(n int) Option {
+func WithMaxFileBytes(n int64) Option {
 	return func(et *EditTool) { et.maxFileBytes = n }
+}
+
+// WithDenyRules sets glob patterns for file basenames that are not allowed
+// to be edited (e.g., "*.env", "*.lock", "credentials.json"). Patterns are
+// matched against filepath.Base(path) using filepath.Match.
+func WithDenyRules(patterns ...string) Option {
+	return func(et *EditTool) { et.denyRules = patterns }
+}
+
+// WithReadTracker sets a ReadTracker that requires files to be read before
+// editing. When configured, the edit handler will reject edits to files that
+// have not been recorded via the tracker.
+func WithReadTracker(tracker toolkit.ReadTracker) Option {
+	return func(et *EditTool) { et.readTracker = tracker }
 }
 
 // WithAllowedDirs sets the allowed base directories for the edit tool.
@@ -123,6 +140,14 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", err.Error()), nil
 		}
 
+		if matched := matchDenyRule(cleaned, et.denyRules); matched != "" {
+			return schema.ErrorResult("", fmt.Sprintf("edit tool: file is protected by deny rule %q: %s", matched, cleaned)), nil
+		}
+
+		if et.readTracker != nil && !et.readTracker.HasRead(cleaned) {
+			return schema.ErrorResult("", fmt.Sprintf("edit tool: file must be read before editing; use the read tool first: %s", cleaned)), nil
+		}
+
 		if parsed.OldString == "" {
 			return schema.ErrorResult("", "edit tool: old_string must not be empty"), nil
 		}
@@ -149,8 +174,12 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", fmt.Sprintf("edit tool: path is a directory, not a file: %s", cleaned)), nil
 		}
 
-		if info.Size() > int64(et.maxFileBytes) {
-			return schema.ErrorResult("", fmt.Sprintf("edit tool: file exceeds maximum size (%d bytes)", et.maxFileBytes)), nil
+		if info.Mode().Perm()&0o200 == 0 {
+			return schema.ErrorResult("", fmt.Sprintf("edit tool: file appears to be read-only (mode %s): %s", info.Mode().Perm(), cleaned)), nil
+		}
+
+		if info.Size() > et.maxFileBytes {
+			return schema.ErrorResult("", fmt.Sprintf("edit tool: file size (%d bytes) exceeds maximum allowed (%d bytes): %s", info.Size(), et.maxFileBytes, cleaned)), nil
 		}
 
 		content, err := os.ReadFile(cleaned)
@@ -162,7 +191,7 @@ func (et *EditTool) Handler() tool.ToolHandler {
 		count := strings.Count(contentStr, parsed.OldString)
 
 		if count == 0 {
-			return schema.ErrorResult("", "edit tool: old_string not found in file"), nil
+			return schema.ErrorResult("", fmt.Sprintf("edit tool: old_string not found in file. Possible causes: whitespace/indentation mismatch, or the file may have changed since last read. File: %s", cleaned)), nil
 		}
 
 		if count > 1 && !parsed.ReplaceAll {
@@ -195,6 +224,27 @@ func (et *EditTool) Handler() tool.ToolHandler {
 
 		return schema.TextResult("", msg), nil
 	}
+}
+
+// matchDenyRule checks path against a list of glob patterns. Patterns are
+// matched against filepath.Base(path) using filepath.Match. Returns the first
+// matching pattern, or "" if none match.
+func matchDenyRule(path string, patterns []string) string {
+	base := filepath.Base(path)
+
+	for _, p := range patterns {
+		matched, err := filepath.Match(p, base)
+		if err != nil {
+			// Invalid pattern; skip gracefully.
+			continue
+		}
+
+		if matched {
+			return p
+		}
+	}
+
+	return ""
 }
 
 // Register creates an EditTool and registers it in the given registry.

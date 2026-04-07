@@ -25,11 +25,21 @@ import (
 	"strings"
 )
 
-// ValidatePath checks that path is non-empty, absolute, and within allowed directories.
-// toolName is used in error message prefixes (e.g., "read").
+// ValidatePath checks that path is non-empty, absolute, not a UNC path, and
+// within allowed directories. toolName is used in error message prefixes
+// (e.g., "read").
 func ValidatePath(toolName, path string, allowedDirs []string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("%s tool: file_path must not be empty", toolName)
+	}
+
+	// Reject UNC network paths (\\server\share or //server/share).
+	if strings.HasPrefix(path, `\\`) {
+		return "", fmt.Errorf("%s tool: UNC paths are not allowed: %s", toolName, path)
+	}
+
+	if strings.HasPrefix(path, "//") && len(path) > 2 && path[2] != '/' {
+		return "", fmt.Errorf("%s tool: UNC paths are not allowed: %s", toolName, path)
 	}
 
 	if !filepath.IsAbs(path) {

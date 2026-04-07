@@ -611,8 +611,16 @@ func TestEditExceedsMaxFileBytes(t *testing.T) {
 	}
 
 	text := toolkit.ResultText(result)
-	if !strings.Contains(text, "exceeds maximum size") {
-		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
+	if !strings.Contains(text, "exceeds maximum allowed") {
+		t.Errorf("expected 'exceeds maximum allowed' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "200 bytes") {
+		t.Errorf("expected file size in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "100 bytes") {
+		t.Errorf("expected max size in output, got: %s", text)
 	}
 }
 

@@ -174,6 +174,10 @@ func TestEditTool_NotFound(t *testing.T) {
 	if !strings.Contains(text, "old_string not found in file") {
 		t.Errorf("expected 'old_string not found in file' in output, got: %s", text)
 	}
+
+	if !strings.Contains(text, "whitespace/indentation mismatch") {
+		t.Errorf("expected actionable guidance in output, got: %s", text)
+	}
 }
 
 func TestEditTool_AmbiguousMatch(t *testing.T) {
@@ -365,8 +369,20 @@ func TestEditTool_ExceedsMaxFileBytes(t *testing.T) {
 	}
 
 	text := toolkit.ResultText(result)
-	if !strings.Contains(text, "exceeds maximum size") {
-		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
+	if !strings.Contains(text, "file size") {
+		t.Errorf("expected 'file size' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "exceeds maximum allowed") {
+		t.Errorf("expected 'exceeds maximum allowed' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "200 bytes") {
+		t.Errorf("expected file size in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "100 bytes") {
+		t.Errorf("expected max size in output, got: %s", text)
 	}
 }
 
@@ -596,6 +612,219 @@ func TestEditTool_ConcurrentSameFile(t *testing.T) {
 		if !strings.Contains(string(content), expected) {
 			t.Errorf("expected %q in file content", expected)
 		}
+	}
+}
+
+func TestEditTool_DenyRule_ExactMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, ".env", "SECRET=value")
+
+	et := New(WithDenyRules("*.env"))
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "protected by deny rule") {
+		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "*.env") {
+		t.Errorf("expected pattern in output, got: %s", text)
+	}
+}
+
+func TestEditTool_DenyRule_GlobMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "go.lock", "dependency data")
+
+	et := New(WithDenyRules("*.lock"))
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"dependency","new_string":"changed"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "protected by deny rule") {
+		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
+	}
+}
+
+func TestEditTool_DenyRule_NoMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "main.go", "old content")
+
+	et := New(WithDenyRules("*.env", "*.lock"))
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"old content","new_string":"new content"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+}
+
+func TestEditTool_ReadPrerequisite_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "content")
+
+	tracker := toolkit.NewMemoryReadTracker(0)
+	et := New(WithReadTracker(tracker))
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "file must be read before editing") {
+		t.Errorf("expected 'file must be read before editing' in output, got: %s", text)
+	}
+}
+
+func TestEditTool_ReadPrerequisite_Allowed(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "content")
+
+	tracker := toolkit.NewMemoryReadTracker(0)
+	// Simulate that the file has been read. We need to use the cleaned path.
+	cleanedPath, err := toolkit.ValidatePath("test", path, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tracker.RecordRead(cleanedPath)
+
+	et := New(WithReadTracker(tracker))
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+}
+
+func TestEditTool_ReadPrerequisite_NoTracker(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "test.txt", "content")
+
+	// No tracker configured -- should succeed (backward compat).
+	et := New()
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+	}
+}
+
+func TestEditTool_ReadOnlyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := toolkit.WriteTestFile(t, dir, "readonly.txt", "content")
+
+	// Make file read-only.
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatalf("failed to chmod: %v", err)
+	}
+
+	t.Cleanup(func() {
+		// Restore write permission so TempDir cleanup can delete the file.
+		_ = os.Chmod(path, 0o644)
+	})
+
+	et := New()
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", fmt.Sprintf(
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "file appears to be read-only") {
+		t.Errorf("expected 'file appears to be read-only' in output, got: %s", text)
+	}
+
+	if !strings.Contains(text, "mode") || !strings.Contains(text, "r--") {
+		t.Errorf("expected file mode in output, got: %s", text)
+	}
+}
+
+func TestEditTool_UNCPath(t *testing.T) {
+	et := New()
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", `{"file_path":"\\\\server\\share\\file.txt","old_string":"a","new_string":"b"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "UNC paths are not allowed") {
+		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
+	}
+}
+
+func TestEditTool_UNCPathSlash(t *testing.T) {
+	et := New()
+	handler := et.Handler()
+
+	result, err := handler(context.Background(), "", `{"file_path":"//server/share/file.txt","old_string":"a","new_string":"b"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true")
+	}
+
+	text := toolkit.ResultText(result)
+	if !strings.Contains(text, "UNC paths are not allowed") {
+		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
 	}
 }
 

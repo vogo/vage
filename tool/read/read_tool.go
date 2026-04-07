@@ -44,6 +44,7 @@ const (
 type ReadTool struct {
 	allowedDirs  []string
 	maxReadBytes int
+	readTracker  toolkit.ReadTracker
 }
 
 // Option is a functional option for configuring a ReadTool.
@@ -52,6 +53,13 @@ type Option func(*ReadTool)
 // WithMaxReadBytes sets the maximum number of bytes to read.
 func WithMaxReadBytes(n int) Option {
 	return func(rt *ReadTool) { rt.maxReadBytes = n }
+}
+
+// WithReadTracker sets a ReadTracker that records successful file reads.
+// When configured, the read handler will call RecordRead after each
+// successful file read (not for directory listings).
+func WithReadTracker(tracker toolkit.ReadTracker) Option {
+	return func(rt *ReadTool) { rt.readTracker = tracker }
 }
 
 // WithAllowedDirs sets the allowed base directories for the read tool.
@@ -207,6 +215,10 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 
 				result = fmt.Appendf(result, "\n... [output truncated, showing first %d bytes]", rt.maxReadBytes)
 
+				if rt.readTracker != nil {
+					rt.readTracker.RecordRead(cleaned)
+				}
+
 				return schema.TextResult("", string(result)), nil
 			}
 
@@ -230,6 +242,10 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 
 		if err := scanner.Err(); err != nil {
 			return schema.ErrorResult("", "read tool: error reading file: "+err.Error()), nil
+		}
+
+		if rt.readTracker != nil {
+			rt.readTracker.RecordRead(cleaned)
 		}
 
 		return schema.TextResult("", string(result)), nil
