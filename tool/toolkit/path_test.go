@@ -110,7 +110,6 @@ func TestValidatePath_AllowedDirsAccepted(t *testing.T) {
 
 	resolved := ResolveDir(t, dir)
 	cleaned, err := ValidatePath("test", path, CleanAllowedDirs([]string{resolved}))
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

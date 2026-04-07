@@ -70,7 +70,7 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	mw := NewDebugMiddleware(sink)
 	stub := &stubCompleter{
 		resp: &aimodel.ChatResponse{
-			Model: "m",
+			Model:   "m",
 			Choices: []aimodel.Choice{{Message: aimodel.Message{Content: aimodel.NewTextContent("hi")}, FinishReason: "stop"}},
 			Usage:   aimodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
 		},
@@ -125,7 +125,7 @@ func TestDebugMiddleware_NoopSink(t *testing.T) {
 
 func TestNewCorrelationID_Unique(t *testing.T) {
 	seen := make(map[string]bool)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := NewCorrelationID()
 		if id == "" {
 			t.Fatal("empty id")
