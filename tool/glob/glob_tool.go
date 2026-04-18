@@ -47,6 +47,7 @@ type GlobTool struct {
 	timeout        time.Duration
 	workingDir     string
 	allowedDirs    []string
+	guard          *toolkit.PathGuard
 	maxOutputBytes int
 	maxResults     int
 }
@@ -69,6 +70,13 @@ func WithAllowedDirs(dirs ...string) Option {
 	return func(gt *GlobTool) {
 		gt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
+}
+
+// WithPathGuard installs a PathGuard used to validate the search directory.
+// Subprocess execution itself is still bounded only by cmd.Dir; the guard
+// ensures the directory argument cannot point outside the allow-list.
+func WithPathGuard(g *toolkit.PathGuard) Option {
+	return func(gt *GlobTool) { gt.guard = g }
 }
 
 // WithMaxOutput sets the maximum output size in bytes.
@@ -162,8 +170,13 @@ func (gt *GlobTool) Handler() tool.ToolHandler {
 		// Normalize path to resolve ".." components.
 		dir = filepath.Clean(dir)
 
-		// Validate path if allowedDirs is set.
-		if len(gt.allowedDirs) > 0 {
+		// Validate path via guard (if installed) or allowedDirs.
+		switch {
+		case gt.guard.Allowed():
+			if _, _, _, err := gt.guard.Check("glob", dir); err != nil {
+				return schema.ErrorResult("", err.Error()), nil
+			}
+		case len(gt.allowedDirs) > 0:
 			if _, err := toolkit.ValidatePath("glob", dir, gt.allowedDirs); err != nil {
 				return schema.ErrorResult("", err.Error()), nil
 			}

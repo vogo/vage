@@ -2,7 +2,7 @@ module github.com/vogo/vage
 
 go 1.26.0
 
-require github.com/vogo/aimodel v0.2.0
+require github.com/vogo/aimodel v0.3.0
 
 require gopkg.in/yaml.v3 v3.0.1
 
@@ -14,7 +14,4 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
-)
-replace (
-	github.com/vogo/aimodel => ../aimodel
 )

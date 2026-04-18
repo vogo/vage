@@ -43,6 +43,7 @@ const (
 // ReadTool holds configuration for the built-in file read tool.
 type ReadTool struct {
 	allowedDirs  []string
+	guard        *toolkit.PathGuard
 	maxReadBytes int
 	readTracker  toolkit.ReadTracker
 }
@@ -62,11 +63,19 @@ func WithReadTracker(tracker toolkit.ReadTracker) Option {
 	return func(rt *ReadTool) { rt.readTracker = tracker }
 }
 
-// WithAllowedDirs sets the allowed base directories for the read tool.
+// WithAllowedDirs sets the allowed base directories for the read tool. When
+// set in isolation it uses ValidatePath semantics for backward compatibility.
+// For TOCTOU-safe enforcement via os.Root prefer WithPathGuard.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(rt *ReadTool) {
 		rt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
+}
+
+// WithPathGuard installs a PathGuard which enforces os.Root-bounded access.
+// When installed, takes precedence over allowedDirs.
+func WithPathGuard(g *toolkit.PathGuard) Option {
+	return func(rt *ReadTool) { rt.guard = g }
 }
 
 // New creates a ReadTool with the given options.
@@ -130,15 +139,62 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", "read tool: invalid arguments: "+err.Error()), nil
 		}
 
-		cleaned, err := toolkit.ValidatePath("read", parsed.FilePath, rt.allowedDirs)
-		if err != nil {
-			return schema.ErrorResult("", err.Error()), nil
+		var (
+			cleaned string
+			info    os.FileInfo
+			f       *os.File
+			err     error
+		)
+
+		if rt.guard.Allowed() {
+			var rel string
+			var root *os.Root
+			cleaned, rel, root, err = rt.guard.Check("read", parsed.FilePath)
+			if err != nil {
+				return schema.ErrorResult("", err.Error()), nil
+			}
+
+			info, err = root.Stat(rel)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return schema.ErrorResult("", fmt.Sprintf("read tool: file does not exist: %s", cleaned)), nil
+				}
+				return schema.ErrorResult("", "read tool: "+err.Error()), nil
+			}
+
+			f, err = root.Open(rel)
+			if err != nil {
+				return schema.ErrorResult("", "read tool: "+err.Error()), nil
+			}
+		} else {
+			cleaned, err = toolkit.ValidatePath("read", parsed.FilePath, rt.allowedDirs)
+			if err != nil {
+				return schema.ErrorResult("", err.Error()), nil
+			}
+
+			info, err = os.Stat(cleaned)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return schema.ErrorResult("", fmt.Sprintf("read tool: file does not exist: %s", cleaned)), nil
+				}
+				return schema.ErrorResult("", "read tool: "+err.Error()), nil
+			}
+
+			if !info.IsDir() {
+				f, err = os.Open(cleaned)
+				if err != nil {
+					return schema.ErrorResult("", "read tool: "+err.Error()), nil
+				}
+			}
 		}
 
 		offset := 1
 		if parsed.Offset != nil {
 			offset = *parsed.Offset
 			if offset < 1 {
+				if f != nil {
+					_ = f.Close()
+				}
 				return schema.ErrorResult("", "read tool: offset must be >= 1"), nil
 			}
 		}
@@ -149,29 +205,23 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 		if parsed.Limit != nil {
 			limit = *parsed.Limit
 			if limit < 1 {
+				if f != nil {
+					_ = f.Close()
+				}
 				return schema.ErrorResult("", "read tool: limit must be >= 1"), nil
 			}
 
 			limitSet = true
 		}
 
-		info, err := os.Stat(cleaned)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return schema.ErrorResult("", fmt.Sprintf("read tool: file does not exist: %s", cleaned)), nil
-			}
-
-			return schema.ErrorResult("", "read tool: "+err.Error()), nil
-		}
-
 		if info.IsDir() {
+			if f != nil {
+				defer func() { _ = f.Close() }()
+				return listDirectoryFile(f, cleaned)
+			}
 			return listDirectory(cleaned)
 		}
 
-		f, err := os.Open(cleaned)
-		if err != nil {
-			return schema.ErrorResult("", "read tool: "+err.Error()), nil
-		}
 		defer func() { _ = f.Close() }()
 
 		scanner := bufio.NewScanner(f)
@@ -252,16 +302,30 @@ func (rt *ReadTool) Handler() tool.ToolHandler {
 	}
 }
 
-// listDirectory returns a listing of directory entries.
+// listDirectory returns a listing of directory entries (fallback path).
 func listDirectory(dir string) (schema.ToolResult, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return schema.ErrorResult("", "read tool: "+err.Error()), nil
 	}
 
+	return formatDirectoryListing(entries, dir), nil
+}
+
+// listDirectoryFile returns a listing via an already-open *os.File (guard path).
+func listDirectoryFile(f *os.File, displayDir string) (schema.ToolResult, error) {
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return schema.ErrorResult("", "read tool: "+err.Error()), nil
+	}
+
+	return formatDirectoryListing(entries, displayDir), nil
+}
+
+func formatDirectoryListing(entries []os.DirEntry, displayDir string) schema.ToolResult {
 	var sb strings.Builder
 
-	fmt.Fprintf(&sb, "Directory: %s\n\n", dir)
+	fmt.Fprintf(&sb, "Directory: %s\n\n", displayDir)
 
 	count := 0
 
@@ -281,7 +345,7 @@ func listDirectory(dir string) (schema.ToolResult, error) {
 		count++
 	}
 
-	return schema.TextResult("", sb.String()), nil
+	return schema.TextResult("", sb.String())
 }
 
 // Register creates a ReadTool and registers it in the given registry.

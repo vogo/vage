@@ -54,21 +54,36 @@ func ValidatePath(toolName, path string, allowedDirs []string) (string, error) {
 			return "", fmt.Errorf("%s tool: failed to resolve path: %w", toolName, err)
 		}
 
-		allowed := false
-		for _, dir := range allowedDirs {
-			if strings.HasPrefix(resolved, dir+string(filepath.Separator)) || resolved == dir {
-				allowed = true
-
-				break
+		if !underAny(resolved, allowedDirs) {
+			// Differentiate plain "outside" from "symlink escape" so the caller
+			// can tell the difference: if the cleaned (unresolved) path sits
+			// under an allowed dir but its symlink-resolved form does not, the
+			// escape happened via a symlink component.
+			if cleaned != resolved && underAny(cleaned, allowedDirs) {
+				return "", fmt.Errorf("%s tool: symlink resolves outside allowed directories: %s", toolName, path)
 			}
-		}
-
-		if !allowed {
 			return "", fmt.Errorf("%s tool: path not allowed: %s", toolName, path)
 		}
 	}
 
 	return cleaned, nil
+}
+
+// underAny reports whether p equals or is a descendant of any of the dirs.
+// Uses string prefix match; callers must pass canonical dirs (as produced by
+// CleanAllowedDirs).
+func underAny(p string, dirs []string) bool {
+	for _, dir := range dirs {
+		if p == dir {
+			return true
+		}
+
+		if strings.HasPrefix(p, dir+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ResolveExistingPath walks up the path until it finds an existing ancestor,

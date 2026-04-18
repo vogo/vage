@@ -134,7 +134,7 @@ func (c *Classifier) classifyOne(sub string) Classification {
 //   - Pipes (`|`) stay inside the current sub-command so patterns like
 //     "curl ... | bash" can match the pipeline as a whole.
 //   - Single-quoted content is dropped (it cannot be expanded or executed).
-//   - Double-quoted content is dropped, but any `$(...)` or `` ` `` subshells
+//   - Double-quoted content is dropped, but any `$(...)` or “ ` “ subshells
 //     inside it are extracted and classified recursively.
 //   - Bare `$(...)` and backticks are extracted as their own sub-commands.
 //

@@ -44,6 +44,7 @@ type BashTool struct {
 	timeout        time.Duration
 	workingDir     string
 	maxOutputBytes int
+	pathGuardian   *PathGuardian
 }
 
 // Option is a functional option for configuring a BashTool.
@@ -62,6 +63,12 @@ func WithWorkingDir(dir string) Option {
 // WithMaxOutput sets the maximum output size in bytes.
 func WithMaxOutput(n int) Option {
 	return func(bt *BashTool) { bt.maxOutputBytes = n }
+}
+
+// WithPathGuardian installs a path guardian that hard-blocks commands
+// classified as TierBlocked before execution.
+func WithPathGuardian(g *PathGuardian) Option {
+	return func(bt *BashTool) { bt.pathGuardian = g }
 }
 
 // New creates a BashTool with the given options.
@@ -119,6 +126,12 @@ func (bt *BashTool) Handler() tool.ToolHandler {
 
 // execute runs the command and returns the tool result.
 func (bt *BashTool) execute(parentCtx context.Context, command string) (schema.ToolResult, error) {
+	if bt.pathGuardian != nil {
+		if cls := bt.pathGuardian.Classify(command); cls.Tier == TierBlocked {
+			return schema.ErrorResult("", fmt.Sprintf("bash tool: blocked by rule %q: %s", cls.Rule, cls.Reason)), nil
+		}
+	}
+
 	childCtx, cancel := context.WithTimeout(parentCtx, bt.timeout)
 	defer cancel()
 

@@ -41,6 +41,7 @@ const (
 // EditTool holds configuration for the built-in file edit tool.
 type EditTool struct {
 	allowedDirs  []string
+	guard        *toolkit.PathGuard
 	maxFileBytes int64
 	denyRules    []string
 	readTracker  toolkit.ReadTracker
@@ -68,11 +69,17 @@ func WithReadTracker(tracker toolkit.ReadTracker) Option {
 	return func(et *EditTool) { et.readTracker = tracker }
 }
 
-// WithAllowedDirs sets the allowed base directories for the edit tool.
+// WithAllowedDirs sets the allowed base directories for the edit tool. Uses
+// ValidatePath semantics; for TOCTOU-safe enforcement prefer WithPathGuard.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(et *EditTool) {
 		et.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
+}
+
+// WithPathGuard installs a PathGuard which bounds edits to its roots.
+func WithPathGuard(g *toolkit.PathGuard) Option {
+	return func(et *EditTool) { et.guard = g }
 }
 
 // New creates an EditTool with the given options.
@@ -135,7 +142,19 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", "edit tool: invalid arguments: "+err.Error()), nil
 		}
 
-		cleaned, err := toolkit.ValidatePath("edit", parsed.FilePath, et.allowedDirs)
+		var (
+			cleaned string
+			rel     string
+			root    *os.Root
+			info    os.FileInfo
+			err     error
+		)
+
+		if et.guard.Allowed() {
+			cleaned, rel, root, err = et.guard.Check("edit", parsed.FilePath)
+		} else {
+			cleaned, err = toolkit.ValidatePath("edit", parsed.FilePath, et.allowedDirs)
+		}
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
@@ -161,7 +180,11 @@ func (et *EditTool) Handler() tool.ToolHandler {
 		unlock := toolkit.LockPath(cleaned)
 		defer unlock()
 
-		info, err := os.Stat(cleaned)
+		if root != nil {
+			info, err = root.Stat(rel)
+		} else {
+			info, err = os.Stat(cleaned)
+		}
 		if err != nil {
 			if os.IsNotExist(err) {
 				return schema.ErrorResult("", fmt.Sprintf("edit tool: file does not exist: %s", cleaned)), nil
@@ -182,7 +205,12 @@ func (et *EditTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", fmt.Sprintf("edit tool: file size (%d bytes) exceeds maximum allowed (%d bytes): %s", info.Size(), et.maxFileBytes, cleaned)), nil
 		}
 
-		content, err := os.ReadFile(cleaned)
+		var content []byte
+		if root != nil {
+			content, err = root.ReadFile(rel)
+		} else {
+			content, err = os.ReadFile(cleaned)
+		}
 		if err != nil {
 			return schema.ErrorResult("", "edit tool: "+err.Error()), nil
 		}
@@ -212,7 +240,13 @@ func (et *EditTool) Handler() tool.ToolHandler {
 		}
 
 		// Atomic write-back: write to temp file then rename.
-		if writeErr := toolkit.AtomicWriteFile(cleaned, []byte(newContent), info.Mode().Perm()); writeErr != nil {
+		var writeErr error
+		if root != nil {
+			writeErr = toolkit.AtomicWriteInRoot(root, rel, []byte(newContent), info.Mode().Perm())
+		} else {
+			writeErr = toolkit.AtomicWriteFile(cleaned, []byte(newContent), info.Mode().Perm())
+		}
+		if writeErr != nil {
 			return schema.ErrorResult("", "edit tool: "+writeErr.Error()), nil
 		}
 

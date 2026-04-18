@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -38,6 +39,7 @@ const (
 // WriteTool holds configuration for the built-in file write tool.
 type WriteTool struct {
 	allowedDirs   []string
+	guard         *toolkit.PathGuard
 	maxWriteBytes int
 }
 
@@ -49,11 +51,17 @@ func WithMaxWriteBytes(n int) Option {
 	return func(wt *WriteTool) { wt.maxWriteBytes = n }
 }
 
-// WithAllowedDirs sets the allowed base directories for the write tool.
+// WithAllowedDirs sets the allowed base directories for the write tool. Uses
+// ValidatePath semantics; for TOCTOU-safe enforcement prefer WithPathGuard.
 func WithAllowedDirs(dirs ...string) Option {
 	return func(wt *WriteTool) {
 		wt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
+}
+
+// WithPathGuard installs a PathGuard which bounds writes to its roots.
+func WithPathGuard(g *toolkit.PathGuard) Option {
+	return func(wt *WriteTool) { wt.guard = g }
 }
 
 // New creates a WriteTool with the given options.
@@ -111,17 +119,20 @@ func (wt *WriteTool) Handler() tool.ToolHandler {
 			return schema.ErrorResult("", "write tool: invalid arguments: "+err.Error()), nil
 		}
 
+		if len(parsed.Content) > wt.maxWriteBytes {
+			return schema.ErrorResult("", fmt.Sprintf("write tool: content exceeds maximum size (%d bytes)", wt.maxWriteBytes)), nil
+		}
+
+		if wt.guard.Allowed() {
+			return wt.writeViaGuard(parsed.FilePath, parsed.Content, parsed.CreateOnly)
+		}
+
 		cleaned, err := toolkit.ValidatePath("write", parsed.FilePath, wt.allowedDirs)
 		if err != nil {
 			return schema.ErrorResult("", err.Error()), nil
 		}
 
-		if len(parsed.Content) > wt.maxWriteBytes {
-			return schema.ErrorResult("", fmt.Sprintf("write tool: content exceeds maximum size (%d bytes)", wt.maxWriteBytes)), nil
-		}
-
-		// Determine file permissions: preserve existing or use default.
-		var perm os.FileMode = toolkit.DefaultFilePermission
+		perm := os.FileMode(toolkit.DefaultFilePermission)
 
 		if info, statErr := os.Stat(cleaned); statErr == nil {
 			if parsed.CreateOnly {
@@ -137,6 +148,41 @@ func (wt *WriteTool) Handler() tool.ToolHandler {
 
 		return schema.TextResult("", fmt.Sprintf("wrote %d bytes to %s", len(parsed.Content), cleaned)), nil
 	}
+}
+
+// writeViaGuard performs a guard-bounded write using the matching os.Root.
+func (wt *WriteTool) writeViaGuard(filePath, content string, createOnly bool) (schema.ToolResult, error) {
+	cleaned, rel, root, err := wt.guard.Check("write", filePath)
+	if err != nil {
+		return schema.ErrorResult("", err.Error()), nil
+	}
+
+	perm := os.FileMode(toolkit.DefaultFilePermission)
+
+	if info, statErr := root.Stat(rel); statErr == nil {
+		if createOnly {
+			return schema.ErrorResult("", fmt.Sprintf("write tool: file already exists (create_only=true): %s", cleaned)), nil
+		}
+		if info.IsDir() {
+			return schema.ErrorResult("", fmt.Sprintf("write tool: path is a directory, not a file: %s", cleaned)), nil
+		}
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(statErr) {
+		return schema.ErrorResult("", "write tool: "+statErr.Error()), nil
+	} else {
+		parentRel := path.Dir(rel)
+		if parentRel != "" && parentRel != "." {
+			if mkErr := root.MkdirAll(parentRel, toolkit.DefaultDirPermission); mkErr != nil {
+				return schema.ErrorResult("", "write tool: "+mkErr.Error()), nil
+			}
+		}
+	}
+
+	if writeErr := toolkit.AtomicWriteInRoot(root, rel, []byte(content), perm); writeErr != nil {
+		return schema.ErrorResult("", "write tool: "+writeErr.Error()), nil
+	}
+
+	return schema.TextResult("", fmt.Sprintf("wrote %d bytes to %s", len(content), cleaned)), nil
 }
 
 // Register creates a WriteTool and registers it in the given registry.

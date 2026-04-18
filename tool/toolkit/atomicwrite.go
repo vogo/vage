@@ -18,8 +18,12 @@
 package toolkit
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -74,4 +78,71 @@ func AtomicWriteFile(path string, content []byte, perm os.FileMode) error {
 	}
 
 	return nil
+}
+
+// AtomicWriteInRoot writes content to relPath inside root atomically via a
+// temp file in the same directory followed by rename. relPath uses forward
+// slashes (os.Root convention). Parent directories must already exist.
+func AtomicWriteInRoot(root *os.Root, relPath string, content []byte, perm fs.FileMode) error {
+	dir := path.Dir(relPath)
+	if dir == "" {
+		dir = "."
+	}
+
+	tmpName, err := randomTempName()
+	if err != nil {
+		return fmt.Errorf("failed to generate temp name: %w", err)
+	}
+
+	tmpBase := "." + filepath.Base(relPath) + ".tmp-" + tmpName
+
+	var tmpRel string
+	if dir == "." {
+		tmpRel = tmpBase
+	} else {
+		tmpRel = dir + "/" + tmpBase
+	}
+
+	f, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	_, writeErr := f.Write(content)
+	closeErr := f.Close()
+
+	if writeErr != nil {
+		_ = root.Remove(tmpRel)
+
+		return fmt.Errorf("failed to write temp file: %w", writeErr)
+	}
+
+	if closeErr != nil {
+		_ = root.Remove(tmpRel)
+
+		return fmt.Errorf("failed to close temp file: %w", closeErr)
+	}
+
+	if chmodErr := root.Chmod(tmpRel, perm); chmodErr != nil {
+		_ = root.Remove(tmpRel)
+
+		return fmt.Errorf("failed to set file permissions: %w", chmodErr)
+	}
+
+	if renameErr := root.Rename(tmpRel, relPath); renameErr != nil {
+		_ = root.Remove(tmpRel)
+
+		return fmt.Errorf("failed to rename temp file: %w", renameErr)
+	}
+
+	return nil
+}
+
+func randomTempName() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(buf[:]), nil
 }

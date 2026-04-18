@@ -694,8 +694,8 @@ func TestGrepSymlinkOutsideAllowedDirs(t *testing.T) {
 	}
 
 	text := toolkit.ResultText(result)
-	if !strings.Contains(text, "not allowed") {
-		t.Errorf("expected 'not allowed' in output, got: %s", text)
+	if !strings.Contains(text, "not allowed") && !strings.Contains(text, "symlink resolves outside") {
+		t.Errorf("expected path rejection in output, got: %s", text)
 	}
 }
 

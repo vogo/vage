@@ -541,8 +541,8 @@ func TestReadTool_AllowedDirsSymlink(t *testing.T) {
 	}
 
 	text := toolkit.ResultText(result)
-	if !strings.Contains(text, "path not allowed") {
-		t.Errorf("expected 'path not allowed' in output, got: %s", text)
+	if !strings.Contains(text, "path not allowed") && !strings.Contains(text, "symlink resolves outside") {
+		t.Errorf("expected path rejection in output, got: %s", text)
 	}
 }
 

@@ -42,6 +42,7 @@ type GrepTool struct {
 	timeout        time.Duration
 	workingDir     string
 	allowedDirs    []string
+	guard          *toolkit.PathGuard
 	maxOutputBytes int
 }
 
@@ -63,6 +64,11 @@ func WithAllowedDirs(dirs ...string) Option {
 	return func(gt *GrepTool) {
 		gt.allowedDirs = toolkit.CleanAllowedDirs(dirs)
 	}
+}
+
+// WithPathGuard installs a PathGuard used to validate the search path.
+func WithPathGuard(g *toolkit.PathGuard) Option {
+	return func(gt *GrepTool) { gt.guard = g }
 }
 
 // WithMaxOutput sets the maximum output size in bytes.
@@ -147,8 +153,13 @@ func (gt *GrepTool) Handler() tool.ToolHandler {
 		// Normalize path to resolve ".." components.
 		searchPath = filepath.Clean(searchPath)
 
-		// Validate path if allowedDirs is set.
-		if len(gt.allowedDirs) > 0 {
+		// Validate path via guard (if installed) or allowedDirs.
+		switch {
+		case gt.guard.Allowed():
+			if _, _, _, err := gt.guard.Check("grep", searchPath); err != nil {
+				return schema.ErrorResult("", err.Error()), nil
+			}
+		case len(gt.allowedDirs) > 0:
 			if _, err := toolkit.ValidatePath("grep", searchPath, gt.allowedDirs); err != nil {
 				return schema.ErrorResult("", err.Error()), nil
 			}
