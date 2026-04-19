@@ -55,6 +55,10 @@ const (
 	// Guard events (emitted when a guard check produces a material outcome
 	// such as log/rewrite/block/error; silent passes produce no event).
 	EventGuardCheck = "guard_check"
+
+	// MCP credential filter events (emitted by vage/mcp client/server when
+	// the credential scanner detects credentials in tool I/O).
+	EventMCPCredentialDetected = "mcp_credential_detected"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -271,6 +275,22 @@ type GuardCheckData struct {
 }
 
 func (GuardCheckData) eventData() {}
+
+// MCPCredentialDetectedData carries a summary of a credential scan at the
+// MCP boundary. Plaintext credentials never appear in this payload — only
+// masked previews such as "AKIA****".
+type MCPCredentialDetectedData struct {
+	Direction string   `json:"direction"` // e.g. "mcp_outbound", "mcp_inbound"
+	ServerURI string   `json:"server_uri,omitempty"`
+	ToolName  string   `json:"tool_name,omitempty"`
+	Action    string   `json:"action"` // "log" | "redact" | "block"
+	HitTypes  []string `json:"hit_types"`
+	HitCount  int      `json:"hit_count"`
+	Masked    []string `json:"masked,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+func (MCPCredentialDetectedData) eventData() {}
 
 // PendingInteractionData carries information about a pending user interaction.
 type PendingInteractionData struct {

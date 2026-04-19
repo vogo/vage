@@ -23,6 +23,7 @@ import (
 
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
+	"github.com/vogo/vage/security/credscrub"
 )
 
 func TestNewServer(t *testing.T) {
@@ -33,6 +34,10 @@ func TestNewServer(t *testing.T) {
 
 	if s.server == nil {
 		t.Error("expected non-nil internal server")
+	}
+
+	if s.scanner != nil {
+		t.Error("expected nil scanner when no option provided")
 	}
 }
 
@@ -101,6 +106,8 @@ func TestServer_RegisterTool(t *testing.T) {
 			},
 		},
 		Handler: func(_ context.Context, args map[string]any) (schema.ToolResult, error) {
+			_ = args
+
 			return schema.TextResult("", "result"), nil
 		},
 	})
@@ -160,5 +167,116 @@ func TestServer_RegisterAgentAndTool(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error registering tool: %v", err)
+	}
+}
+
+func TestServer_WithCredentialScanner(t *testing.T) {
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionRedact})
+	srv := NewServer(WithCredentialScanner(s))
+
+	if srv.scanner != s {
+		t.Error("expected scanner to be installed by option")
+	}
+}
+
+func TestServer_WithScanCallback(t *testing.T) {
+	called := false
+	cb := func(_ context.Context, _ ScanEvent) { called = true }
+	srv := NewServer(WithScanCallback(cb))
+
+	srv.onScan(t.Context(), ScanEvent{Direction: DirectionServerInbound})
+	if !called {
+		t.Error("stored callback did not fire")
+	}
+}
+
+func TestServer_ApplyInboundScan_Redact(t *testing.T) {
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionRedact})
+	srv := NewServer(WithCredentialScanner(s))
+
+	args, blockResp := srv.applyInboundScan(t.Context(), "tool", []byte(`{"password":"hunter2"}`))
+	if blockResp != nil {
+		t.Fatalf("redact should not block; got %+v", blockResp)
+	}
+
+	if args["password"] != "[REDACTED:password]" {
+		t.Errorf("expected password redaction, got %v", args["password"])
+	}
+}
+
+func TestServer_ApplyInboundScan_Block(t *testing.T) {
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionBlock})
+	srv := NewServer(WithCredentialScanner(s))
+
+	_, blockResp := srv.applyInboundScan(t.Context(), "tool", []byte(`{"password":"hunter2"}`))
+	if blockResp == nil {
+		t.Fatal("block action should produce a block response")
+	}
+
+	if !blockResp.IsError {
+		t.Error("block response should have IsError=true")
+	}
+}
+
+func TestServer_ApplyInboundScan_NoScanner(t *testing.T) {
+	srv := NewServer()
+
+	args, blockResp := srv.applyInboundScan(t.Context(), "tool", []byte(`{"password":"hunter2"}`))
+	if blockResp != nil {
+		t.Error("no scanner should not block")
+	}
+
+	if args["password"] != "hunter2" {
+		t.Error("no scanner should not mutate")
+	}
+}
+
+func TestServer_ApplyOutboundTextScan_Redact(t *testing.T) {
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionRedact})
+	srv := NewServer(WithCredentialScanner(s))
+
+	out, blockResp := srv.applyOutboundTextScan(t.Context(), "tool", "key=AKIAIOSFODNN7EXAMPLE")
+	if blockResp != nil {
+		t.Fatal("redact should not block")
+	}
+
+	if out == "key=AKIAIOSFODNN7EXAMPLE" {
+		t.Errorf("expected redaction; got %q", out)
+	}
+}
+
+func TestServer_ApplyOutboundTextScan_Block(t *testing.T) {
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionBlock})
+	srv := NewServer(WithCredentialScanner(s))
+
+	_, blockResp := srv.applyOutboundTextScan(t.Context(), "tool", "key=AKIAIOSFODNN7EXAMPLE")
+	if blockResp == nil {
+		t.Fatal("block action should produce a block response")
+	}
+
+	if !blockResp.IsError {
+		t.Error("block response should have IsError=true")
+	}
+}
+
+func TestServer_CallbackFiresOnHit(t *testing.T) {
+	events := []ScanEvent{}
+	cb := func(_ context.Context, ev ScanEvent) { events = append(events, ev) }
+
+	s := credscrub.NewScanner(credscrub.Config{Action: credscrub.ActionRedact})
+	srv := NewServer(WithCredentialScanner(s), WithScanCallback(cb))
+
+	srv.applyInboundScan(t.Context(), "tool", []byte(`{"password":"hunter2"}`))
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 callback invocation; got %d", len(events))
+	}
+
+	if events[0].Direction != DirectionServerInbound {
+		t.Errorf("want inbound direction; got %q", events[0].Direction)
+	}
+
+	if events[0].ToolName != "tool" {
+		t.Errorf("want tool name; got %q", events[0].ToolName)
 	}
 }

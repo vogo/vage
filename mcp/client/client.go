@@ -21,12 +21,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vogo/vage/schema"
+	"github.com/vogo/vage/security/credscrub"
 	"github.com/vogo/vage/tool"
 )
+
+// Direction values for credential scan events.
+const (
+	DirectionOutbound = "mcp_outbound"
+	DirectionInbound  = "mcp_inbound"
+)
+
+// ScanEvent is delivered to an optional callback when the credential
+// scanner detects a hit on MCP I/O. The hits carry only masked previews,
+// never plaintext credentials.
+type ScanEvent struct {
+	Direction string
+	ServerURI string
+	ToolName  string
+	Hits      []credscrub.Hit
+	Action    credscrub.Action
+	Truncated bool
+}
+
+// ScanCallback receives a scan event. Must be safe for concurrent use.
+type ScanCallback func(ctx context.Context, ev ScanEvent)
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithCredentialScanner installs a scanner used to filter tool arguments
+// (outbound) and tool results (inbound). A nil scanner is a no-op.
+func WithCredentialScanner(s *credscrub.Scanner) Option {
+	return func(c *Client) { c.scanner = s }
+}
+
+// WithScanCallback installs a callback invoked once per scan hit cluster.
+// nil disables the callback.
+func WithScanCallback(cb ScanCallback) Option {
+	return func(c *Client) { c.onScan = cb }
+}
 
 // Lifecycle manages the connection lifecycle of an MCP client.
 type Lifecycle interface {
@@ -47,6 +85,8 @@ type Client struct {
 	client    *mcp.Client
 	session   *mcp.ClientSession
 	serverURI string
+	scanner   *credscrub.Scanner
+	onScan    ScanCallback
 	mu        sync.RWMutex
 }
 
@@ -54,15 +94,21 @@ type Client struct {
 var _ MCPClient = (*Client)(nil)
 
 // NewClient creates a new MCP client.
-func NewClient(serverURI string) *Client {
+func NewClient(serverURI string, opts ...Option) *Client {
 	c := mcp.NewClient(&mcp.Implementation{
 		Name:    "vage-mcp-client",
 		Version: "1.0.0",
 	}, nil)
-	return &Client{
+
+	cli := &Client{
 		client:    c,
 		serverURI: serverURI,
 	}
+	for _, opt := range opts {
+		opt(cli)
+	}
+
+	return cli
 }
 
 // Connect establishes a connection to the server via the given transport.
@@ -121,6 +167,8 @@ func (c *Client) ListTools(ctx context.Context) ([]schema.ToolDef, error) {
 }
 
 // CallTool sends tools/call and converts the response to schema.ToolResult.
+// When a credential scanner is installed, it is applied to both outbound
+// arguments and inbound tool-result text.
 func (c *Client) CallTool(ctx context.Context, name, args string) (schema.ToolResult, error) {
 	c.mu.RLock()
 	s := c.session
@@ -130,8 +178,30 @@ func (c *Client) CallTool(ctx context.Context, name, args string) (schema.ToolRe
 		return schema.ToolResult{}, fmt.Errorf("not connected")
 	}
 
+	effectiveArgs := args
+	if c.scanner != nil {
+		sr, redacted, err := c.scanner.ScanJSON([]byte(args))
+		if err != nil {
+			return schema.ToolResult{}, fmt.Errorf("credential scan failed: %w", err)
+		}
+		if len(sr.Hits) > 0 {
+			c.fireScan(ctx, DirectionOutbound, name, sr)
+			switch sr.Action {
+			case credscrub.ActionBlock:
+				return schema.ErrorResult("",
+					"blocked by mcp credential filter (outbound): "+typesSummary(sr.Hits)), nil
+			case credscrub.ActionRedact:
+				if redacted != nil {
+					effectiveArgs = string(redacted)
+				}
+			case credscrub.ActionLog:
+				// leave effectiveArgs as-is
+			}
+		}
+	}
+
 	var argsObj any
-	if err := json.Unmarshal([]byte(args), &argsObj); err != nil {
+	if err := json.Unmarshal([]byte(effectiveArgs), &argsObj); err != nil {
 		return schema.ToolResult{}, fmt.Errorf("invalid tool arguments JSON: %w", err)
 	}
 
@@ -147,6 +217,28 @@ func (c *Client) CallTool(ctx context.Context, name, args string) (schema.ToolRe
 	for i, content := range result.Content {
 		if tc, ok := content.(*mcp.TextContent); ok {
 			parts[i] = schema.ContentPart{Type: "text", Text: tc.Text}
+		}
+	}
+
+	if c.scanner != nil {
+		for i := range parts {
+			if parts[i].Type != "text" || parts[i].Text == "" {
+				continue
+			}
+			sr := c.scanner.ScanText(parts[i].Text)
+			if len(sr.Hits) == 0 {
+				continue
+			}
+			c.fireScan(ctx, DirectionInbound, name, sr)
+			switch sr.Action {
+			case credscrub.ActionBlock:
+				return schema.ErrorResult("",
+					"blocked by mcp credential filter (inbound): "+typesSummary(sr.Hits)), nil
+			case credscrub.ActionRedact:
+				parts[i].Text = c.scanner.RedactText(parts[i].Text, sr.Hits)
+			case credscrub.ActionLog:
+				// leave as-is
+			}
 		}
 	}
 
@@ -167,4 +259,23 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 
 	return s.Ping(ctx, &mcp.PingParams{})
+}
+
+func (c *Client) fireScan(ctx context.Context, direction, toolName string, sr credscrub.ScanResult) {
+	if c.onScan == nil {
+		return
+	}
+
+	c.onScan(ctx, ScanEvent{
+		Direction: direction,
+		ServerURI: c.serverURI,
+		ToolName:  toolName,
+		Hits:      sr.Hits,
+		Action:    sr.Action,
+		Truncated: sr.Truncated,
+	})
+}
+
+func typesSummary(hits []credscrub.Hit) string {
+	return strings.Join(credscrub.SummarizeTypes(hits), ",")
 }

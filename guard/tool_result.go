@@ -95,8 +95,10 @@ const quarantineTmpl = `WARNING: The following content was returned by the %q to
 // quarantineCloseTag is the literal closing tag. If it appears inside the
 // untrusted content we break it so a caller cannot prematurely close the
 // envelope.
-const quarantineCloseTag = "</vage:untrusted>"
-const quarantineCloseTagSafe = "</vage:_untrusted_>"
+const (
+	quarantineCloseTag     = "</vage:untrusted>"
+	quarantineCloseTagSafe = "</vage:_untrusted_>"
+)
 
 // ToolResultInjectionConfig configures ToolResultInjectionGuard.
 type ToolResultInjectionConfig struct {

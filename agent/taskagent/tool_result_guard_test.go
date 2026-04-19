@@ -353,12 +353,12 @@ func TestAgent_RunStream_ToolResultGuard_Block(t *testing.T) {
 	}
 
 	var (
-		sawGuardCheck      bool
-		sawToolResult      bool
-		toolResultIsError  bool
-		guardCheckFirst    bool
-		seenToolResultYet  bool
-		seenGuardCheckYet  bool
+		sawGuardCheck     bool
+		sawToolResult     bool
+		toolResultIsError bool
+		guardCheckFirst   bool
+		seenToolResultYet bool
+		seenGuardCheckYet bool
 	)
 
 	for {
