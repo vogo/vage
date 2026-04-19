@@ -28,8 +28,9 @@ import (
 type Direction int
 
 const (
-	DirectionInput  Direction = 0
-	DirectionOutput Direction = 1
+	DirectionInput      Direction = 0
+	DirectionOutput     Direction = 1
+	DirectionToolResult Direction = 2
 )
 
 // Guard checks a message and returns a result.

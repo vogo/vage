@@ -51,8 +51,10 @@ func NewPromptInjectionGuard(cfg PromptInjectionConfig) *PromptInjectionGuard {
 func (g *PromptInjectionGuard) Name() string { return "prompt_injection" }
 
 func (g *PromptInjectionGuard) Check(msg *Message) (*Result, error) {
-	// Prompt injection is only relevant for input messages.
-	if msg.Direction == DirectionOutput {
+	// Prompt injection is only relevant for input messages. Reject any other
+	// direction (including DirectionToolResult) so this guard never scans a
+	// channel it was not designed for.
+	if msg.Direction != DirectionInput {
 		return Pass(), nil
 	}
 

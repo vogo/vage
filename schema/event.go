@@ -51,6 +51,10 @@ const (
 
 	// Interaction events.
 	EventPendingInteraction = "pending_interaction"
+
+	// Guard events (emitted when a guard check produces a material outcome
+	// such as log/rewrite/block/error; silent passes produce no event).
+	EventGuardCheck = "guard_check"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -253,6 +257,20 @@ type SkillResourceLoadData struct {
 }
 
 func (SkillResourceLoadData) eventData() {}
+
+// GuardCheckData carries the outcome of a guard check with a material effect
+// (log / rewrite / block / error). Silent passes do not emit this event.
+type GuardCheckData struct {
+	GuardName  string   `json:"guard_name"`
+	ToolCallID string   `json:"tool_call_id,omitempty"`
+	ToolName   string   `json:"tool_name,omitempty"`
+	Action     string   `json:"action"`              // "log" | "rewrite" | "block" | "error"
+	RuleHits   []string `json:"rule_hits,omitempty"` // matched rule names
+	Severity   string   `json:"severity,omitempty"`  // max severity among hits
+	Snippet    string   `json:"snippet,omitempty"`   // leading chars of scanned content
+}
+
+func (GuardCheckData) eventData() {}
 
 // PendingInteractionData carries information about a pending user interaction.
 type PendingInteractionData struct {

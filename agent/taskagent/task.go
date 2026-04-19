@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
@@ -57,6 +58,7 @@ type Agent struct {
 	hookManager      *hook.Manager
 	inputGuards      []guard.Guard
 	outputGuards     []guard.Guard
+	toolResultGuards []guard.Guard
 	skillManager     skill.Manager
 }
 
@@ -127,6 +129,14 @@ func WithInputGuards(guards ...guard.Guard) Option {
 // WithOutputGuards sets guards to check agent output before returning to the user.
 func WithOutputGuards(guards ...guard.Guard) Option {
 	return func(a *Agent) { a.outputGuards = guards }
+}
+
+// WithToolResultGuards sets guards that scan each tool result before it is
+// appended to the model message queue. Guards see messages with
+// Direction == DirectionToolResult and Metadata carrying tool_call_id /
+// tool_name. If no guards are configured the scan is skipped entirely.
+func WithToolResultGuards(guards ...guard.Guard) Option {
+	return func(a *Agent) { a.toolResultGuards = guards }
 }
 
 // WithSkillManager sets the skill manager for prompt injection and tool filtering.
@@ -513,6 +523,169 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 	return respMsgs, nil
 }
 
+// runToolResultGuards scans the text of a tool result through toolResultGuards
+// and returns the (possibly rewritten or error-replaced) ToolResult along with
+// an optional guard_check event for the caller to dispatch via the appropriate
+// channel (hook-only in Run, stream+hook in RunStream). A nil event means the
+// guard produced no material outcome.
+// When no guards are configured, IsError results, or non-text content, the
+// input is returned unchanged and evt is nil.
+func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc aimodel.ToolCall, result schema.ToolResult) (schema.ToolResult, *schema.Event) {
+	if len(a.toolResultGuards) == 0 {
+		return result, nil
+	}
+
+	if result.IsError {
+		return result, nil
+	}
+
+	textIdx := -1
+	for i, p := range result.Content {
+		if p.Type == "text" {
+			textIdx = i
+			break
+		}
+	}
+
+	if textIdx < 0 {
+		return result, nil
+	}
+
+	text := result.Content[textIdx].Text
+	if text == "" {
+		return result, nil
+	}
+
+	msg := &guard.Message{
+		Direction: guard.DirectionToolResult,
+		Content:   text,
+		AgentID:   a.ID(),
+		SessionID: rc.sessionID,
+		Metadata: map[string]any{
+			guard.MetaToolCallID: tc.ID,
+			guard.MetaToolName:   tc.Function.Name,
+		},
+	}
+
+	gres, err := guard.RunGuards(ctx, msg, a.toolResultGuards...)
+	if err != nil {
+		evt := a.buildGuardCheckEvent(rc, tc, text, "tool_result_injection", "error", nil, "", err.Error())
+		return schema.ErrorResult(tc.ID, "tool result guard error: "+err.Error()), &evt
+	}
+
+	switch gres.Action {
+	case guard.ActionPass:
+		if len(gres.Violations) == 0 {
+			return result, nil
+		}
+		// Log-only outcome: violations surfaced but content unchanged.
+		sev := a.maxToolResultSeverity(gres.Violations)
+		evt := a.buildGuardCheckEvent(rc, tc, text, gres.GuardName, "log", gres.Violations, sev, "")
+		return result, &evt
+	case guard.ActionRewrite:
+		sev := a.maxToolResultSeverity(gres.Violations)
+		evt := a.buildGuardCheckEvent(rc, tc, text, gres.GuardName, "rewrite", gres.Violations, sev, gres.Reason)
+
+		out := result
+		out.Content = make([]schema.ContentPart, len(result.Content))
+		copy(out.Content, result.Content)
+		out.Content[textIdx].Text = gres.Content
+		return out, &evt
+	case guard.ActionBlock:
+		sev := a.maxToolResultSeverity(gres.Violations)
+		evt := a.buildGuardCheckEvent(rc, tc, text, gres.GuardName, "block", gres.Violations, sev, gres.Reason)
+
+		reason := gres.Reason
+		if reason == "" {
+			reason = "tool result blocked"
+		}
+
+		return schema.ErrorResult(tc.ID, fmt.Sprintf("blocked by %s: %s", gres.GuardName, reason)), &evt
+	default:
+		return result, nil
+	}
+}
+
+// maxToolResultSeverity returns the highest severity name among rule hits,
+// or "" if none. It consults any ToolResultInjectionGuard among the
+// configured tool-result guards to resolve rule → severity mapping.
+func (a *Agent) maxToolResultSeverity(hits []string) string {
+	var max guard.Severity
+
+	for _, g := range a.toolResultGuards {
+		tg, ok := g.(*guard.ToolResultInjectionGuard)
+		if !ok {
+			continue
+		}
+
+		if s := tg.MaxSeverity(hits); s > max {
+			max = s
+		}
+	}
+
+	if max == 0 {
+		return ""
+	}
+
+	return max.String()
+}
+
+// buildGuardCheckEvent creates an EventGuardCheck event and writes a
+// structured warning log as a side effect. The returned event must be
+// dispatched by the caller via the channel appropriate for the execution
+// mode (a.dispatch for non-streaming, send for streaming).
+func (a *Agent) buildGuardCheckEvent(rc *runContext, tc aimodel.ToolCall, text, guardName, action string, hits []string, severity, reason string) schema.Event {
+	const snippetMax = 200
+
+	snippet := safeSnippet(text, snippetMax)
+
+	attrs := []any{
+		"guard", guardName,
+		"tool", tc.Function.Name,
+		"tool_call_id", tc.ID,
+		"action", action,
+		"rules", hits,
+		"agent_id", a.ID(),
+		"session_id", rc.sessionID,
+	}
+	if severity != "" {
+		attrs = append(attrs, "severity", severity)
+	}
+	if reason != "" {
+		attrs = append(attrs, "reason", reason)
+	}
+
+	slog.Warn("vage: tool result guard hit", attrs...)
+
+	return schema.NewEvent(schema.EventGuardCheck, a.ID(), rc.sessionID, schema.GuardCheckData{
+		GuardName:  guardName,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Function.Name,
+		Action:     action,
+		RuleHits:   hits,
+		Severity:   severity,
+		Snippet:    snippet,
+	})
+}
+
+// safeSnippet returns the leading bytes of s up to max, walking back to the
+// nearest rune boundary so the result is always valid UTF-8. An ellipsis
+// marker is appended when truncation happened.
+func safeSnippet(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+
+	// Walk back until we land on a rune boundary. We never walk more than 3
+	// bytes because a UTF-8 codepoint is at most 4 bytes.
+	end := max
+	for end > 0 && end > max-4 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+
+	return s[:end] + "..."
+}
+
 // buildResponseMsgs builds the response message slice from the last assistant message.
 // For partial results (budget/iterations), it includes messages with tool calls.
 // For normal completion, it always includes the message.
@@ -722,6 +895,11 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 				ToolName:   tc.Function.Name,
 				Duration:   time.Since(toolStart).Milliseconds(),
 			}))
+
+			result, guardEvt := a.runToolResultGuards(ctx, rc, tc, result)
+			if guardEvt != nil {
+				a.dispatch(ctx, *guardEvt)
+			}
 
 			toolMsg := aimodel.Message{
 				Role:       aimodel.RoleTool,
@@ -975,6 +1153,13 @@ func (a *Agent) runStreamLoop(
 				Duration:   time.Since(toolStart).Milliseconds(),
 			})); err != nil {
 				return err
+			}
+
+			result, guardEvt := a.runToolResultGuards(ctx, rc, tc, result)
+			if guardEvt != nil {
+				if err := send(*guardEvt); err != nil {
+					return err
+				}
 			}
 
 			if err := send(schema.NewEvent(schema.EventToolResult, agentID, rc.sessionID, schema.ToolResultData{
