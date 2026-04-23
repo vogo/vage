@@ -20,6 +20,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/vogo/aimodel"
@@ -97,6 +98,11 @@ func (r *Registry) Get(name string) (schema.ToolDef, bool) {
 	return e.def, true
 }
 
+// List returns all registered tool definitions in a deterministic
+// (name-sorted) order. Stable ordering keeps the Anthropic prompt-cache
+// prefix (tools block) byte-identical across independent invocations,
+// which is a prerequisite for cache hits — map iteration order would
+// otherwise shuffle the prefix on every call.
 func (r *Registry) List() []schema.ToolDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -104,6 +110,7 @@ func (r *Registry) List() []schema.ToolDef {
 	for _, e := range r.entries {
 		defs = append(defs, e.def)
 	}
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }
 

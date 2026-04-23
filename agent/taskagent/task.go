@@ -43,6 +43,7 @@ import (
 const (
 	defaultMaxIterations        = 10
 	defaultMaxParallelToolCalls = 4
+	defaultPromptCaching        = true
 )
 
 // Agent implements the agent.Agent interface using a ChatCompleter with ReAct-style tool calling.
@@ -68,6 +69,10 @@ type Agent struct {
 	// tool dispatch. 0 uses defaultMaxParallelToolCalls; values <= 1 force
 	// serial execution (byte-identical to the pre-P1-7 behaviour).
 	maxParallelToolCalls int
+	// promptCaching, when true, marks the system prompt and the last tool
+	// definition with cache breakpoints so Anthropic prompt caching kicks
+	// in on the repeat ReAct iterations. No on-wire effect for OpenAI.
+	promptCaching bool
 }
 
 var (
@@ -165,6 +170,15 @@ func WithMaxParallelToolCalls(n int) Option {
 	}
 }
 
+// WithPromptCaching enables or disables emission of prompt-cache
+// boundary hints on the system message and the last tool definition.
+// Default true. Has no on-wire effect for OpenAI-compatible backends —
+// OpenAI caches identical prefixes automatically with no request-side
+// marker.
+func WithPromptCaching(on bool) Option {
+	return func(a *Agent) { a.promptCaching = on }
+}
+
 // New creates a new Agent with the given config and options.
 func New(cfg agent.Config, opts ...Option) *Agent {
 	a := &Agent{
@@ -172,6 +186,7 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 		maxIterations:        defaultMaxIterations,
 		streamBufferSize:     agent.DefaultStreamBufferSize,
 		maxParallelToolCalls: defaultMaxParallelToolCalls,
+		promptCaching:        defaultPromptCaching,
 	}
 	for _, o := range opts {
 		o(a)
@@ -859,6 +874,10 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 	messages := rc.br.messages
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
 
+	if a.promptCaching {
+		markPromptCacheBreakpoints(messages, aiTools)
+	}
+
 	for iter := 0; iter < p.maxIter; iter++ {
 		rc.iteration = iter
 
@@ -1109,10 +1128,31 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, req.SessionID))
 
+	if a.promptCaching {
+		markPromptCacheBreakpoints(br.messages, aiTools)
+	}
+
 	return schema.NewRunStream(ctx, a.streamBufferSize, func(ctx context.Context, rawSend func(schema.Event) error) error {
 		send := a.buildSend(ctx, rawSend)
 		return a.runStreamLoop(ctx, req, p, br, aiTools, send)
 	}), nil
+}
+
+// markPromptCacheBreakpoints attaches cache-breakpoint hints to the two
+// stable per-session surfaces: the last system message (if any) and the
+// last tool definition (if any). Messages and tools are slice-backed, so
+// mutating in place propagates to every ReAct iteration that reuses the
+// slice for the outgoing ChatRequest.
+func markPromptCacheBreakpoints(messages []aimodel.Message, tools []aimodel.Tool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == aimodel.RoleSystem {
+			messages[i].CacheBreakpoint = true
+			break
+		}
+	}
+	if len(tools) > 0 {
+		tools[len(tools)-1].CacheBreakpoint = true
+	}
 }
 
 // runStreamLoop is the streaming ReAct loop that emits events via send.

@@ -88,6 +88,32 @@ func TestRegistry_List(t *testing.T) {
 	}
 }
 
+// TestRegistry_List_DeterministicOrder guards the name-sorted iteration
+// contract relied on by the Anthropic prompt-cache prefix — map-range
+// order would otherwise shuffle the tools block across calls and bust
+// the cache key on every request.
+func TestRegistry_List_DeterministicOrder(t *testing.T) {
+	// Register in a non-alphabetical order to prove the registry sorts.
+	r := NewRegistry()
+	_ = r.Register(schema.ToolDef{Name: "delta"}, echoHandler)
+	_ = r.Register(schema.ToolDef{Name: "alpha"}, echoHandler)
+	_ = r.Register(schema.ToolDef{Name: "charlie"}, echoHandler)
+	_ = r.Register(schema.ToolDef{Name: "bravo"}, echoHandler)
+
+	want := []string{"alpha", "bravo", "charlie", "delta"}
+	for i := 0; i < 20; i++ {
+		defs := r.List()
+		if len(defs) != len(want) {
+			t.Fatalf("iter %d len(List) = %d, want %d", i, len(defs), len(want))
+		}
+		for j, d := range defs {
+			if d.Name != want[j] {
+				t.Errorf("iter %d defs[%d].Name = %q, want %q", i, j, d.Name, want[j])
+			}
+		}
+	}
+}
+
 func TestRegistry_Execute(t *testing.T) {
 	r := NewRegistry()
 	_ = r.Register(schema.ToolDef{Name: "echo"}, echoHandler)
