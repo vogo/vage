@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -39,7 +40,10 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-const defaultMaxIterations = 10
+const (
+	defaultMaxIterations        = 10
+	defaultMaxParallelToolCalls = 4
+)
 
 // Agent implements the agent.Agent interface using a ChatCompleter with ReAct-style tool calling.
 type Agent struct {
@@ -60,6 +64,10 @@ type Agent struct {
 	outputGuards     []guard.Guard
 	toolResultGuards []guard.Guard
 	skillManager     skill.Manager
+	// maxParallelToolCalls caps the concurrency of within-assistant-message
+	// tool dispatch. 0 uses defaultMaxParallelToolCalls; values <= 1 force
+	// serial execution (byte-identical to the pre-P1-7 behaviour).
+	maxParallelToolCalls int
 }
 
 var (
@@ -144,12 +152,26 @@ func WithSkillManager(m skill.Manager) Option {
 	return func(a *Agent) { a.skillManager = m }
 }
 
+// WithMaxParallelToolCalls caps concurrent tool dispatch within a single
+// assistant message. A value <= 1 forces serial execution (pre-P1-7
+// behaviour); values >= 2 fan out execution under a semaphore. If the
+// option is never set, the agent uses defaultMaxParallelToolCalls.
+func WithMaxParallelToolCalls(n int) Option {
+	return func(a *Agent) {
+		if n < 0 {
+			n = 0
+		}
+		a.maxParallelToolCalls = n
+	}
+}
+
 // New creates a new Agent with the given config and options.
 func New(cfg agent.Config, opts ...Option) *Agent {
 	a := &Agent{
-		Base:             agent.NewBase(cfg),
-		maxIterations:    defaultMaxIterations,
-		streamBufferSize: agent.DefaultStreamBufferSize,
+		Base:                 agent.NewBase(cfg),
+		maxIterations:        defaultMaxIterations,
+		streamBufferSize:     agent.DefaultStreamBufferSize,
+		maxParallelToolCalls: defaultMaxParallelToolCalls,
 	}
 	for _, o := range opts {
 		o(a)
@@ -880,39 +902,131 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
 		}
 
-		for _, tc := range assistantMsg.ToolCalls {
-			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Arguments:  tc.Function.Arguments,
-			}))
-
-			toolStart := time.Now()
-			result := a.executeToolCall(ctx, tc)
-
-			a.dispatch(ctx, schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Duration:   time.Since(toolStart).Milliseconds(),
-			}))
-
-			result, guardEvt := a.runToolResultGuards(ctx, rc, tc, result)
-			if guardEvt != nil {
-				a.dispatch(ctx, *guardEvt)
-			}
-
-			toolMsg := aimodel.Message{
-				Role:       aimodel.RoleTool,
-				ToolCallID: result.ToolCallID,
-				Content:    aimodel.NewTextContent(toolResultText(result)),
-			}
-			messages = append(messages, toolMsg)
+		sink := func(ev schema.Event) error {
+			a.dispatch(ctx, ev)
+			return nil
 		}
+		toolMsgs, _ := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls, false, sink)
+		messages = append(messages, toolMsgs...)
 	}
 
 	// Max iterations exceeded.
 	rc.iteration = p.maxIter - 1
 	return a.finalizeRun(ctx, rc, schema.StopReasonMaxIterations), nil
+}
+
+// executeToolBatch dispatches the tool calls from a single assistant message
+// with bounded concurrency, emitting events and returning the tool-result
+// messages in ToolCalls[i] order regardless of goroutine finish order.
+//
+// For 0 or 1 tool calls (or when a.maxParallelToolCalls <= 1) the path
+// degenerates to the pre-P1-7 serial loop — no goroutines, no semaphore.
+//
+// eventSink is called serially from the calling goroutine for every event
+// (Start / End / GuardCheck / Result) in the original index order. Returning
+// a non-nil error halts dispatch and propagates the error up; the sync-path
+// adapter always returns nil, the stream path's send() may fail.
+//
+// emitResultEvent controls whether EventToolResult is sent after each guard
+// pass — true for the streaming path, false for the sync path (which
+// appends the result message directly without a user-facing event).
+func (a *Agent) executeToolBatch(
+	ctx context.Context,
+	rc *runContext,
+	agentID string,
+	toolCalls []aimodel.ToolCall,
+	emitResultEvent bool,
+	eventSink func(schema.Event) error,
+) ([]aimodel.Message, error) {
+	n := len(toolCalls)
+	if n == 0 {
+		return nil, nil
+	}
+
+	// Dispatch all Start events up-front in ToolCalls order so downstream
+	// consumers (tests, UI) see a stable sequence regardless of how the
+	// workers below complete.
+	starts := make([]time.Time, n)
+	for i, tc := range toolCalls {
+		if err := eventSink(schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Arguments:  tc.Function.Arguments,
+		})); err != nil {
+			return nil, err
+		}
+		starts[i] = time.Now()
+	}
+
+	results := make([]schema.ToolResult, n)
+	durations := make([]time.Duration, n)
+
+	parallelCap := a.maxParallelToolCalls
+	if parallelCap <= 0 {
+		parallelCap = defaultMaxParallelToolCalls
+	}
+
+	if n == 1 || parallelCap <= 1 {
+		for i, tc := range toolCalls {
+			results[i] = a.executeToolCall(ctx, tc)
+			durations[i] = time.Since(starts[i])
+		}
+	} else {
+		if parallelCap > n {
+			parallelCap = n
+		}
+		sem := make(chan struct{}, parallelCap)
+		var wg sync.WaitGroup
+		for i, tc := range toolCalls {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, tc aimodel.ToolCall) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				results[i] = a.executeToolCall(ctx, tc)
+				durations[i] = time.Since(starts[i])
+			}(i, tc)
+		}
+		wg.Wait()
+	}
+
+	// Dispatch End / Guard / (optional) Result events + build tool messages
+	// in ToolCalls order — matches pre-P1-7 observable sequence.
+	toolMsgs := make([]aimodel.Message, 0, n)
+	for i, tc := range toolCalls {
+		if err := eventSink(schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Duration:   durations[i].Milliseconds(),
+		})); err != nil {
+			return nil, err
+		}
+
+		res, guardEvt := a.runToolResultGuards(ctx, rc, tc, results[i])
+		if guardEvt != nil {
+			if err := eventSink(*guardEvt); err != nil {
+				return nil, err
+			}
+		}
+
+		if emitResultEvent {
+			if err := eventSink(schema.NewEvent(schema.EventToolResult, agentID, rc.sessionID, schema.ToolResultData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Result:     res,
+			})); err != nil {
+				return nil, err
+			}
+		}
+
+		toolMsgs = append(toolMsgs, aimodel.Message{
+			Role:       aimodel.RoleTool,
+			ToolCallID: res.ToolCallID,
+			Content:    aimodel.NewTextContent(toolResultText(res)),
+		})
+	}
+
+	return toolMsgs, nil
 }
 
 // storeAndPromoteMessages stores request and response messages in working memory
@@ -1134,49 +1248,13 @@ func (a *Agent) runStreamLoop(
 			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonBudgetExhausted)
 		}
 
-		// Execute tool calls.
-		for _, tc := range accumulated.ToolCalls {
-			if err := send(schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Arguments:  tc.Function.Arguments,
-			})); err != nil {
-				return err
-			}
-
-			toolStart := time.Now()
-			result := a.executeToolCall(ctx, tc)
-
-			if err := send(schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Duration:   time.Since(toolStart).Milliseconds(),
-			})); err != nil {
-				return err
-			}
-
-			result, guardEvt := a.runToolResultGuards(ctx, rc, tc, result)
-			if guardEvt != nil {
-				if err := send(*guardEvt); err != nil {
-					return err
-				}
-			}
-
-			if err := send(schema.NewEvent(schema.EventToolResult, agentID, rc.sessionID, schema.ToolResultData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Result:     result,
-			})); err != nil {
-				return err
-			}
-
-			toolMsg := aimodel.Message{
-				Role:       aimodel.RoleTool,
-				ToolCallID: result.ToolCallID,
-				Content:    aimodel.NewTextContent(toolResultText(result)),
-			}
-			messages = append(messages, toolMsg)
+		// Execute tool calls with bounded concurrency; events and messages
+		// emerge in ToolCalls order.
+		toolMsgs, err := a.executeToolBatch(ctx, rc, agentID, accumulated.ToolCalls, true, send)
+		if err != nil {
+			return err
 		}
+		messages = append(messages, toolMsgs...)
 	}
 
 	// Max iterations exceeded.
