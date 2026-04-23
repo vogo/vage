@@ -37,6 +37,12 @@ const (
 
 	EventTokenBudgetExhausted = "token_budget_exhausted"
 
+	// Session- and daily-level budget events (distinct from EventTokenBudgetExhausted,
+	// which is Run-level). Emitted by the BudgetMiddleware host closures — see
+	// vv/traces/budgets.
+	EventBudgetWarn     = "budget_warn"
+	EventBudgetExceeded = "budget_exceeded"
+
 	// Orchestration lifecycle events.
 	EventPhaseStart    = "phase_start"
 	EventPhaseEnd      = "phase_end"
@@ -139,6 +145,33 @@ type TokenBudgetExhaustedData struct {
 }
 
 func (TokenBudgetExhaustedData) eventData() {}
+
+// BudgetWarnData reports the first crossing of a soft warn threshold on a
+// session- or daily-level budget. Emitted at most once per tracker per window.
+type BudgetWarnData struct {
+	Scope     string  `json:"scope"`     // "session" | "daily"
+	Dimension string  `json:"dimension"` // "tokens" | "cost"
+	Used      int64   `json:"used"`
+	UsedCost  float64 `json:"used_cost,omitempty"`
+	Limit     int64   `json:"limit"`
+	LimitCost float64 `json:"limit_cost,omitempty"`
+	Percent   float64 `json:"percent"`
+}
+
+func (BudgetWarnData) eventData() {}
+
+// BudgetExceededData reports that a session- or daily-level hard limit was
+// hit and the LLM call was rejected before reaching the network.
+type BudgetExceededData struct {
+	Scope     string  `json:"scope"`
+	Dimension string  `json:"dimension"`
+	Used      int64   `json:"used"`
+	UsedCost  float64 `json:"used_cost,omitempty"`
+	Limit     int64   `json:"limit"`
+	LimitCost float64 `json:"limit_cost,omitempty"`
+}
+
+func (BudgetExceededData) eventData() {}
 
 func (AgentEndData) eventData() {}
 
