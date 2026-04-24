@@ -65,6 +65,12 @@ const (
 	// MCP credential filter events (emitted by vage/mcp client/server when
 	// the credential scanner detects credentials in tool I/O).
 	EventMCPCredentialDetected = "mcp_credential_detected"
+
+	// Todo tracking events (emitted by the todo_write built-in tool whenever
+	// the session-scoped todo list changes). Payload carries the full snapshot
+	// — consumers receive a version number and can treat each event as an
+	// idempotent replacement of their local state.
+	EventTodoUpdate = "todo_update"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -333,6 +339,26 @@ type PendingInteractionData struct {
 }
 
 func (PendingInteractionData) eventData() {}
+
+// TodoItem is the wire form of a single todo list entry emitted on
+// EventTodoUpdate. It duplicates vage/tool/todo.Item to keep the schema
+// package free of a reverse dependency on vage/tool.
+type TodoItem struct {
+	ID         string `json:"id"`
+	Content    string `json:"content"`
+	ActiveForm string `json:"active_form"`
+	Status     string `json:"status"`
+}
+
+// TodoUpdateData carries a full snapshot of the session-scoped todo list after
+// a successful todo_write invocation. Version is strictly monotonic per
+// session; clients may use it as an idempotency key.
+type TodoUpdateData struct {
+	Version int64      `json:"version"`
+	Items   []TodoItem `json:"items"`
+}
+
+func (TodoUpdateData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {

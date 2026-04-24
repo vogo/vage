@@ -962,6 +962,14 @@ func (a *Agent) executeToolBatch(
 		return nil, nil
 	}
 
+	// Expose sessionID and a stream emitter to tool handlers that want to
+	// surface their own events (e.g. todo_write). Injection happens at this
+	// single choke point — both sync and stream paths funnel through here.
+	ctx = schema.WithSessionID(ctx, rc.sessionID)
+	if eventSink != nil {
+		ctx = schema.WithEmitter(ctx, schema.Emitter(eventSink))
+	}
+
 	// Dispatch all Start events up-front in ToolCalls order so downstream
 	// consumers (tests, UI) see a stable sequence regardless of how the
 	// workers below complete.
