@@ -73,9 +73,9 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 	firstTurn := multiToolCallChunks([]struct {
 		ID, Name, Args string
 	}{
-		{"stc-1", "wait", `{"ms":90}`},  // slowest
-		{"stc-2", "wait", `{"ms":10}`},  // fastest
-		{"stc-3", "wait", `{"ms":45}`},  // mid
+		{"stc-1", "wait", `{"ms":90}`}, // slowest
+		{"stc-2", "wait", `{"ms":10}`}, // fastest
+		{"stc-3", "wait", `{"ms":45}`}, // mid
 	})
 	secondTurn := []string{textDeltaChunk("done"), stopChunk()}
 

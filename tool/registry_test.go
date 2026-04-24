@@ -101,7 +101,7 @@ func TestRegistry_List_DeterministicOrder(t *testing.T) {
 	_ = r.Register(schema.ToolDef{Name: "bravo"}, echoHandler)
 
 	want := []string{"alpha", "bravo", "charlie", "delta"}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		defs := r.List()
 		if len(defs) != len(want) {
 			t.Fatalf("iter %d len(List) = %d, want %d", i, len(defs), len(want))
