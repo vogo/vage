@@ -73,6 +73,11 @@ type Agent struct {
 	// definition with cache breakpoints so Anthropic prompt caching kicks
 	// in on the repeat ReAct iterations. No on-wire effect for OpenAI.
 	promptCaching bool
+	// extraSources are vctx.Source plug-ins inserted into the ContextBuilder
+	// pipeline AFTER SessionMemorySource and BEFORE RequestMessagesSource.
+	// Used to inject cross-cutting context like the Plan Workspace, vector
+	// recall, or session tree without rewriting the whole Builder.
+	extraSources []vctx.Source
 }
 
 var (
@@ -179,6 +184,30 @@ func WithPromptCaching(on bool) Option {
 	return func(a *Agent) { a.promptCaching = on }
 }
 
+// WithExtraSources appends vctx.Source plug-ins to the ContextBuilder used
+// by every Run / RunStream call. Extras are inserted AFTER the built-in
+// SessionMemorySource and BEFORE RequestMessagesSource so the resulting
+// message order is [system, session_memory, ...extras, request].
+//
+// Use this to plug in cross-cutting context like a Plan Workspace, a
+// vector recall layer, or a session tree without rewriting the whole
+// Builder. Calling the option multiple times appends; nil sources are
+// ignored.
+//
+// Equivalent to vage/context's "WithSource", but at the TaskAgent layer
+// rather than the Builder layer — convenient because TaskAgent owns its
+// Builder construction internally.
+func WithExtraSources(srcs ...vctx.Source) Option {
+	return func(a *Agent) {
+		for _, s := range srcs {
+			if s == nil {
+				continue
+			}
+			a.extraSources = append(a.extraSources, s)
+		}
+	}
+}
+
 // New creates a new Agent with the given config and options.
 func New(cfg agent.Config, opts ...Option) *Agent {
 	a := &Agent{
@@ -270,21 +299,34 @@ type runContext struct {
 }
 
 // buildInitialMessages assembles the message list sent to the LLM via a
-// vctx.DefaultBuilder configured with three built-in sources:
-// SystemPromptSource → SessionMemorySource → RequestMessagesSource. The
-// resulting message order matches the previous hand-rolled assembly
-// ([system, session history, request]) byte-for-byte.
+// vctx.DefaultBuilder configured with the built-in sources
+// SystemPromptSource → SessionMemorySource → ...extras → RequestMessagesSource.
+// When no extras are configured the message order matches the previous
+// hand-rolled assembly ([system, session history, request]) byte-for-byte;
+// extras (configured via WithExtraSources, e.g. a Plan Workspace) slot in
+// just before the current-turn request so cross-cutting context lands as
+// late context rather than as part of recallable memory.
 //
 // sessionMsgCount in the returned buildResult is read from the
 // SessionMemorySource report so storeAndPromoteMessages can offset its
 // indices past existing entries.
 func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest) (buildResult, error) {
-	builder := vctx.NewDefaultBuilder(
+	// Source order: [system, session_memory, ...extras, request].
+	// Extras (like WorkspaceSource) sit between session history and the
+	// current-turn request so the LLM reads "what we had before" → "what we
+	// know about this task across runs" → "what the user is asking now".
+	builderOpts := []vctx.Option{
 		vctx.WithSource(&vctx.SystemPromptSource{Template: a.systemPrompt}),
 		vctx.WithSource(&vctx.SessionMemorySource{Manager: a.memoryManager}),
+	}
+	for _, s := range a.extraSources {
+		builderOpts = append(builderOpts, vctx.WithSource(s))
+	}
+	builderOpts = append(builderOpts,
 		vctx.WithSource(&vctx.RequestMessagesSource{}),
 		vctx.WithHookManager(a.hookManager),
 	)
+	builder := vctx.NewDefaultBuilder(builderOpts...)
 
 	res, err := builder.Build(ctx, vctx.BuildInput{
 		SessionID: req.SessionID,

@@ -76,6 +76,13 @@ const (
 	// assembly completes). Payload is ContextBuiltData and carries per-source
 	// reports for audit and observability.
 	EventContextBuilt = "context_built"
+
+	// Workspace events (emitted by the plan_update / notes_write built-in
+	// tools whenever the per-session plan workspace changes). Payload is a
+	// WorkspacePlanUpdatedData / WorkspaceNoteWrittenData snapshot —
+	// consumers can record progress without having to read plan.md.
+	EventWorkspacePlanUpdated = "workspace.plan_updated"
+	EventWorkspaceNoteWritten = "workspace.note_written"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -394,6 +401,27 @@ type ContextBuiltData struct {
 }
 
 func (ContextBuiltData) eventData() {}
+
+// WorkspacePlanUpdatedData is the payload for EventWorkspacePlanUpdated.
+// Cleared is true when the writer passed an empty content (deleting plan.md).
+type WorkspacePlanUpdatedData struct {
+	SessionID string `json:"session_id"`
+	Bytes     int    `json:"bytes"`
+	Cleared   bool   `json:"cleared,omitempty"`
+}
+
+func (WorkspacePlanUpdatedData) eventData() {}
+
+// WorkspaceNoteWrittenData is the payload for EventWorkspaceNoteWritten.
+// Cleared is true when the writer passed an empty content (deleting the note).
+type WorkspaceNoteWrittenData struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+	Bytes     int    `json:"bytes"`
+	Cleared   bool   `json:"cleared,omitempty"`
+}
+
+func (WorkspaceNoteWrittenData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {

@@ -40,6 +40,7 @@ const (
 	SourceNameSystemPrompt    = "system_prompt"
 	SourceNameSessionMemory   = "session_memory"
 	SourceNameSessionState    = "session_state"
+	SourceNameWorkspace       = "workspace"
 	SourceNameRequestMessages = "request_messages"
 )
 
