@@ -31,12 +31,12 @@ import (
 
 const (
 	ToolName        = "web_search"
-	toolDescription = "Search the public web by keyword and return a list of result URLs with titles and snippets. The result URLs can be passed to web_fetch for full content. Provider is configured by the operator (Tavily / Brave); the agent does not choose."
+	toolDescription = "Search the public web by keyword and return a list of result URLs with titles and snippets. The result URLs can be passed to web_fetch for full content. Provider is configured by the operator (Tavily / Brave / SearXNG); the agent does not choose."
 
 	defaultTimeout        = 10 * time.Second
 	defaultMaxResults     = 5
 	defaultHardMaxResults = 20
-	defaultUserAgent      = "vv-agent-web-search/1.0"
+	defaultUserAgent      = "vage-web-search/1.0"
 	maxQueryRunes         = 1024
 	maxTopicRunes         = 64
 )
