@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/memory"
@@ -269,89 +269,49 @@ type runContext struct {
 	estimated  bool // true if token tracking is based on heuristic estimation
 }
 
-// buildInitialMessages builds the message list starting with the system prompt,
-// followed by session history (if memory is configured), then request messages.
-func (a *Agent) buildInitialMessages(ctx context.Context, reqMsgs []schema.Message) (buildResult, error) {
-	sessionMsgs, sessionMsgCount := a.loadAndCompressSessionHistory(ctx)
+// buildInitialMessages assembles the message list sent to the LLM via a
+// vctx.DefaultBuilder configured with three built-in sources:
+// SystemPromptSource → SessionMemorySource → RequestMessagesSource. The
+// resulting message order matches the previous hand-rolled assembly
+// ([system, session history, request]) byte-for-byte.
+//
+// sessionMsgCount in the returned buildResult is read from the
+// SessionMemorySource report so storeAndPromoteMessages can offset its
+// indices past existing entries.
+func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest) (buildResult, error) {
+	builder := vctx.NewDefaultBuilder(
+		vctx.WithSource(&vctx.SystemPromptSource{Template: a.systemPrompt}),
+		vctx.WithSource(&vctx.SessionMemorySource{Manager: a.memoryManager}),
+		vctx.WithSource(&vctx.RequestMessagesSource{}),
+		vctx.WithHookManager(a.hookManager),
+	)
 
-	messages := make([]aimodel.Message, 0, 1+len(sessionMsgs)+len(reqMsgs))
-
-	if a.systemPrompt != nil {
-		sysText, err := a.systemPrompt.Render(ctx, nil)
-		if err != nil {
-			return buildResult{}, fmt.Errorf("vage: render system prompt: %w", err)
-		}
-
-		if sysText != "" {
-			messages = append(messages, aimodel.Message{
-				Role:    aimodel.RoleSystem,
-				Content: aimodel.NewTextContent(sysText),
-			})
-		}
-	}
-
-	messages = append(messages, schema.ToAIModelMessages(sessionMsgs)...)
-	messages = append(messages, schema.ToAIModelMessages(reqMsgs)...)
-
-	return buildResult{messages: messages, sessionMsgCount: sessionMsgCount}, nil
-}
-
-// loadAndCompressSessionHistory loads session messages, applies compression,
-// and returns the (possibly compressed) messages along with the original count.
-// Returns (nil, 0) if memory is not configured or on error.
-func (a *Agent) loadAndCompressSessionHistory(ctx context.Context) ([]schema.Message, int) {
-	if a.memoryManager == nil || a.memoryManager.Session() == nil {
-		return nil, 0
-	}
-
-	loaded, err := a.loadSessionMessages(ctx)
-	if err != nil {
-		slog.Warn("vage: load session messages", "error", err)
-		return nil, 0
-	}
-
-	originalCount := len(loaded)
-
-	if c := a.memoryManager.Compressor(); c != nil && len(loaded) > 0 {
-		compressed, compErr := c.Compress(ctx, loaded, 0)
-		if compErr != nil {
-			slog.Warn("vage: compress session messages", "error", compErr)
-		} else {
-			loaded = compressed
-		}
-	}
-
-	return loaded, originalCount
-}
-
-// loadSessionMessages loads stored messages from session memory, sorted by key.
-func (a *Agent) loadSessionMessages(ctx context.Context) ([]schema.Message, error) {
-	entries, err := a.memoryManager.Session().List(ctx, "msg:")
-	if err != nil {
-		return nil, err
-	}
-
-	if len(entries) == 0 {
-		return nil, nil
-	}
-
-	slices.SortFunc(entries, func(a, b memory.Entry) int {
-		return strings.Compare(a.Key, b.Key)
+	res, err := builder.Build(ctx, vctx.BuildInput{
+		SessionID: req.SessionID,
+		AgentID:   a.ID(),
+		Intent:    "react-iter",
+		Request:   req,
 	})
-
-	msgs := make([]schema.Message, 0, len(entries))
-
-	for _, e := range entries {
-		msg, ok := e.Value.(schema.Message)
-		if !ok {
-			slog.Warn("vage: unexpected entry type in session", "key", e.Key, "type", fmt.Sprintf("%T", e.Value))
-			continue
-		}
-
-		msgs = append(msgs, msg)
+	if err != nil {
+		return buildResult{}, fmt.Errorf("vage: build context: %w", err)
 	}
 
-	return msgs, nil
+	return buildResult{
+		messages:        res.Messages,
+		sessionMsgCount: sessionMsgCountFromReport(res.Report),
+	}, nil
+}
+
+// sessionMsgCountFromReport extracts the pre-compression message count
+// the SessionMemorySource recorded so taskagent can offset newly stored
+// message keys past existing entries.
+func sessionMsgCountFromReport(r vctx.BuildReport) int {
+	for _, s := range r.Sources {
+		if s.Source == vctx.SourceNameSessionMemory {
+			return s.OriginalCount
+		}
+	}
+	return 0
 }
 
 // prepareAITools converts registry tools to aimodel.Tool slice, applying any filter.
@@ -863,7 +823,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, rc.sessionID, schema.AgentStartData{}))
 
-	br, err := a.buildInitialMessages(ctx, req.Messages)
+	br, err := a.buildInitialMessages(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1126,7 +1086,7 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 
 	p := a.resolveRunParams(req.Options)
 
-	br, err := a.buildInitialMessages(ctx, req.Messages)
+	br, err := a.buildInitialMessages(ctx, req)
 	if err != nil {
 		return nil, err
 	}

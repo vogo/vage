@@ -71,6 +71,11 @@ const (
 	// — consumers receive a version number and can treat each event as an
 	// idempotent replacement of their local state.
 	EventTodoUpdate = "todo_update"
+
+	// Context build event (emitted by vage/context.Builder when a prompt
+	// assembly completes). Payload is ContextBuiltData and carries per-source
+	// reports for audit and observability.
+	EventContextBuilt = "context_built"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -359,6 +364,36 @@ type TodoUpdateData struct {
 }
 
 func (TodoUpdateData) eventData() {}
+
+// ContextSourceReport describes a single Source.Fetch outcome inside a
+// Builder run. The vage/context package reuses this type as its FetchReport
+// so the wire format and the in-process structure match exactly — no
+// mirrored types, no ToEventData copy field-by-field for the source list.
+type ContextSourceReport struct {
+	Source        string `json:"source"`
+	Status        string `json:"status"`                   // "ok" | "skipped" | "error" | "truncated"
+	InputN        int    `json:"input_n,omitempty"`        // candidate item count (semantics per source)
+	OutputN       int    `json:"output_n"`                 // emitted message count
+	DroppedN      int    `json:"dropped_n,omitempty"`      // candidates dropped by the source
+	Tokens        int    `json:"tokens"`                   // estimated tokens of emitted messages
+	OriginalCount int    `json:"original_count,omitempty"` // session-history sources: pre-compression message count
+	Note          string `json:"note,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// ContextBuiltData is the payload for EventContextBuilt.
+type ContextBuiltData struct {
+	Builder      string                `json:"builder"`
+	Strategy     string                `json:"strategy"`     // currently fixed at "ordered_greedy"
+	BudgetTotal  int                   `json:"budget_total"` // 0 = unlimited
+	OutputCount  int                   `json:"output_count"`
+	OutputTokens int                   `json:"output_tokens"`
+	DroppedCount int                   `json:"dropped_count"`
+	Sources      []ContextSourceReport `json:"sources"`
+	Duration     int64                 `json:"duration_ms"`
+}
+
+func (ContextBuiltData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
