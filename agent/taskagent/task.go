@@ -34,6 +34,7 @@ import (
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -82,6 +83,10 @@ type Agent struct {
 	// iterationStore persists per-iteration ReAct snapshots so a Run can
 	// be resumed across crashes. nil disables checkpointing entirely.
 	iterationStore checkpoint.IterationStore
+	// contextEditor, when non-nil, is wrapped around chatCompleter at
+	// the end of New so multi-iteration ReAct loops automatically fold
+	// older tool_result messages into placeholders. See WithContextEditor.
+	contextEditor *largemodel.ContextEditorMiddleware
 }
 
 var (
@@ -196,6 +201,19 @@ func WithIterationStore(s checkpoint.IterationStore) Option {
 	return func(a *Agent) { a.iterationStore = s }
 }
 
+// WithContextEditor wraps the agent's ChatCompleter with a Context
+// Editing middleware so multi-iteration ReAct loops automatically
+// fold older tool_result messages into short placeholders before each
+// LLM request leaves the agent.
+//
+// Wrapping happens at New time AFTER WithChatCompleter is resolved, so
+// option order does not matter. Pass nil to leave the chain untouched.
+// If chatCompleter is itself nil at New time the option is a no-op
+// (the agent will fail at first Run as before).
+func WithContextEditor(mw *largemodel.ContextEditorMiddleware) Option {
+	return func(a *Agent) { a.contextEditor = mw }
+}
+
 // WithExtraSources appends vctx.Source plug-ins to the ContextBuilder used
 // by every Run / RunStream call. Extras are inserted AFTER the built-in
 // SessionMemorySource and BEFORE RequestMessagesSource so the resulting
@@ -232,6 +250,15 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 	for _, o := range opts {
 		o(a)
 	}
+
+	// WithContextEditor is order-insensitive: wrap chatCompleter at the
+	// innermost layer once all options have resolved. nil chatCompleter
+	// means the agent will fail at first Run as before — wrapping nil
+	// would just defer the same failure.
+	if a.contextEditor != nil && a.chatCompleter != nil {
+		a.chatCompleter = largemodel.Chain(a.chatCompleter, a.contextEditor)
+	}
+
 	return a
 }
 

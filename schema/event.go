@@ -91,6 +91,12 @@ const (
 	// downstream consumers can compare against EventIterationStart counts
 	// to detect store failures without needing a failure-variant event.
 	EventCheckpointWritten = "checkpoint_written"
+
+	// Context editing event (emitted by largemodel.ContextEditorMiddleware
+	// when at least one tool_result in an outgoing ChatRequest is folded
+	// into a placeholder). Payload is ContextEditedData. Silent passes
+	// (nothing eligible / under threshold) emit no event.
+	EventContextEdited = "context_edited"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -445,6 +451,21 @@ type CheckpointWrittenData struct {
 }
 
 func (CheckpointWrittenData) eventData() {}
+
+// ContextEditedData is the payload for EventContextEdited. It is
+// emitted by largemodel.ContextEditorMiddleware after a successful
+// edit pass on a single outgoing ChatRequest. Edited is always >= 1
+// (silent passes emit no event).
+type ContextEditedData struct {
+	Edited        int    `json:"edited"`                      // count of tool_result messages elided this pass
+	Kept          int    `json:"kept"`                        // count of tool_result messages kept verbatim
+	Total         int    `json:"total"`                       // total messages in the request
+	OriginalBytes int    `json:"original_bytes"`              // sum of elided original Content.Text() byte length
+	Placeholder   int    `json:"placeholder_bytes,omitempty"` // sum of placeholder string byte length
+	Strategy      string `json:"strategy"`                    // currently fixed at "keep_last_k"
+}
+
+func (ContextEditedData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
