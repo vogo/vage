@@ -113,6 +113,18 @@ type SessionTreeSource struct {
 	// non-path siblings/children.
 	IncludePromoted bool
 
+	// Predicate, when non-nil, gates Fetch on a per-session basis: when
+	// the predicate returns false the source short-circuits with
+	// Status=Skipped and Note="predicate gated", emitting no message.
+	// This is the hook for lazy-activation policies (e.g., "do not inject
+	// the tree until the session has crossed N events"). Predicate runs
+	// before any store I/O so a gated session pays no extra read cost.
+	//
+	// Implementations should be cheap and side-effect-free. Panics in the
+	// predicate fall open: the source emits Status=Error with the panic
+	// info and the build proceeds with the next source.
+	Predicate func(ctx context.Context, sessionID string) bool
+
 	// Render overrides the default renderer.
 	Render TreeRenderer
 }
@@ -132,6 +144,20 @@ func (s *SessionTreeSource) Fetch(ctx context.Context, in FetchInput) (FetchResu
 		rep.Status = StatusSkipped
 		rep.Note = "no store / no session"
 		return FetchResult{Report: rep}, nil
+	}
+
+	if s.Predicate != nil {
+		ok, recovered := safeCallPredicate(s.Predicate, ctx, in.SessionID)
+		if recovered != "" {
+			rep.Status = StatusError
+			rep.Error = "predicate panic: " + recovered
+			return FetchResult{Report: rep}, nil
+		}
+		if !ok {
+			rep.Status = StatusSkipped
+			rep.Note = "predicate gated"
+			return FetchResult{Report: rep}, nil
+		}
 	}
 
 	tr, err := s.Store.GetTree(ctx, in.SessionID)
@@ -335,6 +361,19 @@ func mostRecentDoneSibling(tr *tree.SessionTree, parent *tree.TreeNode, skipID s
 		}
 	}
 	return best
+}
+
+// safeCallPredicate runs fn under a deferred recover so a panicking
+// caller-supplied predicate cannot bring down the Builder. recovered is
+// "" on a clean call and a stringified panic otherwise.
+func safeCallPredicate(fn func(context.Context, string) bool, ctx context.Context, sid string) (ok bool, recovered string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			recovered = fmt.Sprintf("%v", rec)
+			slog.Warn("vctx: session tree predicate panicked", "panic", rec)
+		}
+	}()
+	return fn(ctx, sid), ""
 }
 
 // recoveringTreeRenderer wraps a renderer so a panicking caller-supplied

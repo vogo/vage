@@ -234,6 +234,75 @@ func TestTreeSource_ByteCap(t *testing.T) {
 	}
 }
 
+// TestTreeSource_PredicateGated covers the lazy-activation contract: when
+// the predicate returns false, Fetch must short-circuit with status
+// "skipped" and emit zero messages — even though the underlying tree
+// exists and would otherwise render.
+func TestTreeSource_PredicateGated(t *testing.T) {
+	src := &SessionTreeSource{
+		Store: &stubTreeStore{tr: fixtureTree()},
+		Predicate: func(_ context.Context, _ string) bool {
+			return false
+		},
+	}
+	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Report.Status != StatusSkipped {
+		t.Errorf("Status=%q want skipped", res.Report.Status)
+	}
+	if res.Report.Note != "predicate gated" {
+		t.Errorf("Note=%q want 'predicate gated'", res.Report.Note)
+	}
+	if len(res.Messages) != 0 {
+		t.Errorf("messages=%d want 0", len(res.Messages))
+	}
+}
+
+// TestTreeSource_PredicatePass exercises the inverse: predicate=true is a
+// no-op and the source renders the tree normally.
+func TestTreeSource_PredicatePass(t *testing.T) {
+	src := &SessionTreeSource{
+		Store: &stubTreeStore{tr: fixtureTree()},
+		Predicate: func(_ context.Context, _ string) bool {
+			return true
+		},
+	}
+	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Report.Status != StatusOK {
+		t.Errorf("Status=%q want ok", res.Report.Status)
+	}
+	if len(res.Messages) != 1 {
+		t.Errorf("messages=%d want 1", len(res.Messages))
+	}
+}
+
+// TestTreeSource_PredicatePanicFailsOpen confirms a panicking predicate
+// does not crash the build; it surfaces as Status=Error and the
+// surrounding Builder pipeline keeps going.
+func TestTreeSource_PredicatePanicFailsOpen(t *testing.T) {
+	src := &SessionTreeSource{
+		Store: &stubTreeStore{tr: fixtureTree()},
+		Predicate: func(_ context.Context, _ string) bool {
+			panic("predicate boom")
+		},
+	}
+	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if res.Report.Status != StatusError {
+		t.Errorf("Status=%q want error", res.Report.Status)
+	}
+	if res.Report.Error == "" {
+		t.Errorf("expected non-empty Error string")
+	}
+}
+
 func TestTreeSource_CustomRenderPanic(t *testing.T) {
 	src := &SessionTreeSource{
 		Store:  &stubTreeStore{tr: fixtureTree()},
