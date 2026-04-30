@@ -30,6 +30,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/checkpoint"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
@@ -78,6 +79,9 @@ type Agent struct {
 	// Used to inject cross-cutting context like the Plan Workspace, vector
 	// recall, or session tree without rewriting the whole Builder.
 	extraSources []vctx.Source
+	// iterationStore persists per-iteration ReAct snapshots so a Run can
+	// be resumed across crashes. nil disables checkpointing entirely.
+	iterationStore checkpoint.IterationStore
 }
 
 var (
@@ -182,6 +186,14 @@ func WithMaxParallelToolCalls(n int) Option {
 // marker.
 func WithPromptCaching(on bool) Option {
 	return func(a *Agent) { a.promptCaching = on }
+}
+
+// WithIterationStore enables per-iteration checkpointing for Run /
+// RunStream and is the prerequisite for Resume. When nil (the default)
+// no checkpoints are written and Resume returns
+// checkpoint.ErrInvalidArgument.
+func WithIterationStore(s checkpoint.IterationStore) Option {
+	return func(a *Agent) { a.iterationStore = s }
 }
 
 // WithExtraSources appends vctx.Source plug-ins to the ContextBuilder used
@@ -885,6 +897,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 		// Pre-call budget check.
 		if rc.tracker.Exhausted() {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
 			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
 		}
 
@@ -915,11 +928,13 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		messages = append(messages, assistantMsg)
 
 		if choice.FinishReason != aimodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls) == 0 {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonComplete)
 			return a.finalizeRun(ctx, rc, schema.StopReasonComplete), nil
 		}
 
 		// Post-call budget check before executing tool calls.
 		if rc.tracker.Exhausted() {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
 			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
 		}
 
@@ -929,10 +944,13 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		}
 		toolMsgs, _ := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls, false, sink)
 		messages = append(messages, toolMsgs...)
+
+		a.saveIterationCheckpoint(ctx, rc, messages, false, "")
 	}
 
 	// Max iterations exceeded.
 	rc.iteration = p.maxIter - 1
+	a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonMaxIterations)
 	return a.finalizeRun(ctx, rc, schema.StopReasonMaxIterations), nil
 }
 
@@ -1195,6 +1213,7 @@ func (a *Agent) runStreamLoop(
 
 		// Pre-call budget check.
 		if rc.tracker.Exhausted() {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
 			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonBudgetExhausted)
 		}
 
@@ -1290,11 +1309,13 @@ func (a *Agent) runStreamLoop(
 		messages = append(messages, accumulated)
 
 		if finishReason != aimodel.FinishReasonToolCalls || len(accumulated.ToolCalls) == 0 {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonComplete)
 			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonComplete)
 		}
 
 		// Post-call budget check before executing tool calls.
 		if rc.tracker.Exhausted() {
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
 			return a.finalizeStream(ctx, send, rc, req, schema.StopReasonBudgetExhausted)
 		}
 
@@ -1305,10 +1326,13 @@ func (a *Agent) runStreamLoop(
 			return err
 		}
 		messages = append(messages, toolMsgs...)
+
+		a.saveIterationCheckpoint(ctx, rc, messages, false, "")
 	}
 
 	// Max iterations exceeded.
 	rc.iteration = p.maxIter - 1
+	a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonMaxIterations)
 	return a.finalizeStream(ctx, send, rc, req, schema.StopReasonMaxIterations)
 }
 

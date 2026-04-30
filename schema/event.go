@@ -83,6 +83,14 @@ const (
 	// consumers can record progress without having to read plan.md.
 	EventWorkspacePlanUpdated = "workspace.plan_updated"
 	EventWorkspaceNoteWritten = "workspace.note_written"
+
+	// Iteration-level checkpoint event (emitted by TaskAgent at the end
+	// of each ReAct iteration after a successful IterationStore.Save).
+	// Payload is CheckpointWrittenData. The "successful save" precondition
+	// keeps the invariant: hook event count == checkpoints persisted, so
+	// downstream consumers can compare against EventIterationStart counts
+	// to detect store failures without needing a failure-variant event.
+	EventCheckpointWritten = "checkpoint_written"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -422,6 +430,21 @@ type WorkspaceNoteWrittenData struct {
 }
 
 func (WorkspaceNoteWrittenData) eventData() {}
+
+// CheckpointWrittenData is the payload for EventCheckpointWritten. It
+// is emitted by TaskAgent after the IterationStore has successfully
+// persisted the iteration snapshot. Final == true ⇒ StopReason != "".
+type CheckpointWrittenData struct {
+	CheckpointID  string     `json:"checkpoint_id"`
+	Sequence      int        `json:"sequence"`
+	Iteration     int        `json:"iteration"`
+	Final         bool       `json:"final,omitempty"`
+	StopReason    StopReason `json:"stop_reason,omitempty"`
+	MessagesCount int        `json:"messages_count"`
+	TotalTokens   int        `json:"total_tokens"`
+}
+
+func (CheckpointWrittenData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
