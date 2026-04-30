@@ -41,6 +41,7 @@ const (
 	SourceNameSessionMemory   = "session_memory"
 	SourceNameSessionState    = "session_state"
 	SourceNameWorkspace       = "workspace"
+	SourceNameVectorRecall    = "vector_recall"
 	SourceNameRequestMessages = "request_messages"
 )
 
