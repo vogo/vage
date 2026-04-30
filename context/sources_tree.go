@@ -53,8 +53,22 @@ type TreeView struct {
 	Tree              *tree.SessionTree
 	Path              []*tree.TreeNode // root → cursor; len >= 1 when populated
 	CursorChildren    []*tree.TreeNode // direct children of cursor (truncated to MaxSiblingTitles)
-	CursorChildrenN   int              // total before truncation
-	RecentDoneSibling *tree.TreeNode   // most-recent done sibling of cursor; may be nil
+	CursorChildrenN   int              // total non-promoted before truncation
+	RecentDoneSibling *tree.TreeNode   // most-recent (non-promoted) done sibling of cursor; may be nil
+
+	// CursorChildrenPromotedN is the number of promoted children skipped
+	// from CursorChildren (renderer surfaces them as a "(folded: N children, M done)"
+	// hint). Zero when nothing is folded or IncludePromoted=true.
+	CursorChildrenPromotedN int
+
+	// CursorChildrenPromotedDone is the number of promoted children whose
+	// Status == StatusDone. Always <= CursorChildrenPromotedN.
+	CursorChildrenPromotedDone int
+
+	// IncludePromoted carries the source's flag to the renderer: when true,
+	// promoted children are mixed into CursorChildren and the folded hint is
+	// suppressed.
+	IncludePromoted bool
 
 	// MaxPathDepth carries the source's configured path-depth cap to the
 	// renderer. 0 means the renderer should fall back to its own default.
@@ -87,6 +101,17 @@ type SessionTreeSource struct {
 	// the cap because the head of the output (Goal + path) is the most
 	// important context for the next turn.
 	MaxBytes int
+
+	// IncludePromoted disables the folding behaviour: when true, nodes
+	// with Promoted=true are rendered alongside the live ones and the
+	// "(folded: ...)" hint is suppressed. Default false matches the
+	// "compress old work" prompt-shaping intent. Use true for zoom-in
+	// flows that want full visibility (audit, debugging, manual review).
+	//
+	// Path nodes (root → cursor) are always rendered regardless of this
+	// flag — the navigation spine must survive. Folding only affects
+	// non-path siblings/children.
+	IncludePromoted bool
 
 	// Render overrides the default renderer.
 	Render TreeRenderer
@@ -185,7 +210,7 @@ func (s *SessionTreeSource) buildView(tr *tree.SessionTree) (TreeView, bool) {
 		return TreeView{}, false
 	}
 
-	view := TreeView{Tree: tr, MaxPathDepth: s.MaxPathDepth}
+	view := TreeView{Tree: tr, MaxPathDepth: s.MaxPathDepth, IncludePromoted: s.IncludePromoted}
 
 	// Path: root → cursor. When the cursor is absent or invalid we walk
 	// the tree along the active branch where possible; otherwise the path
@@ -205,13 +230,20 @@ func (s *SessionTreeSource) buildView(tr *tree.SessionTree) (TreeView, bool) {
 	if maxSiblings <= 0 {
 		maxSiblings = defaultTreeMaxSiblingTitles
 	}
-	view.CursorChildrenN = len(cursor.Children)
-	view.CursorChildren = make([]*tree.TreeNode, 0, min(maxSiblings, len(cursor.Children)))
 	for _, cid := range cursor.Children {
-		if len(view.CursorChildren) >= maxSiblings {
-			break
+		c, ok := tr.Nodes[cid]
+		if !ok {
+			continue
 		}
-		if c, ok := tr.Nodes[cid]; ok {
+		if c.Promoted && !s.IncludePromoted {
+			view.CursorChildrenPromotedN++
+			if c.Status == tree.StatusDone {
+				view.CursorChildrenPromotedDone++
+			}
+			continue
+		}
+		view.CursorChildrenN++
+		if len(view.CursorChildren) < maxSiblings {
 			view.CursorChildren = append(view.CursorChildren, c)
 		}
 	}
@@ -221,7 +253,7 @@ func (s *SessionTreeSource) buildView(tr *tree.SessionTree) (TreeView, bool) {
 	// next turn picks up where the previous one finished.
 	if cursor.Parent != "" {
 		if parent, ok := tr.Nodes[cursor.Parent]; ok {
-			view.RecentDoneSibling = mostRecentDoneSibling(tr, parent, cursor.ID)
+			view.RecentDoneSibling = mostRecentDoneSibling(tr, parent, cursor.ID, s.IncludePromoted)
 		}
 	}
 
@@ -278,9 +310,11 @@ func pathFromRoot(tr *tree.SessionTree, root, cursor *tree.TreeNode) []*tree.Tre
 }
 
 // mostRecentDoneSibling returns the parent's most-recently-updated done
-// child whose id != skipID (the cursor itself). Returns nil when no such
-// sibling exists.
-func mostRecentDoneSibling(tr *tree.SessionTree, parent *tree.TreeNode, skipID string) *tree.TreeNode {
+// child whose id != skipID (the cursor itself). When includePromoted is
+// false the search skips promoted siblings — the renderer's intent there
+// is "show what's still live", not "remind the LLM of folded subtrees".
+// Returns nil when no such sibling exists.
+func mostRecentDoneSibling(tr *tree.SessionTree, parent *tree.TreeNode, skipID string, includePromoted bool) *tree.TreeNode {
 	var best *tree.TreeNode
 	for _, cid := range parent.Children {
 		if cid == skipID {
@@ -291,6 +325,9 @@ func mostRecentDoneSibling(tr *tree.SessionTree, parent *tree.TreeNode, skipID s
 			continue
 		}
 		if c.Status != tree.StatusDone {
+			continue
+		}
+		if c.Promoted && !includePromoted {
 			continue
 		}
 		if best == nil || c.UpdatedAt.After(best.UpdatedAt) {
@@ -362,13 +399,17 @@ func defaultTreeRender(_ FetchInput, view TreeView) string {
 	}
 
 	cursor := view.Path[len(view.Path)-1]
-	if len(view.CursorChildren) > 0 || view.CursorChildrenN > 0 {
+	if len(view.CursorChildren) > 0 || view.CursorChildrenN > 0 || view.CursorChildrenPromotedN > 0 {
 		b.WriteString("### Cursor's children\n")
 		for _, c := range view.CursorChildren {
 			writeNodeLine(&b, c, "")
 		}
 		if view.CursorChildrenN > len(view.CursorChildren) {
 			fmt.Fprintf(&b, "(... and %d more)\n", view.CursorChildrenN-len(view.CursorChildren))
+		}
+		if !view.IncludePromoted && view.CursorChildrenPromotedN > 0 {
+			fmt.Fprintf(&b, "(folded: %d children, %d done)\n",
+				view.CursorChildrenPromotedN, view.CursorChildrenPromotedDone)
 		}
 		b.WriteByte('\n')
 	} else {

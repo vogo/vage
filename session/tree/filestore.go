@@ -66,6 +66,11 @@ type FileTreeStore struct {
 
 	hooks *hook.Manager
 	now   func() time.Time
+
+	promoter        Promoter
+	promotionDecide PromotionDecider
+	asyncRunner     func(func())
+	inflight        promotionInflight
 }
 
 // FileOption configures a FileTreeStore.
@@ -85,6 +90,30 @@ func WithFileClock(fn func() time.Time) FileOption {
 	}
 }
 
+// WithFilePromoter configures the Promoter used by PromoteNode and the
+// auto-trigger pipeline. nil disables both.
+func WithFilePromoter(p Promoter) FileOption {
+	return func(s *FileTreeStore) { s.promoter = p }
+}
+
+// WithFilePromotionDecider configures the trigger that fires automatic
+// promotion after AddNode / UpdateNode. nil disables auto-promotion;
+// PromoteNode remains usable as a synchronous primitive.
+func WithFilePromotionDecider(d PromotionDecider) FileOption {
+	return func(s *FileTreeStore) { s.promotionDecide = d }
+}
+
+// WithFilePromotionAsync injects the runner used to execute auto-triggered
+// promotions. The default is `go fn()`. Tests inject a synchronous runner
+// to avoid timing flakes.
+func WithFilePromotionAsync(fn func(func())) FileOption {
+	return func(s *FileTreeStore) {
+		if fn != nil {
+			s.asyncRunner = fn
+		}
+	}
+}
+
 // Compile-time conformance.
 var _ SessionTreeStore = (*FileTreeStore)(nil)
 
@@ -99,8 +128,9 @@ func NewFileTreeStore(root string, opts ...FileOption) (*FileTreeStore, error) {
 		return nil, fmt.Errorf("tree: create root %q: %w", root, err)
 	}
 	s := &FileTreeStore{
-		root: root,
-		now:  time.Now,
+		root:        root,
+		now:         time.Now,
+		asyncRunner: defaultAsyncRunner,
 	}
 	for _, o := range opts {
 		o(s)
@@ -258,6 +288,7 @@ func (s *FileTreeStore) AddNode(ctx context.Context, sessionID, parentID string,
 	mu.Unlock()
 
 	s.dispatch(ctx, sessionID, schema.SessionTreeOpAdd, child, count)
+	s.maybeTriggerPromotion(sessionID, parentID)
 	return cloneNode(child), nil
 }
 
@@ -308,10 +339,14 @@ func (s *FileTreeStore) UpdateNode(ctx context.Context, sessionID string, n Tree
 	}
 
 	updated := cloneNode(cur)
+	parentID := cur.Parent
 	count := len(tr.Nodes)
 	mu.Unlock()
 
 	s.dispatch(ctx, sessionID, schema.SessionTreeOpUpdate, updated, count)
+	if parentID != "" {
+		s.maybeTriggerPromotion(sessionID, parentID)
+	}
 	return updated, nil
 }
 
@@ -503,6 +538,180 @@ func (s *FileTreeStore) dispatch(ctx context.Context, sessionID, op string, n *T
 		data.Status = string(n.Status)
 	}
 	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreeUpdated, "", sessionID, data))
+}
+
+// GetTreeView returns the tree filtered by opts.
+func (s *FileTreeStore) GetTreeView(ctx context.Context, sessionID string, opts ViewOptions) (*SessionTree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+	tr, err := s.readTree(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if opts.IncludePromoted {
+		return tr, nil
+	}
+	return filterPromotedFromTree(tr), nil
+}
+
+// PromoteNode aggregates eligible children of nodeID into nodeID's
+// summary using the configured Promoter.
+func (s *FileTreeStore) PromoteNode(ctx context.Context, sessionID, nodeID string) (*TreeNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+	if err := validateNodeID(nodeID); err != nil {
+		return nil, err
+	}
+	if s.promoter == nil {
+		return nil, errPromoterNotConfigured
+	}
+
+	mu := s.lockFor(sessionID)
+
+	// Phase 1: snapshot eligible children under the per-session lock.
+	mu.Lock()
+	tr, err := s.readTree(sessionID)
+	if err != nil {
+		mu.Unlock()
+		return nil, err
+	}
+	parent, ok := tr.Nodes[nodeID]
+	if !ok {
+		mu.Unlock()
+		return nil, fmt.Errorf("%w: %q", ErrNotFound, nodeID)
+	}
+	parentSnap := cloneNode(parent)
+	eligibleSnap := cloneEligible(eligibleChildren(tr, parent))
+	mu.Unlock()
+
+	if len(eligibleSnap) == 0 {
+		return parentSnap, nil
+	}
+
+	// Phase 2: invoke the Promoter outside the lock and dispatch Started.
+	s.dispatchStarted(ctx, sessionID, nodeID, len(eligibleSnap))
+	newSummary, err := s.promoter.Summarize(ctx, parentSnap, eligibleSnap)
+	if err != nil {
+		s.dispatchFailed(ctx, sessionID, nodeID, err)
+		return nil, err
+	}
+	newSummary = clampSummary(newSummary, SummaryMaxBytes)
+
+	// Phase 3: re-acquire the lock and apply.
+	mu.Lock()
+	tr, err = s.readTree(sessionID)
+	if err != nil {
+		mu.Unlock()
+		s.dispatchFailed(ctx, sessionID, nodeID, err)
+		return nil, err
+	}
+	parent, ok = tr.Nodes[nodeID]
+	if !ok {
+		mu.Unlock()
+		err := fmt.Errorf("%w: %q", ErrNotFound, nodeID)
+		s.dispatchFailed(ctx, sessionID, nodeID, err)
+		return nil, err
+	}
+	now := s.now()
+	folded := applyPromotion(parent, tr, newSummary, eligibleSnap, now)
+	// Skip the disk write when applyPromotion produced no mutation; the
+	// snapshot raced empty (every planned child got promoted/pinned in
+	// the gap) and writing back a byte-identical tree would be wasted IO.
+	if folded > 0 {
+		tr.UpdatedAt = now
+		if err := s.writeTree(sessionID, tr); err != nil {
+			mu.Unlock()
+			s.dispatchFailed(ctx, sessionID, nodeID, err)
+			return nil, err
+		}
+	}
+	updatedParent := cloneNode(parent)
+	mu.Unlock()
+
+	// Completed pairs with Started even when folded==0; see MapTreeStore
+	// for the rationale.
+	s.dispatchCompleted(ctx, sessionID, nodeID, folded, len(updatedParent.Summary))
+	return updatedParent, nil
+}
+
+// maybeTriggerPromotion mirrors MapTreeStore.maybeTriggerPromotion. It runs
+// the configured decider against a deep-copied snapshot of the parent +
+// its eligible children, and dispatches PromoteNode via the async runner
+// when the decider fires. The in-flight set drops duplicate triggers for
+// the same (session, parent) instead of queuing them.
+func (s *FileTreeStore) maybeTriggerPromotion(sessionID, parentID string) {
+	if s.promoter == nil || s.promotionDecide == nil {
+		return
+	}
+
+	mu := s.lockFor(sessionID)
+	mu.Lock()
+	tr, err := s.readTree(sessionID)
+	if err != nil {
+		mu.Unlock()
+		return
+	}
+	parent, ok := tr.Nodes[parentID]
+	if !ok {
+		mu.Unlock()
+		return
+	}
+	parentSnap := cloneNode(parent)
+	eligibleSnap := cloneEligible(eligibleChildren(tr, parent))
+	mu.Unlock()
+
+	if !s.promotionDecide.ShouldPromote(parentSnap, eligibleSnap) {
+		return
+	}
+	if !s.inflight.reserve(sessionID, parentID) {
+		return
+	}
+
+	runner := s.asyncRunner
+	if runner == nil {
+		runner = defaultAsyncRunner
+	}
+	runner(func() {
+		defer s.inflight.release(sessionID, parentID)
+		_, _ = s.PromoteNode(context.Background(), sessionID, parentID)
+	})
+}
+
+// dispatchStarted publishes EventSessionTreePromotionStarted.
+func (s *FileTreeStore) dispatchStarted(ctx context.Context, sessionID, parentID string, eligible int) {
+	if s.hooks == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionStarted, "", sessionID,
+		schema.SessionTreePromotionStartedData{SessionID: sessionID, ParentID: parentID, Eligible: eligible}))
+}
+
+// dispatchCompleted publishes EventSessionTreePromotionCompleted.
+func (s *FileTreeStore) dispatchCompleted(ctx context.Context, sessionID, parentID string, folded, summaryBytes int) {
+	if s.hooks == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionCompleted, "", sessionID,
+		schema.SessionTreePromotionCompletedData{
+			SessionID: sessionID, ParentID: parentID, FoldedCount: folded, NewSummaryBytes: summaryBytes,
+		}))
+}
+
+// dispatchFailed publishes EventSessionTreePromotionFailed.
+func (s *FileTreeStore) dispatchFailed(ctx context.Context, sessionID, parentID string, err error) {
+	if s.hooks == nil || err == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionFailed, "", sessionID,
+		schema.SessionTreePromotionFailedData{SessionID: sessionID, ParentID: parentID, Error: err.Error()}))
 }
 
 // writeFileAtomic encodes data via temp file + rename so a crashed write

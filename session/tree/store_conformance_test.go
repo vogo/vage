@@ -28,8 +28,9 @@ import (
 // store factory. MapStore and FileStore both invoke this so behaviour stays
 // in lock-step.
 //
-//nolint:funlen // Conformance suites exercise full surface area; splitting
 // would obscure the linear narrative for the reader.
+//
+//nolint:funlen // Conformance suites exercise full surface area; splitting
 func runStoreConformance(t *testing.T, makeStore func(t *testing.T) SessionTreeStore) {
 	t.Run("CreateTree happy path", func(t *testing.T) {
 		store := makeStore(t)
@@ -281,5 +282,108 @@ func runStoreConformance(t *testing.T, makeStore func(t *testing.T) SessionTreeS
 			t.Errorf("got %v want ErrInvalidArgument", err)
 		}
 		_ = ctx
+	})
+
+	t.Run("PromoteNode no promoter configured", func(t *testing.T) {
+		store := makeStore(t)
+		ctx := context.Background()
+		root, _ := store.CreateTree(ctx, "s", TreeNode{Title: "Goal"})
+		_, err := store.PromoteNode(ctx, "s", root.ID)
+		if !errors.Is(err, errPromoterNotConfigured) {
+			t.Errorf("got %v want errPromoterNotConfigured", err)
+		}
+	})
+
+	t.Run("PromoteNode missing tree", func(t *testing.T) {
+		store := makeStoreWithPromoter(t, makeStore, fixedPromoter("rolled"))
+		_, err := store.PromoteNode(context.Background(), "absent", "tn-x")
+		if !errors.Is(err, ErrTreeMissing) {
+			t.Errorf("got %v want ErrTreeMissing", err)
+		}
+	})
+
+	t.Run("GetTreeView IncludePromoted=true equals GetTree", func(t *testing.T) {
+		store := makeStore(t)
+		ctx := context.Background()
+		root, _ := store.CreateTree(ctx, "s", TreeNode{Title: "Goal"})
+		c, _ := store.AddNode(ctx, "s", root.ID, TreeNode{Type: NodeFact, Title: "f"})
+		_, _ = store.UpdateNode(ctx, "s", TreeNode{ID: c.ID, Title: c.Title, Promoted: true})
+		full, err := store.GetTreeView(ctx, "s", ViewOptions{IncludePromoted: true})
+		if err != nil {
+			t.Fatalf("GetTreeView: %v", err)
+		}
+		if len(full.Nodes) != 2 {
+			t.Errorf("nodes=%d want 2", len(full.Nodes))
+		}
+	})
+
+	t.Run("GetTreeView default filters promoted", func(t *testing.T) {
+		store := makeStore(t)
+		ctx := context.Background()
+		root, _ := store.CreateTree(ctx, "s", TreeNode{Title: "Goal"})
+		live, _ := store.AddNode(ctx, "s", root.ID, TreeNode{Type: NodeSubtask, Title: "live"})
+		gone, _ := store.AddNode(ctx, "s", root.ID, TreeNode{Type: NodeSubtask, Title: "gone"})
+		// Manually mark gone as promoted.
+		_, _ = store.UpdateNode(ctx, "s", TreeNode{ID: gone.ID, Title: gone.Title, Promoted: true})
+		view, err := store.GetTreeView(ctx, "s", ViewOptions{})
+		if err != nil {
+			t.Fatalf("GetTreeView: %v", err)
+		}
+		if _, ok := view.Nodes[gone.ID]; ok {
+			t.Error("promoted child should be filtered")
+		}
+		if _, ok := view.Nodes[live.ID]; !ok {
+			t.Error("live child should be present")
+		}
+		// Parent's Children list must omit the promoted child.
+		rootNode := view.Nodes[root.ID]
+		for _, cid := range rootNode.Children {
+			if cid == gone.ID {
+				t.Error("parent.Children still contains promoted id")
+			}
+		}
+	})
+
+	t.Run("GetTreeView drops descendants of promoted nodes", func(t *testing.T) {
+		store := makeStore(t)
+		ctx := context.Background()
+		root, _ := store.CreateTree(ctx, "s", TreeNode{Title: "Goal"})
+		mid, _ := store.AddNode(ctx, "s", root.ID, TreeNode{Type: NodeSubtask, Title: "mid"})
+		leaf, _ := store.AddNode(ctx, "s", mid.ID, TreeNode{Type: NodeFact, Title: "leaf"})
+		_, _ = store.UpdateNode(ctx, "s", TreeNode{ID: mid.ID, Title: mid.Title, Promoted: true})
+		view, err := store.GetTreeView(ctx, "s", ViewOptions{})
+		if err != nil {
+			t.Fatalf("GetTreeView: %v", err)
+		}
+		if _, ok := view.Nodes[mid.ID]; ok {
+			t.Error("promoted node still present")
+		}
+		if _, ok := view.Nodes[leaf.ID]; ok {
+			t.Error("descendant of promoted node still present")
+		}
+	})
+}
+
+// makeStoreWithPromoter wraps the conformance factory to attach a Promoter.
+// Each backend has its own option API so the helper down-casts to whichever
+// concrete type the factory returns.
+func makeStoreWithPromoter(t *testing.T, makeStore func(t *testing.T) SessionTreeStore, p Promoter) SessionTreeStore {
+	t.Helper()
+	store := makeStore(t)
+	switch s := store.(type) {
+	case *MapTreeStore:
+		s.promoter = p
+	case *FileTreeStore:
+		s.promoter = p
+	default:
+		t.Fatalf("makeStoreWithPromoter: unsupported store type %T", store)
+	}
+	return store
+}
+
+// fixedPromoter returns a Promoter that always returns the given text.
+func fixedPromoter(text string) Promoter {
+	return PromoteFunc(func(_ context.Context, _ *TreeNode, _ []*TreeNode) (string, error) {
+		return text, nil
 	})
 }

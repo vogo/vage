@@ -85,8 +85,8 @@ func TestValidateNodeID(t *testing.T) {
 	}{
 		{"tn-12345-abcdef01", true},
 		{"tn-x", true},
-		{"foo", false},  // missing prefix
-		{"tn-", false},  // body empty
+		{"foo", false}, // missing prefix
+		{"tn-", false}, // body empty
 		{"", false},
 		{"tn-bad/slash", false},
 	}

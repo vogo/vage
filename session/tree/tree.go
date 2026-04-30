@@ -106,6 +106,16 @@ const (
 	// node id.
 	NodeIDMaxLen = 128
 
+	// DefaultPromotionMinChildren is the default ChildrenCountDecider
+	// threshold: parents with at least this many eligible (non-promoted,
+	// non-pinned) children are candidates for folding.
+	DefaultPromotionMinChildren = 8
+
+	// DefaultPromotionMinSubtreeBytes is the default SubtreeBytesDecider
+	// threshold: if the eligible children's combined Title+Summary bytes
+	// exceed this number, the parent is a candidate for folding.
+	DefaultPromotionMinSubtreeBytes = 8 * 1024
+
 	// nodeIDPrefix is the required prefix on every node id. It distinguishes
 	// tree node ids from session ids on log output and keeps the address
 	// space disjoint should the two ever share a key column in the future.
@@ -178,6 +188,19 @@ type TreeNode struct {
 	Evidence    []string `json:"evidence,omitempty"`
 	Supersedes  []string `json:"supersedes,omitempty"`
 	Pinned      bool     `json:"pinned,omitempty"`
+
+	// Promoted marks the node as having been folded into its parent's
+	// summary by a PromoteNode call. The node remains in the tree (so
+	// audit and zoom-in stay possible) but the default render skips it.
+	// Pinned and Promoted are mutually exclusive at the producer side
+	// (PromoteNode never folds Pinned children); a manual UpdateNode can
+	// in principle set both, in which case Pinned wins on render.
+	Promoted bool `json:"promoted,omitempty"`
+
+	// PromotedAt is set when Promoted transitions to true. Zero on
+	// freshly added or manually-cleared nodes. Uses `omitzero` because
+	// time.Time is a struct and `omitempty` would never elide it.
+	PromotedAt time.Time `json:"promoted_at,omitzero"`
 
 	Parent   string   `json:"parent,omitempty"`
 	Children []string `json:"children,omitempty"`

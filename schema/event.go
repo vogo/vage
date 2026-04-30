@@ -104,6 +104,16 @@ const (
 	// Failed writes emit no event so that the consumer-side invariant
 	// "events received == successful writes" holds.
 	EventSessionTreeUpdated = "session_tree.updated"
+
+	// Session-tree promotion lifecycle events (emitted by vage/session/tree
+	// stores when PromoteNode runs). Started fires before the Promoter is
+	// invoked, Completed after the new summary has been persisted, and
+	// Failed when the Promoter (or the second-phase commit) returns an
+	// error. Skipped no-ops (no eligible children) emit no event so the
+	// "events received == work performed" invariant holds.
+	EventSessionTreePromotionStarted   = "session_tree.promotion.started"
+	EventSessionTreePromotionCompleted = "session_tree.promotion.completed"
+	EventSessionTreePromotionFailed    = "session_tree.promotion.failed"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -501,6 +511,45 @@ type SessionTreeUpdatedData struct {
 }
 
 func (SessionTreeUpdatedData) eventData() {}
+
+// SessionTreePromotionStartedData is the payload for
+// EventSessionTreePromotionStarted. Eligible carries the pre-flight count
+// of children that the Promoter is about to compress; the actual folded
+// count (which can be lower due to interleaving writes) ships in
+// SessionTreePromotionCompletedData.
+type SessionTreePromotionStartedData struct {
+	SessionID string `json:"session_id"`
+	ParentID  string `json:"parent_id"`
+	Eligible  int    `json:"eligible"`
+}
+
+func (SessionTreePromotionStartedData) eventData() {}
+
+// SessionTreePromotionCompletedData is the payload for
+// EventSessionTreePromotionCompleted. FoldedCount is the number of
+// children whose Promoted field flipped to true on this run;
+// NewSummaryBytes is the byte length of the parent's new summary AFTER
+// store-side clamping.
+type SessionTreePromotionCompletedData struct {
+	SessionID       string `json:"session_id"`
+	ParentID        string `json:"parent_id"`
+	FoldedCount     int    `json:"folded_count"`
+	NewSummaryBytes int    `json:"new_summary_bytes"`
+}
+
+func (SessionTreePromotionCompletedData) eventData() {}
+
+// SessionTreePromotionFailedData is the payload for
+// EventSessionTreePromotionFailed. Error carries the formatted error
+// string; structured errors (errors.Is targets) stay in the synchronous
+// PromoteNode return value.
+type SessionTreePromotionFailedData struct {
+	SessionID string `json:"session_id"`
+	ParentID  string `json:"parent_id"`
+	Error     string `json:"error"`
+}
+
+func (SessionTreePromotionFailedData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {

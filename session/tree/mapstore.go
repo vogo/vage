@@ -37,6 +37,11 @@ type MapTreeStore struct {
 
 	hooks *hook.Manager
 	now   func() time.Time
+
+	promoter        Promoter
+	promotionDecide PromotionDecider
+	asyncRunner     func(func())
+	inflight        promotionInflight
 }
 
 // MapOption configures a MapTreeStore.
@@ -59,14 +64,39 @@ func WithMapClock(fn func() time.Time) MapOption {
 	}
 }
 
+// WithMapPromoter configures the Promoter used by PromoteNode and the
+// auto-trigger pipeline. nil disables both.
+func WithMapPromoter(p Promoter) MapOption {
+	return func(s *MapTreeStore) { s.promoter = p }
+}
+
+// WithMapPromotionDecider configures the trigger that fires automatic
+// promotion after AddNode / UpdateNode. nil disables auto-promotion;
+// PromoteNode remains usable as a synchronous primitive.
+func WithMapPromotionDecider(d PromotionDecider) MapOption {
+	return func(s *MapTreeStore) { s.promotionDecide = d }
+}
+
+// WithMapPromotionAsync injects the runner used to execute auto-triggered
+// promotions. The default is `go fn()`. Tests inject a synchronous runner
+// to avoid timing flakes.
+func WithMapPromotionAsync(fn func(func())) MapOption {
+	return func(s *MapTreeStore) {
+		if fn != nil {
+			s.asyncRunner = fn
+		}
+	}
+}
+
 // Compile-time interface conformance.
 var _ SessionTreeStore = (*MapTreeStore)(nil)
 
 // NewMapTreeStore constructs an empty in-memory tree store.
 func NewMapTreeStore(opts ...MapOption) *MapTreeStore {
 	s := &MapTreeStore{
-		trees: make(map[string]*SessionTree),
-		now:   time.Now,
+		trees:       make(map[string]*SessionTree),
+		now:         time.Now,
+		asyncRunner: defaultAsyncRunner,
 	}
 	for _, o := range opts {
 		o(s)
@@ -192,6 +222,7 @@ func (s *MapTreeStore) AddNode(ctx context.Context, sessionID, parentID string, 
 	s.mu.Unlock()
 
 	s.dispatch(ctx, sessionID, schema.SessionTreeOpAdd, child, count)
+	s.maybeTriggerPromotion(sessionID, parentID)
 	return cloneNode(child), nil
 }
 
@@ -234,10 +265,14 @@ func (s *MapTreeStore) UpdateNode(ctx context.Context, sessionID string, n TreeN
 	applyUpdate(cur, &n, now)
 	tr.UpdatedAt = now
 	updated := cloneNode(cur)
+	parentID := cur.Parent
 	count := len(tr.Nodes)
 	s.mu.Unlock()
 
 	s.dispatch(ctx, sessionID, schema.SessionTreeOpUpdate, updated, count)
+	if parentID != "" {
+		s.maybeTriggerPromotion(sessionID, parentID)
+	}
 	return updated, nil
 }
 
@@ -375,6 +410,12 @@ func (s *MapTreeStore) dispatch(ctx context.Context, sessionID, op string, n *Tr
 // refreshing the UpdatedAt timestamp. Type and Parent are not touched
 // (they are immutable). Slice / map fields are reallocated so the caller's
 // post-call mutation of src does not leak into the store.
+//
+// Promoted and PromotedAt are mutable on update — callers can both flip
+// a node into promoted state by hand (a manual fold) and undo a promotion
+// by clearing the flag. PromoteNode is the supported path for the former,
+// but the field is plumbed through here so test fixtures and HTTP
+// callers can drive the same state.
 func applyUpdate(dst *TreeNode, src *TreeNode, now time.Time) {
 	dst.Title = src.Title
 	dst.Summary = src.Summary
@@ -394,6 +435,15 @@ func applyUpdate(dst *TreeNode, src *TreeNode, now time.Time) {
 		dst.Supersedes = nil
 	}
 	dst.Pinned = src.Pinned
+	dst.Promoted = src.Promoted
+	if src.Promoted && src.PromotedAt.IsZero() {
+		// Caller flipped Promoted=true without supplying a timestamp.
+		// Default to the write clock so PromotedAt always carries a
+		// meaningful value when the flag is set.
+		dst.PromotedAt = now
+	} else {
+		dst.PromotedAt = src.PromotedAt
+	}
 	if src.Metadata != nil {
 		dst.Metadata = make(map[string]any, len(src.Metadata))
 		maps.Copy(dst.Metadata, src.Metadata)
@@ -412,4 +462,177 @@ func removeID(ids []string, v string) []string {
 		}
 	}
 	return ids
+}
+
+// GetTreeView returns the tree filtered by opts.
+func (s *MapTreeStore) GetTreeView(ctx context.Context, sessionID string, opts ViewOptions) (*SessionTree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	tr, ok := s.trees[sessionID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrTreeMissing
+	}
+	clone := cloneTree(tr)
+	s.mu.RUnlock()
+
+	if opts.IncludePromoted {
+		return clone, nil
+	}
+	return filterPromotedFromTree(clone), nil
+}
+
+// PromoteNode aggregates eligible children of nodeID into nodeID's
+// summary using the configured Promoter.
+func (s *MapTreeStore) PromoteNode(ctx context.Context, sessionID, nodeID string) (*TreeNode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+	if err := validateNodeID(nodeID); err != nil {
+		return nil, err
+	}
+	if s.promoter == nil {
+		return nil, errPromoterNotConfigured
+	}
+
+	// Phase 1: snapshot eligible children under read lock; skip if none.
+	s.mu.RLock()
+	tr, ok := s.trees[sessionID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, ErrTreeMissing
+	}
+	parent, ok := tr.Nodes[nodeID]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, fmt.Errorf("%w: %q", ErrNotFound, nodeID)
+	}
+	parentSnap := cloneNode(parent)
+	eligibleSnap := cloneEligible(eligibleChildren(tr, parent))
+	s.mu.RUnlock()
+
+	if len(eligibleSnap) == 0 {
+		return parentSnap, nil
+	}
+
+	// Phase 2: invoke the Promoter outside the lock and dispatch Started.
+	s.dispatchStarted(ctx, sessionID, nodeID, len(eligibleSnap))
+	newSummary, err := s.promoter.Summarize(ctx, parentSnap, eligibleSnap)
+	if err != nil {
+		s.dispatchFailed(ctx, sessionID, nodeID, err)
+		return nil, err
+	}
+	newSummary = clampSummary(newSummary, SummaryMaxBytes)
+
+	// Phase 3: re-acquire the write lock and apply.
+	s.mu.Lock()
+	tr, ok = s.trees[sessionID]
+	if !ok {
+		s.mu.Unlock()
+		s.dispatchFailed(ctx, sessionID, nodeID, ErrTreeMissing)
+		return nil, ErrTreeMissing
+	}
+	parent, ok = tr.Nodes[nodeID]
+	if !ok {
+		s.mu.Unlock()
+		err := fmt.Errorf("%w: %q", ErrNotFound, nodeID)
+		s.dispatchFailed(ctx, sessionID, nodeID, err)
+		return nil, err
+	}
+	now := s.now()
+	folded := applyPromotion(parent, tr, newSummary, eligibleSnap, now)
+	if folded > 0 {
+		tr.UpdatedAt = now
+	}
+	updatedParent := cloneNode(parent)
+	s.mu.Unlock()
+
+	// Completed pairs with Started even when the second-phase race drained
+	// the eligible set (FoldedCount=0). Consumers rely on Started/Completed
+	// /Failed forming a pair; emitting only Started would leave Started
+	// dangling. The parent itself is unchanged — applyPromotion no-ops on
+	// folded==0 — so this is honest reporting of "ran, nothing to do".
+	s.dispatchCompleted(ctx, sessionID, nodeID, folded, len(updatedParent.Summary))
+	return updatedParent, nil
+}
+
+// maybeTriggerPromotion is the post-write hook invoked by AddNode and
+// UpdateNode. It runs the configured PromotionDecider against the named
+// parent and, when the decider fires, dispatches a PromoteNode call via
+// the configured async runner. Reservation against the in-flight set
+// prevents the runner from queueing duplicate work for the same parent.
+func (s *MapTreeStore) maybeTriggerPromotion(sessionID, parentID string) {
+	if s.promoter == nil || s.promotionDecide == nil {
+		return
+	}
+
+	s.mu.RLock()
+	tr, ok := s.trees[sessionID]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	parent, ok := tr.Nodes[parentID]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	parentSnap := cloneNode(parent)
+	eligibleSnap := cloneEligible(eligibleChildren(tr, parent))
+	s.mu.RUnlock()
+
+	if !s.promotionDecide.ShouldPromote(parentSnap, eligibleSnap) {
+		return
+	}
+	if !s.inflight.reserve(sessionID, parentID) {
+		return
+	}
+
+	runner := s.asyncRunner
+	if runner == nil {
+		runner = defaultAsyncRunner
+	}
+	runner(func() {
+		defer s.inflight.release(sessionID, parentID)
+		// Background context: callers see Started/Completed/Failed via hooks.
+		_, _ = s.PromoteNode(context.Background(), sessionID, parentID)
+	})
+}
+
+// dispatchStarted publishes EventSessionTreePromotionStarted.
+func (s *MapTreeStore) dispatchStarted(ctx context.Context, sessionID, parentID string, eligible int) {
+	if s.hooks == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionStarted, "", sessionID,
+		schema.SessionTreePromotionStartedData{SessionID: sessionID, ParentID: parentID, Eligible: eligible}))
+}
+
+// dispatchCompleted publishes EventSessionTreePromotionCompleted.
+func (s *MapTreeStore) dispatchCompleted(ctx context.Context, sessionID, parentID string, folded, summaryBytes int) {
+	if s.hooks == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionCompleted, "", sessionID,
+		schema.SessionTreePromotionCompletedData{
+			SessionID: sessionID, ParentID: parentID, FoldedCount: folded, NewSummaryBytes: summaryBytes,
+		}))
+}
+
+// dispatchFailed publishes EventSessionTreePromotionFailed.
+func (s *MapTreeStore) dispatchFailed(ctx context.Context, sessionID, parentID string, err error) {
+	if s.hooks == nil || err == nil {
+		return
+	}
+	s.hooks.Dispatch(ctx, schema.NewEvent(schema.EventSessionTreePromotionFailed, "", sessionID,
+		schema.SessionTreePromotionFailedData{SessionID: sessionID, ParentID: parentID, Error: err.Error()}))
 }

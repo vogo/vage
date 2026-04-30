@@ -19,6 +19,22 @@ package tree
 
 import "context"
 
+// ViewOptions configures GetTreeView. Currently it only controls whether
+// promoted (folded) nodes are kept in the returned tree; future extensions
+// (depth caps, type filters, since-cursor pruning) live here without
+// breaking callers that pass the zero value.
+type ViewOptions struct {
+	// IncludePromoted, when true, returns the full tree exactly like
+	// GetTree. The default false drops every node with Promoted=true and
+	// every descendant under one — useful for "folded" prompt views and
+	// HTTP listings that want to surface only the live working set.
+	//
+	// Note: GetTreeView does NOT understand cursor semantics. A renderer
+	// that needs path-aware folding (root → cursor must always survive)
+	// should call GetTree (full tree) and apply its own filter.
+	IncludePromoted bool
+}
+
 // SessionTreeStore is the persistent backend for one or many SessionTrees.
 // All methods are concurrency-safe; writes against the same session are
 // serialised inside the implementation.
@@ -67,4 +83,32 @@ type SessionTreeStore interface {
 	// DeleteTree removes the entire tree. Idempotent: deleting a non-existent
 	// session returns nil.
 	DeleteTree(ctx context.Context, sessionID string) error
+
+	// PromoteNode aggregates the eligible (non-Pinned, non-Promoted) children
+	// of nodeID into nodeID's summary using the store-configured Promoter,
+	// then marks each folded child Promoted=true (with PromotedAt=now). The
+	// parent's Summary is replaced with the Promoter output (clamped to
+	// SummaryMaxBytes), and Metadata["summary_source"] is set to
+	// "promotion" on both parent and folded children.
+	//
+	// When zero children are eligible, the call is a no-op: the parent is
+	// returned unchanged and no event is dispatched. When the configured
+	// Promoter returns an error, no field on parent or children is mutated.
+	//
+	// Concurrency: PromoteNode releases the per-session write lock while
+	// the Promoter is running (LLM calls may take seconds), then re-acquires
+	// it to write the new summary. Children that have changed during the
+	// gap are silently skipped from folding; PromoteNode never returns a
+	// stale-state error.
+	//
+	// Errors:
+	//   - ErrTreeMissing: no tree for sessionID
+	//   - ErrNotFound:    nodeID not present
+	//   - ErrInvalidArgument: input validation failure
+	//   - whatever Promoter.Summarize returns (passed through)
+	PromoteNode(ctx context.Context, sessionID, nodeID string) (*TreeNode, error)
+
+	// GetTreeView returns a deep-copied tree filtered by opts.
+	// opts.IncludePromoted=true is equivalent to GetTree.
+	GetTreeView(ctx context.Context, sessionID string, opts ViewOptions) (*SessionTree, error)
 }
