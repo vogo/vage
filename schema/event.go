@@ -97,6 +97,13 @@ const (
 	// into a placeholder). Payload is ContextEditedData. Silent passes
 	// (nothing eligible / under threshold) emit no event.
 	EventContextEdited = "context_edited"
+
+	// Session-tree mutation event (emitted by vage/session/tree store
+	// implementations after a successful CreateTree / AddNode / UpdateNode /
+	// DeleteNode / SetCursor / DeleteTree). Payload is SessionTreeUpdatedData.
+	// Failed writes emit no event so that the consumer-side invariant
+	// "events received == successful writes" holds.
+	EventSessionTreeUpdated = "session_tree.updated"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -466,6 +473,34 @@ type ContextEditedData struct {
 }
 
 func (ContextEditedData) eventData() {}
+
+// SessionTreeOperation enumerates the kinds of mutation that can produce
+// an EventSessionTreeUpdated. Constants live on the schema side so trace
+// readers and SessionHook subscribers can switch on them without importing
+// vage/session/tree.
+const (
+	SessionTreeOpCreate     = "create"      // CreateTree completed
+	SessionTreeOpAdd        = "add"         // AddNode completed
+	SessionTreeOpUpdate     = "update"      // UpdateNode completed
+	SessionTreeOpDelete     = "delete"      // DeleteNode completed
+	SessionTreeOpCursor     = "cursor"      // SetCursor completed
+	SessionTreeOpDeleteTree = "delete_tree" // DeleteTree completed
+)
+
+// SessionTreeUpdatedData is the payload for EventSessionTreeUpdated. It is
+// emitted by vage/session/tree.SessionTreeStore implementations after a
+// mutation succeeds. NodeID/NodeType/Status are populated for node-level
+// operations and left empty on tree-level operations (create/delete_tree).
+type SessionTreeUpdatedData struct {
+	SessionID string `json:"session_id"`
+	Operation string `json:"operation"`
+	NodeID    string `json:"node_id,omitempty"`
+	NodeType  string `json:"node_type,omitempty"`
+	Status    string `json:"status,omitempty"`
+	NodeCount int    `json:"node_count"`
+}
+
+func (SessionTreeUpdatedData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
