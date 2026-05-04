@@ -76,6 +76,9 @@ func (a *Agent) saveIterationCheckpoint(
 			"session_id", rc.sessionID,
 			"iteration", rc.iteration,
 			"final", final)
+		if a.checkpointFailureCB != nil {
+			a.checkpointFailureCB(ctx, rc.sessionID, err)
+		}
 		return
 	}
 

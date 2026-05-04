@@ -40,6 +40,11 @@ type DefaultBuilder struct {
 	sources   []Source
 	estimator memory.TokenEstimator
 	hooks     *hook.Manager
+	// reportSink, when non-nil, persists the BuildReport produced by
+	// each Build call. nil disables the per-turn archive — the
+	// EventContextBuilt event is still dispatched so live observers
+	// keep working.
+	reportSink BuildReportSink
 }
 
 // Compile-time interface conformance.
@@ -91,6 +96,14 @@ func WithTokenEstimator(est memory.TokenEstimator) Option {
 // dispatch.
 func WithHookManager(m *hook.Manager) Option {
 	return func(b *DefaultBuilder) { b.hooks = m }
+}
+
+// WithBuildReportSink installs a per-turn report archive. The Builder
+// invokes sink.Save inline after each successful Build; Save errors
+// are slog.Warn'd and dropped — observability must not abort an
+// in-flight LLM call. nil disables persistence (the default).
+func WithBuildReportSink(sink BuildReportSink) Option {
+	return func(b *DefaultBuilder) { b.reportSink = sink }
 }
 
 // NewDefaultBuilder constructs a DefaultBuilder with the given options.
@@ -257,6 +270,15 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 			in.SessionID,
 			report.ToEventData(),
 		))
+	}
+
+	if b.reportSink != nil && in.SessionID != "" {
+		if err := b.reportSink.Save(ctx, in.SessionID, report); err != nil {
+			slog.Warn("vctx: persist build_report",
+				"error", err,
+				"session_id", in.SessionID,
+				"agent_id", in.AgentID)
+		}
 	}
 
 	return BuildResult{Messages: out, Report: report}, nil

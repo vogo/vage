@@ -83,6 +83,17 @@ type Agent struct {
 	// iterationStore persists per-iteration ReAct snapshots so a Run can
 	// be resumed across crashes. nil disables checkpointing entirely.
 	iterationStore checkpoint.IterationStore
+	// checkpointFailureCB, when non-nil, runs after a non-fatal save
+	// failure on iterationStore. Used to feed observability counters
+	// (e.g., session.SessionMetrics.CheckpointSaveFailures) without
+	// dragging metrics types into vage/agent/taskagent. The callback
+	// must not block — it is invoked inline on the ReAct hot path.
+	checkpointFailureCB CheckpointFailureCallback
+	// buildReportSink, when non-nil, persists the per-turn BuildReport
+	// produced by the internal vctx.DefaultBuilder. Forwarded as
+	// vctx.WithBuildReportSink so callers do not have to replace the
+	// whole Builder to get the report archive.
+	buildReportSink vctx.BuildReportSink
 	// contextEditor, when non-nil, is wrapped around chatCompleter at
 	// the end of New so multi-iteration ReAct loops automatically fold
 	// older tool_result messages into placeholders. See WithContextEditor.
@@ -199,6 +210,33 @@ func WithPromptCaching(on bool) Option {
 // checkpoint.ErrInvalidArgument.
 func WithIterationStore(s checkpoint.IterationStore) Option {
 	return func(a *Agent) { a.iterationStore = s }
+}
+
+// CheckpointFailureCallback is invoked after a non-fatal
+// IterationStore.Save failure. The agent has already logged the error
+// at slog.Warn level; the callback exists so observability layers can
+// turn the failure into a counter (e.g., bumping
+// session.SessionMetrics.CheckpointSaveFailures) without forcing
+// vage/agent/taskagent to import session.
+//
+// Callbacks must not block — they execute inline on the ReAct hot
+// path between iterations. Errors returned from the callback are
+// dropped; the agent continues execution.
+type CheckpointFailureCallback func(ctx context.Context, sessionID string, saveErr error)
+
+// WithCheckpointFailureCallback installs the failure callback. nil
+// (the default) leaves save failures observable only via slog.
+func WithCheckpointFailureCallback(cb CheckpointFailureCallback) Option {
+	return func(a *Agent) { a.checkpointFailureCB = cb }
+}
+
+// WithBuildReportSink wires a per-turn BuildReport archive into the
+// agent's internal context Builder. When non-nil, every successful
+// Build dispatches a Save(ctx, sessionID, report). nil (the default)
+// preserves the existing zero-cost path; the EventContextBuilt event
+// is still dispatched regardless so live observers keep working.
+func WithBuildReportSink(sink vctx.BuildReportSink) Option {
+	return func(a *Agent) { a.buildReportSink = sink }
 }
 
 // WithContextEditor wraps the agent's ChatCompleter with a Context
@@ -365,6 +403,9 @@ func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest
 		vctx.WithSource(&vctx.RequestMessagesSource{}),
 		vctx.WithHookManager(a.hookManager),
 	)
+	if a.buildReportSink != nil {
+		builderOpts = append(builderOpts, vctx.WithBuildReportSink(a.buildReportSink))
+	}
 	builder := vctx.NewDefaultBuilder(builderOpts...)
 
 	res, err := builder.Build(ctx, vctx.BuildInput{

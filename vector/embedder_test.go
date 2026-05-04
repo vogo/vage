@@ -136,6 +136,60 @@ func TestHashEmbedder_PunctuationOnly(t *testing.T) {
 	}
 }
 
+func TestHashEmbedder_BatchEmbed(t *testing.T) {
+	h := NewHashEmbedder(32)
+	texts := []string{"alpha beta", "gamma delta", "alpha beta"}
+	vs, err := h.BatchEmbed(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(vs) != len(texts) {
+		t.Fatalf("len(vs) = %d, want %d", len(vs), len(texts))
+	}
+	// Same input -> same output (determinism preserved through batch).
+	for i := range vs[0] {
+		if vs[0][i] != vs[2][i] {
+			t.Fatalf("batch index 0 and 2 (same text) diverge at %d: %v vs %v", i, vs[0][i], vs[2][i])
+		}
+	}
+}
+
+func TestHashEmbedder_BatchEmbed_Empty(t *testing.T) {
+	h := NewHashEmbedder(32)
+	vs, err := h.BatchEmbed(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(vs) != 0 {
+		t.Fatalf("expected empty result, got %d", len(vs))
+	}
+}
+
+func TestHashEmbedder_SiblingInterfaceConformance(t *testing.T) {
+	// Type-assertion path that real callers will use to detect optional
+	// capabilities. HashEmbedder must satisfy all three so the runtime
+	// dispatch is exercised even in tests with no real backend wired.
+	var e Embedder = NewHashEmbedder(64)
+
+	if be, ok := e.(BatchEmbedder); !ok {
+		t.Fatal("HashEmbedder does not satisfy BatchEmbedder")
+	} else if _, err := be.BatchEmbed(context.Background(), []string{"x"}); err != nil {
+		t.Fatalf("BatchEmbed: %v", err)
+	}
+
+	if ne, ok := e.(NamedEmbedder); !ok {
+		t.Fatal("HashEmbedder does not satisfy NamedEmbedder")
+	} else if got := ne.ModelName(); got != HashEmbedderModelName {
+		t.Fatalf("ModelName = %q, want %q", got, HashEmbedderModelName)
+	}
+
+	if le, ok := e.(LimitedEmbedder); !ok {
+		t.Fatal("HashEmbedder does not satisfy LimitedEmbedder")
+	} else if got := le.MaxInputTokens(); got != HashEmbedderMaxInputTokens {
+		t.Fatalf("MaxInputTokens = %d, want %d", got, HashEmbedderMaxInputTokens)
+	}
+}
+
 // dotProduct returns sum(a[i]*b[i]). Both inputs must be the same length;
 // for L2-normalized vectors this equals cosine similarity.
 func dotProduct(a, b []float32) float64 {
