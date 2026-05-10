@@ -124,6 +124,22 @@ func (et *EditTool) ToolDef() schema.ToolDef {
 	}
 }
 
+// Compile-time conformance: EditTool reports a write-mode reference even
+// though it depends on a prior read. For ContextEditorMiddleware's stale
+// pass it is the *overwriter*, so any earlier read tool_result of the
+// same path is invalidated.
+var _ tool.ResourceTracker = (*EditTool)(nil)
+
+// ResourceIDs returns a single write-mode reference to the cleaned
+// file_path. Malformed args produce nil.
+func (et *EditTool) ResourceIDs(args map[string]any) []tool.ResourceRef {
+	p, _ := args["file_path"].(string)
+	if p == "" {
+		return nil
+	}
+	return []tool.ResourceRef{{ID: filepath.Clean(p), Mode: tool.ResourceWrite}}
+}
+
 // Handler returns the ToolHandler closure for this edit tool.
 func (et *EditTool) Handler() tool.ToolHandler {
 	return func(ctx context.Context, _, args string) (schema.ToolResult, error) {

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vogo/vage/schema"
@@ -119,6 +120,23 @@ func (rt *ReadTool) ToolDef() schema.ToolDef {
 			"additionalProperties": false,
 		},
 	}
+}
+
+// Compile-time conformance: ReadTool exposes the canonical resource it
+// reads so ContextEditorMiddleware can detect stale tool_results when a
+// later write/edit overwrites the same path.
+var _ tool.ResourceTracker = (*ReadTool)(nil)
+
+// ResourceIDs returns a single read-mode reference to the cleaned
+// file_path. Malformed args (missing field, wrong type, empty string)
+// produce nil — the editor then leaves the corresponding tool_result
+// untouched by the resource pass.
+func (rt *ReadTool) ResourceIDs(args map[string]any) []tool.ResourceRef {
+	p, _ := args["file_path"].(string)
+	if p == "" {
+		return nil
+	}
+	return []tool.ResourceRef{{ID: filepath.Clean(p), Mode: tool.ResourceRead}}
 }
 
 // Handler returns the ToolHandler closure for this read tool.

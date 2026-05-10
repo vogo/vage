@@ -68,6 +68,8 @@ func TestStoreConformance(t *testing.T) {
 		{"DeleteRemovesEventsAndState", testDeleteRemovesEventsAndState},
 		{"ListFiltersByUserAndAgent", testListFiltersByUserAndAgent},
 		{"ListLimitOffset", testListLimitOffset},
+		{"ListFiltersByParentID", testListFiltersByParentID},
+		{"ListChildrenHelper", testListChildrenHelper},
 		{"AppendEventOrderPreserved", testAppendEventOrderPreserved},
 		{"AppendUnknownReturnsNotFound", testAppendUnknownReturnsNotFound},
 		{"ListEventsReturnsCopy", testListEventsReturnsCopy},
@@ -251,6 +253,81 @@ func testListFiltersByUserAndAgent(t *testing.T, store SessionStore) {
 	got, _ = store.List(context.Background(), SessionFilter{State: StateActive})
 	if len(got) != 3 {
 		t.Fatalf("expected 3 active, got %d", len(got))
+	}
+}
+
+// testListFiltersByParentID drives the ParentID filter on every backend:
+// only sessions whose Session.ParentID matches the filter are returned;
+// children whose parent is "" are not pulled in by an empty filter
+// either (the empty string, by design, means "any" — verified separately).
+func testListFiltersByParentID(t *testing.T, store SessionStore) {
+	ctx := context.Background()
+
+	parent := New("parent-1")
+	if err := store.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	for _, cid := range []string{"child-a", "child-b"} {
+		c := New(cid)
+		c.ParentID = parent.ID
+		if err := store.Create(ctx, c); err != nil {
+			t.Fatalf("create %s: %v", cid, err)
+		}
+	}
+	// An unrelated standalone session.
+	if err := store.Create(ctx, New("solo")); err != nil {
+		t.Fatalf("create solo: %v", err)
+	}
+
+	got, err := store.List(ctx, SessionFilter{ParentID: "parent-1"})
+	if err != nil {
+		t.Fatalf("list children: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 children, got %d (%+v)", len(got), got)
+	}
+	for _, s := range got {
+		if s.ParentID != "parent-1" {
+			t.Errorf("returned non-child: %+v", s)
+		}
+	}
+
+	// Empty ParentID filter still returns everything.
+	all, _ := store.List(ctx, SessionFilter{})
+	if len(all) != 4 {
+		t.Errorf("expected all 4, got %d", len(all))
+	}
+}
+
+// testListChildrenHelper drives the convenience function: it must
+// behave identically to a List with the ParentID filter populated.
+func testListChildrenHelper(t *testing.T, store SessionStore) {
+	ctx := context.Background()
+	parent := New("p")
+	if err := store.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	c := New("c1")
+	c.ParentID = "p"
+	if err := store.Create(ctx, c); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	kids, err := ListChildren(ctx, store, "p")
+	if err != nil {
+		t.Fatalf("ListChildren: %v", err)
+	}
+	if len(kids) != 1 || kids[0].ID != "c1" || kids[0].ParentID != "p" {
+		t.Errorf("unexpected: %+v", kids)
+	}
+
+	// No-children parent → empty slice, not error.
+	none, err := ListChildren(ctx, store, "no-such-parent")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("len = %d, want 0", len(none))
 	}
 }
 

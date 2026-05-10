@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -100,6 +101,21 @@ func (wt *WriteTool) ToolDef() schema.ToolDef {
 			"additionalProperties": false,
 		},
 	}
+}
+
+// Compile-time conformance: WriteTool reports the path it overwrites so
+// ContextEditorMiddleware can flag earlier read tool_results of the same
+// path as stale.
+var _ tool.ResourceTracker = (*WriteTool)(nil)
+
+// ResourceIDs returns a single write-mode reference to the cleaned
+// file_path. Malformed args produce nil.
+func (wt *WriteTool) ResourceIDs(args map[string]any) []tool.ResourceRef {
+	p, _ := args["file_path"].(string)
+	if p == "" {
+		return nil
+	}
+	return []tool.ResourceRef{{ID: filepath.Clean(p), Mode: tool.ResourceWrite}}
 }
 
 // Handler returns the ToolHandler closure for this write tool.

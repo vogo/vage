@@ -48,17 +48,45 @@ const MaxNoteBytes = 32 * 1024
 // notes index injected via WorkspaceSource from blowing up.
 const MaxNoteCount = 200
 
+// MaxArtifactBytes caps an artifact size. Artifacts hold things like
+// the externalised body of a single oversized tool_result; a hard cap
+// protects the per-session sandbox from a runaway tool dumping multi-
+// gigabyte payloads. 4 MiB comfortably accommodates whole-file reads
+// and long grep outputs that the editor would elide.
+const MaxArtifactBytes = 4 * 1024 * 1024
+
+// MaxScratchBytesPerFile caps a single scratch entry. Scratch holds
+// transient subtask drafts (LLM intermediate reasoning, partial tool
+// outputs the agent wants to keep across iterations); 32 KiB matches
+// MaxNoteBytes so callers can mentally model "a scratch entry is a note
+// scoped to one slot".
+const MaxScratchBytesPerFile = 32 * 1024
+
+// MaxScratchFilesPerSlot caps how many entries a single scratch slot
+// may hold. Mirrors MaxNoteCount; the cap protects ListScratch indexes
+// from runaway LLM loops dumping into one slot.
+const MaxScratchFilesPerSlot = 200
+
+// SlotNameMaxLen exposes the length cap for slot ids so callers can
+// reject early (matches NoteNameMaxLen).
+const SlotNameMaxLen = 64
+
 // Errors returned from Workspace methods.
 var (
 	// ErrInvalidName is returned when a note name fails validation.
 	ErrInvalidName = errors.New("workspace: invalid note name")
 	// ErrInvalidSession is returned when the session id fails validation.
 	ErrInvalidSession = errors.New("workspace: invalid session id")
+	// ErrInvalidSlot is returned when a scratch slot id fails validation.
+	ErrInvalidSlot = errors.New("workspace: invalid scratch slot")
 	// ErrTooLarge is returned when a payload exceeds MaxPlanBytes / MaxNoteBytes.
 	ErrTooLarge = errors.New("workspace: payload exceeds limit")
 	// ErrTooManyNotes is returned by WriteNote when adding the note would push
 	// the session past MaxNoteCount.
 	ErrTooManyNotes = errors.New("workspace: note count exceeds limit")
+	// ErrTooManyScratch is returned by WriteScratch when adding the entry
+	// would push the slot past MaxScratchFilesPerSlot.
+	ErrTooManyScratch = errors.New("workspace: scratch count exceeds limit")
 )
 
 // NoteInfo is the index entry returned by ListNotes.
@@ -98,13 +126,58 @@ type Workspace interface {
 	// ListNotes returns notes ordered by UpdatedAt DESC.
 	ListNotes(ctx context.Context, sessionID string) ([]NoteInfo, error)
 
-	// Delete removes the entire workspace (plan + notes/) for a session.
-	// Idempotent — deleting a session that has no workspace is a no-op.
+	// Delete removes the entire workspace (plan + notes/ + artifacts/)
+	// for a session. Idempotent — deleting a session that has no
+	// workspace is a no-op.
 	Delete(ctx context.Context, sessionID string) error
 
 	// PathOf returns the on-disk root for a session (advisory; primarily
 	// for logging). Returns "" when the implementation is not file-backed.
 	PathOf(sessionID string) string
+
+	// WriteArtifact persists arbitrary content under
+	// <session>/workspace/artifacts/<name>. Distinct from notes/:
+	// artifacts are not indexed by ListNotes, not subject to
+	// MaxNoteBytes (only MaxArtifactBytes), and not capped by
+	// MaxNoteCount. Empty content writes an empty file rather than
+	// deleting (artifacts are typically write-once references; a
+	// caller wanting deletion should rely on session Delete). Returns
+	// the on-disk path the content was written to.
+	WriteArtifact(ctx context.Context, sessionID, name string, content []byte) (path string, err error)
+
+	// ReadArtifact returns artifact content. A missing artifact is
+	// reported as (nil, nil) — symmetric with ReadNote — so the
+	// caller can return an empty answer without ferrying os.IsNotExist
+	// around. Returns ErrInvalidName for malformed names.
+	ReadArtifact(ctx context.Context, sessionID, name string) ([]byte, error)
+
+	// WriteScratch writes <session>/workspace/scratch/<slot>/<name>.md
+	// atomically. Scratch is a per-subtask draft area: each subagent
+	// dispatch binds a slot id, so the subagent's intermediate notes
+	// stay isolated from siblings and from the parent's notes/. Empty
+	// content removes the entry (symmetric with WriteNote). Adding a
+	// new entry that would push the slot past MaxScratchFilesPerSlot
+	// returns ErrTooManyScratch with no write. Returns ErrInvalidSlot
+	// for malformed slot ids and ErrInvalidName for malformed entry
+	// names.
+	WriteScratch(ctx context.Context, sessionID, slot, name, content string) error
+
+	// ReadScratch reads scratch/<slot>/<name>.md. A missing entry is
+	// reported as ("", nil) so callers can return an empty answer
+	// without ferrying os.IsNotExist around. Returns ErrInvalidSlot
+	// for malformed slot ids and ErrInvalidName for malformed entry
+	// names.
+	ReadScratch(ctx context.Context, sessionID, slot, name string) (string, error)
+
+	// ListScratch returns the index of entries within a slot, ordered
+	// by UpdatedAt DESC then Name ASC (matching ListNotes). A missing
+	// slot is reported as an empty slice + nil error.
+	ListScratch(ctx context.Context, sessionID, slot string) ([]NoteInfo, error)
+
+	// DeleteScratchSlot removes scratch/<slot>/ entirely. Idempotent
+	// on missing slots. Used by dispatch retry paths to wipe a failed
+	// subagent's draft area before re-running.
+	DeleteScratchSlot(ctx context.Context, sessionID, slot string) error
 }
 
 // noteNamePattern is the regex applied to user-supplied note names. It is a
@@ -149,6 +222,28 @@ func validateSessionID(id string) error {
 	}
 	if !sessionIDPattern.MatchString(id) {
 		return fmt.Errorf("%w: %q does not match pattern", ErrInvalidSession, id)
+	}
+	return nil
+}
+
+// slotNamePattern shares the character class with note names but caps at
+// SlotNameMaxLen (64) — slot ids are typically derived from a child
+// session id (which is longer than a slot name), so callers are
+// expected to truncate before passing in.
+var slotNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+func validateSlotName(slot string) error {
+	if slot == "" {
+		return fmt.Errorf("%w: empty", ErrInvalidSlot)
+	}
+	if slot == "." || slot == ".." {
+		return fmt.Errorf("%w: %q is reserved", ErrInvalidSlot, slot)
+	}
+	if len(slot) > SlotNameMaxLen {
+		return fmt.Errorf("%w: length %d exceeds %d", ErrInvalidSlot, len(slot), SlotNameMaxLen)
+	}
+	if !slotNamePattern.MatchString(slot) {
+		return fmt.Errorf("%w: %q does not match %s", ErrInvalidSlot, slot, slotNamePattern.String())
 	}
 	return nil
 }

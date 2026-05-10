@@ -677,17 +677,17 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 		t.Fatalf("agent run failed: %v", err)
 	}
 
-	var responseText string
+	var responseText strings.Builder
 	for _, msg := range resp.Messages {
 		if msg.Role == aimodel.RoleAssistant {
 			text := msg.Content.Text()
 			if text != "" {
-				responseText += text
+				responseText.WriteString(text)
 			}
 		}
 	}
 
-	if !strings.Contains(responseText, "vage-test-ok") {
-		t.Errorf("expected response to contain 'vage-test-ok', got: %s", responseText)
+	if !strings.Contains(responseText.String(), "vage-test-ok") {
+		t.Errorf("expected response to contain 'vage-test-ok', got: %s", responseText.String())
 	}
 }

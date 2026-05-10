@@ -26,11 +26,22 @@ import (
 // SessionFilter narrows the result of List. Zero-valued fields are ignored
 // so that the empty filter returns every session in insertion order.
 type SessionFilter struct {
-	UserID  string       // exact match; empty means "any"
-	AgentID string       // exact match; empty means "any"
-	State   SessionState // exact match; empty means "any"
-	Limit   int          // 0 means "no limit"
-	Offset  int          // skip this many matches before collecting
+	UserID   string       // exact match; empty means "any"
+	AgentID  string       // exact match; empty means "any"
+	State    SessionState // exact match; empty means "any"
+	ParentID string       // exact match on Session.ParentID; empty means "any"
+	Limit    int          // 0 means "no limit"
+	Offset   int          // skip this many matches before collecting
+}
+
+// ListChildren is a convenience helper: it returns every session whose
+// ParentID equals parentID. Zero-result is reported as an empty slice,
+// not an error — a parent that has not yet dispatched any subagent is a
+// valid state. The helper delegates to store.List, so it works against
+// any SessionMetaStore implementation that honours SessionFilter.ParentID
+// (all built-in stores do).
+func ListChildren(ctx context.Context, store SessionMetaStore, parentID string) ([]*Session, error) {
+	return store.List(ctx, SessionFilter{ParentID: parentID})
 }
 
 // SessionMetaStore handles Session metadata: lifecycle CRUD plus a filtered

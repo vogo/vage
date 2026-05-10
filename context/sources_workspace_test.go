@@ -51,6 +51,23 @@ func (s *stubWorkspace) ListNotes(_ context.Context, _ string) ([]workspace.Note
 }
 func (s *stubWorkspace) Delete(_ context.Context, _ string) error { return nil }
 func (s *stubWorkspace) PathOf(_ string) string                   { return "" }
+func (s *stubWorkspace) WriteArtifact(_ context.Context, _, _ string, _ []byte) (string, error) {
+	return "", nil
+}
+
+func (s *stubWorkspace) ReadArtifact(_ context.Context, _, _ string) ([]byte, error) {
+	return nil, nil
+}
+
+func (s *stubWorkspace) WriteScratch(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *stubWorkspace) ReadScratch(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (s *stubWorkspace) ListScratch(_ context.Context, _, _ string) ([]workspace.NoteInfo, error) {
+	return nil, nil
+}
+func (s *stubWorkspace) DeleteScratchSlot(_ context.Context, _, _ string) error { return nil }
 
 func TestWorkspaceSource_NilOrNoSession_Skipped(t *testing.T) {
 	src := &WorkspaceSource{} // nil Workspace

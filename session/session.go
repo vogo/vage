@@ -64,8 +64,18 @@ var IDPattern = regexp.MustCompile(idPatternRaw)
 // and structured state KV are addressable separately via SessionStore — the
 // Session struct itself only carries identity and lifecycle metadata so that
 // Get is O(1) regardless of how many events the session has accumulated.
+//
+// ParentID, when non-empty, marks this session as a subagent dispatch
+// of a parent session. Set by the dispatcher in vage/tool/agenttool;
+// queried via SessionFilter.ParentID or the ListChildren helper.
+// ParentID is a structural relationship (not just user metadata), so
+// it lives at the top level rather than under Metadata: that lets the
+// store push it down as a SQL column when SQLite/Postgres backends
+// land, and prevents callers from accidentally clearing it through
+// arbitrary metadata patches.
 type Session struct {
 	ID        string         `json:"id"`
+	ParentID  string         `json:"parent_id,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty"`
 	UserID    string         `json:"user_id,omitempty"`
 	Title     string         `json:"title,omitempty"`

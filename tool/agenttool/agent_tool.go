@@ -20,6 +20,7 @@ package agenttool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/vogo/aimodel"
@@ -54,6 +55,7 @@ type config struct {
 	description  string
 	parameters   any
 	argExtractor ArgExtractor
+	session      *sessionConfig // nil ⇒ no child-session wiring
 }
 
 // Option is a functional option for configuring agent-as-tool registration.
@@ -118,7 +120,7 @@ func Register(registry *tool.Registry, ag agent.Agent, opts ...Option) error {
 		AgentID:     ag.ID(),
 	}
 
-	handler := newHandler(ag, cfg.argExtractor)
+	handler := newHandler(ag, cfg.argExtractor, cfg.session)
 
 	return registry.RegisterIfAbsent(def, handler)
 }
@@ -135,7 +137,11 @@ var errMissingInput = &agentToolError{msg: "agent tool: 'input' field must be a 
 // Error policy: agent execution errors are returned as ToolResult with IsError=true
 // rather than as Go errors. This keeps the error visible to the LLM in a tool-calling
 // loop so it can retry or inform the user, instead of aborting the entire chain.
-func newHandler(ag agent.Agent, extract ArgExtractor) tool.ToolHandler {
+//
+// When sessCfg is non-nil, the handler mints a child session per call and
+// runs the subagent under that session's id (parent_id linked back to
+// the parent's session id from ctx). See session.go for the wiring.
+func newHandler(ag agent.Agent, extract ArgExtractor, sessCfg *sessionConfig) tool.ToolHandler {
 	return func(ctx context.Context, _, args string) (schema.ToolResult, error) {
 		var parsed map[string]any
 		if err := json.Unmarshal([]byte(args), &parsed); err != nil {
@@ -151,7 +157,12 @@ func newHandler(ag agent.Agent, extract ArgExtractor) tool.ToolHandler {
 			Messages: []schema.Message{schema.NewUserMessage(input)},
 		}
 
-		resp, err := ag.Run(ctx, &req)
+		runCtx, childSID, sessionErr := setupChildSession(ctx, sessCfg, ag, input)
+		if sessionErr != nil {
+			return schema.ErrorResult("", "agent tool: session setup failed: "+sessionErr.Error()), nil
+		}
+
+		resp, err := ag.Run(runCtx, &req)
 		if err != nil {
 			return schema.ErrorResult("", "agent tool: execution failed: "+err.Error()), nil
 		}
@@ -166,6 +177,14 @@ func newHandler(ag agent.Agent, extract ArgExtractor) tool.ToolHandler {
 			}
 		}
 
-		return schema.TextResult("", strings.Join(parts, "\n")), nil
+		body := strings.Join(parts, "\n")
+		if childSID != "" {
+			// Annotate so the parent LLM can navigate to the child's
+			// records (e.g. via GET /v1/sessions/{id}/children).
+			// Format kept terse — one trailing line, no Markdown.
+			body = fmt.Sprintf("[child_session=%s]\n%s", childSID, body)
+		}
+
+		return schema.TextResult("", body), nil
 	}
 }

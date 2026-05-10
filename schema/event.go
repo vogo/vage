@@ -81,8 +81,10 @@ const (
 	// tools whenever the per-session plan workspace changes). Payload is a
 	// WorkspacePlanUpdatedData / WorkspaceNoteWrittenData snapshot —
 	// consumers can record progress without having to read plan.md.
-	EventWorkspacePlanUpdated = "workspace.plan_updated"
-	EventWorkspaceNoteWritten = "workspace.note_written"
+	EventWorkspacePlanUpdated     = "workspace.plan_updated"
+	EventWorkspaceNoteWritten     = "workspace.note_written"
+	EventWorkspaceScratchWritten  = "workspace.scratch_written"
+	EventWorkspaceArtifactWritten = "workspace.artifact_written"
 
 	// Iteration-level checkpoint event (emitted by TaskAgent at the end
 	// of each ReAct iteration after a successful IterationStore.Save).
@@ -453,6 +455,32 @@ type WorkspaceNoteWrittenData struct {
 }
 
 func (WorkspaceNoteWrittenData) eventData() {}
+
+// WorkspaceScratchWrittenData is the payload for
+// EventWorkspaceScratchWritten. Cleared is true when the writer passed
+// an empty content (deleting the scratch entry).
+type WorkspaceScratchWrittenData struct {
+	SessionID string `json:"session_id"`
+	Slot      string `json:"slot"`
+	Name      string `json:"name"`
+	Bytes     int    `json:"bytes"`
+	Cleared   bool   `json:"cleared,omitempty"`
+}
+
+func (WorkspaceScratchWrittenData) eventData() {}
+
+// WorkspaceArtifactWrittenData is the payload for
+// EventWorkspaceArtifactWritten. Path is the on-disk location returned
+// by the workspace, included so consumers can reference the artifact
+// without round-tripping the workspace API.
+type WorkspaceArtifactWrittenData struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+	Bytes     int    `json:"bytes"`
+	Path      string `json:"path,omitempty"`
+}
+
+func (WorkspaceArtifactWrittenData) eventData() {}
 
 // CheckpointWrittenData is the payload for EventCheckpointWritten. It
 // is emitted by TaskAgent after the IterationStore has successfully

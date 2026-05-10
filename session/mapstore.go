@@ -200,6 +200,9 @@ func sessionMatches(s *Session, f SessionFilter) bool {
 	if f.State != "" && s.State != f.State {
 		return false
 	}
+	if f.ParentID != "" && s.ParentID != f.ParentID {
+		return false
+	}
 	return true
 }
 

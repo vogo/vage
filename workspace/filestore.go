@@ -36,6 +36,7 @@ const (
 	planFileName     = "plan.md"
 	notesDirName     = "notes"
 	noteFileSuffix   = ".md"
+	artifactsDirName = "artifacts"
 )
 
 // FileWorkspace persists per-session plan + notes under a root directory.
@@ -107,6 +108,14 @@ func (w *FileWorkspace) planPath(id string) string {
 
 func (w *FileWorkspace) notePath(id, name string) string {
 	return filepath.Join(w.notesDir(id), name+noteFileSuffix)
+}
+
+func (w *FileWorkspace) artifactsDir(id string) string {
+	return filepath.Join(w.sessionDir(id), artifactsDirName)
+}
+
+func (w *FileWorkspace) artifactPath(id, name string) string {
+	return filepath.Join(w.artifactsDir(id), name)
 }
 
 // --- Plan ---
@@ -292,6 +301,65 @@ func (w *FileWorkspace) ListNotes(ctx context.Context, sessionID string) ([]Note
 	})
 
 	return out, nil
+}
+
+// --- Artifacts ---
+
+// WriteArtifact persists content to <session>/workspace/artifacts/<name>
+// atomically. The file is overwritten if it already exists. Returns the
+// resolved on-disk path so callers can embed it in placeholders or
+// references.
+func (w *FileWorkspace) WriteArtifact(ctx context.Context, sessionID, name string, content []byte) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+	if err := validateNoteName(name); err != nil {
+		return "", err
+	}
+	if len(content) > MaxArtifactBytes {
+		return "", fmt.Errorf("%w: artifact %q size %d exceeds %d",
+			ErrTooLarge, name, len(content), MaxArtifactBytes)
+	}
+
+	mu := w.lockFor(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(w.artifactsDir(sessionID), dirPerm); err != nil {
+		return "", fmt.Errorf("workspace: create artifacts dir: %w", err)
+	}
+	path := w.artifactPath(sessionID, name)
+	if err := writeFileAtomic(path, content); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ReadArtifact reads <session>/workspace/artifacts/<name>. A missing
+// artifact is reported as (nil, nil) so callers don't have to ferry
+// os.IsNotExist around. Invalid names short-circuit before any IO.
+func (w *FileWorkspace) ReadArtifact(ctx context.Context, sessionID, name string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+	if err := validateNoteName(name); err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(w.artifactPath(sessionID, name))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("workspace: read artifact: %w", err)
+	}
+	return data, nil
 }
 
 // Delete removes the entire workspace tree for a session.
