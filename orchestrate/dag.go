@@ -257,16 +257,33 @@ func (de *dagExecutor) run() (*DAGResult, error) {
 			de.mu.Lock()
 			running := countRunning(de.result)
 			de.mu.Unlock()
-			drainDoneCh(de.doneCh, running)
-			de.result.Timeline = de.timeline.result()
-			if de.hasUsage {
-				de.result.Usage = &de.totalUsage
-			}
-			return de.result, de.ctx.Err()
+			return de.abort(running, de.ctx.Err())
 		}
 	}
 
 	return de.finalize()
+}
+
+// abort performs the shared teardown for every terminating branch (error,
+// cancellation, or early exit): it cancels the shared context, drains the
+// given number of still-running node completions from doneCh so their
+// goroutines can exit, runs any afterDrain hooks (used by backward
+// compensation, which must run after draining but before writeback), then
+// writes back Timeline and available Usage and returns the current result
+// paired with err. Cancelling an already-cancelled context and draining zero
+// completions are both no-ops, so cancellation-path callers may reuse it.
+// Caller must NOT hold de.mu.
+func (de *dagExecutor) abort(running int, err error, afterDrain ...func()) (*DAGResult, error) {
+	de.cancel()
+	drainDoneCh(de.doneCh, running)
+	for _, fn := range afterDrain {
+		fn()
+	}
+	de.result.Timeline = de.timeline.result()
+	if de.hasUsage {
+		de.result.Usage = &de.totalUsage
+	}
+	return de.result, err
 }
 
 // handleCompletion processes a single node completion event.
@@ -318,17 +335,14 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 			}
 		}
 
-		// Backward compensation.
+		// Backward compensation runs after cancel+drain, before the shared
+		// Timeline/Usage writeback.
 		firstErr := fmt.Errorf("orchestrate: node %q failed: %w", comp.nodeID, comp.err)
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.cancel()
-		drainDoneCh(de.doneCh, running)
-		_ = executeBackwardCompensation(de.parentCtx, de.cfg.CompensateCfg, de.nodes, de.result)
-		de.result.Timeline = de.timeline.result()
-		if de.hasUsage {
-			de.result.Usage = &de.totalUsage
-		}
+		de.abort(running, firstErr, func() {
+			_ = executeBackwardCompensation(de.parentCtx, de.cfg.CompensateCfg, de.nodes, de.result)
+		})
 		return true, firstErr
 	}
 
@@ -336,12 +350,7 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 		firstErr := fmt.Errorf("orchestrate: node %q failed: %w", comp.nodeID, comp.err)
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.cancel()
-		drainDoneCh(de.doneCh, running)
-		de.result.Timeline = de.timeline.result()
-		if de.hasUsage {
-			de.result.Usage = &de.totalUsage
-		}
+		de.abort(running, firstErr)
 		return true, firstErr
 	}
 
@@ -368,8 +377,7 @@ func (de *dagExecutor) handleNodeSuccess(comp nodeCompletion) (bool, error) {
 	if de.cfg.EarlyExitFunc != nil && de.cfg.EarlyExitFunc(comp.nodeID, comp.resp) {
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.cancel()
-		drainDoneCh(de.doneCh, running)
+		de.abort(running, nil)
 		return true, nil
 	}
 
@@ -377,11 +385,7 @@ func (de *dagExecutor) handleNodeSuccess(comp nodeCompletion) (bool, error) {
 	if de.ctx.Err() != nil {
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		drainDoneCh(de.doneCh, running)
-		de.result.Timeline = de.timeline.result()
-		if de.hasUsage {
-			de.result.Usage = &de.totalUsage
-		}
+		de.abort(running, de.ctx.Err())
 		return true, de.ctx.Err()
 	}
 
