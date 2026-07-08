@@ -174,13 +174,12 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 	return a.runResumeLoop(ctx, rc, p, messages, aiTools, startIter)
 }
 
-// runResumeLoop is the ReAct loop body shared with Run, starting at a
-// resumed iteration index. It mirrors the structure of Run's main loop
-// but begins at startIter instead of 0; checkpoint write points are
-// identical so a resumed run leaves the same audit trail as a fresh run.
-//
-// Errors from chat completion or empty-choices responses propagate up
-// to the Resume caller — same contract as Run.
+// runResumeLoop re-enters the shared ReAct skeleton at a resumed iteration
+// index using the synchronous execution mode, so a resumed run drives the
+// exact same loop, checkpoint write points and finalize path as a fresh Run —
+// only the starting iteration differs. Errors from chat completion or
+// empty-choices responses propagate up to the Resume caller, same contract as
+// Run.
 func (a *Agent) runResumeLoop(
 	ctx context.Context,
 	rc *runContext,
@@ -189,63 +188,10 @@ func (a *Agent) runResumeLoop(
 	aiTools []aimodel.Tool,
 	startIter int,
 ) (*schema.RunResponse, error) {
-	agentID := a.ID()
-
-	for iter := startIter; iter < p.maxIter; iter++ {
-		rc.iteration = iter
-
-		if rc.tracker.Exhausted() {
-			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
-			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
-		}
-
-		chatReq := &aimodel.ChatRequest{
-			Model:       p.model,
-			Messages:    messages,
-			Temperature: p.temperature,
-			MaxTokens:   p.maxTokens,
-			Stop:        p.stopSeq,
-			Tools:       aiTools,
-		}
-
-		resp, err := a.chatCompleter.ChatCompletion(ctx, chatReq)
-		if err != nil {
-			return nil, fmt.Errorf("vage: chat completion: %w", err)
-		}
-
-		rc.totalUsage.Add(&resp.Usage)
-		rc.tracker.Add(resp.Usage.TotalTokens)
-
-		if len(resp.Choices) == 0 {
-			return nil, ErrEmptyLLMResponse
-		}
-
-		choice := resp.Choices[0]
-		assistantMsg := choice.Message
-		rc.lastMsg = assistantMsg
-		messages = append(messages, assistantMsg)
-
-		if choice.FinishReason != aimodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls) == 0 {
-			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonComplete)
-			return a.finalizeRun(ctx, rc, schema.StopReasonComplete), nil
-		}
-
-		if rc.tracker.Exhausted() {
-			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
-			return a.finalizeRun(ctx, rc, schema.StopReasonBudgetExhausted), nil
-		}
-
-		sink := func(ev schema.Event) error {
-			a.dispatch(ctx, ev)
-			return nil
-		}
-		toolMsgs, _ := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls, false, sink)
-		messages = append(messages, toolMsgs...)
-
-		a.saveIterationCheckpoint(ctx, rc, messages, false, "")
+	mode := &syncMode{a: a, ctx: ctx}
+	stopReason, err := a.runReactLoop(ctx, rc, p, messages, aiTools, mode, startIter)
+	if err != nil {
+		return nil, err
 	}
-
-	rc.iteration = p.maxIter - 1
-	a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonMaxIterations)
-	return a.finalizeRun(ctx, rc, schema.StopReasonMaxIterations), nil
+	return a.finalizeRun(ctx, rc, stopReason), nil
 }
