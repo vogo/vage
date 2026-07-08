@@ -49,17 +49,6 @@ const (
 	contextEditStrategyElideInline = "elide_inline"
 )
 
-// PlaceholderFunc renders the placeholder text that replaces an elided
-// tool_result Content. It receives the original tool_call_id and the
-// byte length of the elided text.
-//
-// Deprecated: PlaceholderFunc cannot convey *why* a message was elided
-// (keep_last_k vs stale_resource). New code should use PlaceholderV2Func
-// via WithPlaceholderV2; the legacy form is retained for backwards
-// compatibility with callers that wired their own placeholder template
-// before the multi-strategy editor existed.
-type PlaceholderFunc func(toolCallID string, originalBytes int) string
-
 // PlaceholderV2Func renders a placeholder that includes the *reason* a
 // tool_result was elided (keep_last_k, stale_resource, ...) plus an
 // optional human-readable detail (e.g. "file /a/b modified by call_3").
@@ -89,13 +78,6 @@ type ArtifactWriter interface {
 // names; callers that operate without sessions can leave the option
 // unset, in which case the elision pass falls back to the inline form.
 type SessionIDFunc func(req *aimodel.ChatRequest) string
-
-// DefaultContextEditPlaceholder is the legacy built-in placeholder
-// template. Kept verbatim so callers that compare the wire form against
-// a fixed string (e.g. golden tests) do not have to update.
-func DefaultContextEditPlaceholder(toolCallID string, originalBytes int) string {
-	return fmt.Sprintf("[context_edited: tool_result %s elided, %d bytes]", toolCallID, originalBytes)
-}
 
 // DefaultContextEditPlaceholderV2 is the V2 default. It surfaces the
 // editor's reason inline so a human reading the prompt can immediately
@@ -171,23 +153,6 @@ func WithMinElidedBytes(n int) ContextEditorOption {
 // schema.EventContextEdited event. nil dispatch ⇒ silent (no panic).
 func WithContextEditDispatch(d DispatchFunc) ContextEditorOption {
 	return func(m *ContextEditorMiddleware) { m.dispatch = d }
-}
-
-// WithPlaceholder customises the placeholder text. The function
-// receives the original tool_call_id and the byte length of the
-// elided text content.
-//
-// Deprecated: prefer WithPlaceholderV2 — the V2 form receives the
-// editor's reason and detail, allowing prompts to surface *why* a
-// fold happened. WithPlaceholder is preserved so existing callers do
-// not break, but it cannot express stale_resource or elide_to_artifact
-// context. When both options are configured, V2 wins.
-func WithPlaceholder(fn PlaceholderFunc) ContextEditorOption {
-	return func(m *ContextEditorMiddleware) {
-		if fn != nil {
-			m.placeholderFn = fn
-		}
-	}
 }
 
 // WithPlaceholderV2 sets a placeholder template that receives the fold
@@ -310,19 +275,12 @@ func (m *ContextEditorMiddleware) edit(ctx context.Context, req *aimodel.ChatReq
 		return req
 	}
 
-	edited, placeholderBytes := m.applyElision(req.Messages, allIdx, staleByIdx, elideByIdx)
+	resolver := strategyResolver{staleByIdx: staleByIdx, elideByIdx: elideByIdx}
+
+	edited, placeholderBytes := m.applyElision(req.Messages, allIdx, resolver)
 
 	edReq := *req
 	edReq.Messages = edited
-
-	// Strategy precedence (most informative wins): elide > stale > keep_last_k.
-	strategy := contextEditStrategyKeepLastK
-	if len(staleByIdx) > 0 {
-		strategy = contextEditStrategyStaleResource
-	}
-	if hasArtifactElision(elideByIdx) {
-		strategy = ContextEditStrategyElideArtifact
-	}
 
 	if m.dispatch != nil {
 		m.dispatch(ctx, schema.NewEvent(schema.EventContextEdited, "", "", schema.ContextEditedData{
@@ -331,7 +289,7 @@ func (m *ContextEditorMiddleware) edit(ctx context.Context, req *aimodel.ChatReq
 			Total:         len(req.Messages),
 			OriginalBytes: totalElidedBytes,
 			Placeholder:   placeholderBytes,
-			Strategy:      strategy,
+			Strategy:      resolver.dominantStrategy(allIdx),
 		}))
 	}
 
@@ -468,17 +426,74 @@ type elideOutcome struct {
 	detail string
 }
 
+// strategyResolver is the single point that decides which elision
+// strategy applies to a message index. Both applyElision (per-index
+// placeholder reason/detail) and the EventContextEdited dominant
+// strategy consult it, so the "artifact elision > stale_resource >
+// keep_last_k" precedence lives in exactly one place — adding a new
+// strategy means extending this resolver, not editing the scan, apply
+// and event paths independently.
+type strategyResolver struct {
+	staleByIdx map[int]string
+	elideByIdx map[int]elideOutcome
+}
+
+// strategyForIndex returns the placeholder reason and detail for a
+// single edited index. Precedence: an elide outcome (artifact or the
+// degraded inline form) wins, then stale_resource, then keep_last_k.
+func (r strategyResolver) strategyForIndex(idx int) (reason, detail string) {
+	if e, ok := r.elideByIdx[idx]; ok {
+		return e.reason, e.detail
+	}
+	if d, ok := r.staleByIdx[idx]; ok {
+		return contextEditStrategyStaleResource, d
+	}
+	return contextEditStrategyKeepLastK, ""
+}
+
+// dominantStrategy folds the actually-edited index set into the single
+// strategy reported on EventContextEdited. It ranks the same way as
+// strategyForIndex — artifact elision above stale above keep_last_k —
+// but reports in the event vocabulary: a degraded inline elision is not
+// itself elevated to artifact, so such an index contributes its
+// underlying stale_resource or keep_last_k cause instead.
+func (r strategyResolver) dominantStrategy(edited []int) string {
+	best := contextEditStrategyKeepLastK
+	for _, idx := range edited {
+		s := contextEditStrategyKeepLastK
+		if e, ok := r.elideByIdx[idx]; ok && e.reason == ContextEditStrategyElideArtifact {
+			s = ContextEditStrategyElideArtifact
+		} else if _, ok := r.staleByIdx[idx]; ok {
+			s = contextEditStrategyStaleResource
+		}
+		if dominantStrategyRank(s) > dominantStrategyRank(best) {
+			best = s
+		}
+	}
+	return best
+}
+
+// dominantStrategyRank ranks the event-level strategy vocabulary so
+// dominantStrategy can pick the most informative one. Higher wins.
+func dominantStrategyRank(strategy string) int {
+	switch strategy {
+	case ContextEditStrategyElideArtifact:
+		return 3
+	case contextEditStrategyStaleResource:
+		return 2
+	default:
+		return 1
+	}
+}
+
 // applyElision builds a new []aimodel.Message of the same length as
 // msgs. Indices in elideIdx (ascending) are replaced with placeholder
-// messages; all others are copied through verbatim. Per-index reason
-// precedence: elide (artifact/inline) > stale_resource > keep_last_k.
-// Returns the edited slice and the total bytes occupied by placeholder
-// strings.
+// messages; all others are copied through verbatim. The per-index
+// reason/detail come from the shared strategyResolver.
 func (m *ContextEditorMiddleware) applyElision(
 	msgs []aimodel.Message,
 	elideIdx []int,
-	staleByIdx map[int]string,
-	elideByIdx map[int]elideOutcome,
+	resolver strategyResolver,
 ) ([]aimodel.Message, int) {
 	out := make([]aimodel.Message, len(msgs))
 	placeholderBytes := 0
@@ -494,15 +509,7 @@ func (m *ContextEditorMiddleware) applyElision(
 		original := msgs[i]
 		originalBytes := len(original.Content.Text())
 
-		reason := contextEditStrategyKeepLastK
-		detail := ""
-		if e, ok := elideByIdx[i]; ok {
-			reason = e.reason
-			detail = e.detail
-		} else if d, ok := staleByIdx[i]; ok {
-			reason = contextEditStrategyStaleResource
-			detail = d
-		}
+		reason, detail := resolver.strategyForIndex(i)
 
 		placeholder := m.renderPlaceholder(original.ToolCallID, originalBytes, reason, detail)
 		placeholderBytes += len(placeholder)
@@ -585,18 +592,6 @@ func (m *ContextEditorMiddleware) elideOne(ctx context.Context, sid, body string
 	}
 }
 
-// hasArtifactElision reports whether at least one elision outcome
-// landed in the artifact store (vs degraded to inline). Used to pick
-// the dominant strategy reported in the EventContextEdited payload.
-func hasArtifactElision(m map[int]elideOutcome) bool {
-	for _, o := range m {
-		if o.reason == ContextEditStrategyElideArtifact {
-			return true
-		}
-	}
-	return false
-}
-
 // humanBytes formats n as e.g. "12.3 KiB" / "4.5 MiB" using binary
 // prefixes. Bytes < 1 KiB render as the plain number with the "B"
 // suffix.
@@ -613,30 +608,6 @@ func humanBytes(n int) string {
 	default:
 		return fmt.Sprintf("%d B", n)
 	}
-}
-
-// renderPlaceholder selects the placeholder template. V2 (when wired)
-// always wins because it can convey reason+detail; the legacy V1
-// template is only used when the editor is operating in pure
-// keep_last_k mode and the caller did not opt into V2 — that path is
-// preserved verbatim so existing wire-format expectations hold.
-func (m *ContextEditorMiddleware) renderPlaceholder(toolCallID string, originalBytes int, reason, detail string) string {
-	if m.placeholderV2 != nil {
-		return m.placeholderV2(toolCallID, originalBytes, reason, detail)
-	}
-	if m.usesV2Defaults() && reason != "" {
-		return DefaultContextEditPlaceholderV2(toolCallID, originalBytes, reason, detail)
-	}
-	return m.placeholderFn(toolCallID, originalBytes)
-}
-
-// usesV2Defaults reports whether the editor has any new strategy wired
-// in that the legacy V1 placeholder cannot express. When so, the V2
-// default is used so the prompt actually surfaces the reason; when not,
-// the V1 default is preserved to maintain bit-for-bit wire compat with
-// callers from before stale_resource / elide_to_artifact existed.
-func (m *ContextEditorMiddleware) usesV2Defaults() bool {
-	return m.resourceLookup != nil || m.maxBytesPerMessage > 0
 }
 
 // parseToolArgs decodes the JSON arguments string the LLM emitted. It
