@@ -60,8 +60,8 @@ type SessionMetrics struct {
 	// trusts the in-memory value rather than recomputing it.
 	TotalTokens int `json:"total_tokens"`
 
-	// CostUSD is the cumulative USD cost computed by the caller (vv
-	// uses costtraces pricing) and added on each EventAgentEnd. The
+	// CostUSD is the cumulative USD cost computed by the caller (which
+	// applies its own pricing) and added on each EventAgentEnd. The
 	// session metrics layer does not look up pricing itself — it just
 	// accumulates whatever the hook sends.
 	CostUSD float64 `json:"cost_usd"`
@@ -72,7 +72,7 @@ type SessionMetrics struct {
 	ActiveSeconds int64 `json:"active_seconds"`
 
 	// ResumeCount counts successful Resume operations on the session.
-	// Both transports (CLI vv --resume, HTTP POST .../resume) increment
+	// Both transports (a CLI resume command, HTTP POST .../resume) increment
 	// this exactly once per resumed run that returned a RunResponse.
 	ResumeCount int `json:"resume_count"`
 

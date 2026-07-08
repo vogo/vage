@@ -48,7 +48,7 @@ const (
 )
 
 // IDMaxLen caps the length of a session id. Mirrors the limit applied by
-// vv/traces/tracelog so the same id is reusable across both subsystems
+// a compatible external trace log so the same id is reusable across both subsystems
 // without re-sanitisation.
 const IDMaxLen = 128
 

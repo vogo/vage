@@ -43,7 +43,7 @@ const (
 
 // Tool is the LLM-facing web_search tool. Construction requires a Provider
 // via WithProvider — calling New without one returns nil so callers (e.g.
-// vv's tool wiring) can detect "not configured" and skip registration.
+// the host application's tool wiring) can detect "not configured" and skip registration.
 type Tool struct {
 	provider       Provider
 	httpClient     *http.Client
@@ -115,7 +115,7 @@ func WithUserAgent(s string) Option {
 	}
 }
 
-// New builds the Tool. Returns nil when no Provider was supplied so vv-side
+// New builds the Tool. Returns nil when no Provider was supplied so caller-side
 // wiring can branch on "not configured" without inspecting fields.
 func New(opts ...Option) *Tool {
 	t := &Tool{
@@ -290,7 +290,7 @@ func TopicFromContext(ctx context.Context) string {
 // HTTPClient returns the shared http.Client configured on the Tool, or
 // http.DefaultClient when none was supplied. Providers that build requests
 // internally should call this instead of constructing their own client so
-// vv-side timeouts and proxies stay consistent.
+// caller-side timeouts and proxies stay consistent.
 func (t *Tool) HTTPClient() *http.Client {
 	if t.httpClient != nil {
 		return t.httpClient

@@ -48,7 +48,7 @@ const (
 //	<root>/<session_id>/meta.json     // metadata, atomic-rewritten on Update
 //	<root>/<session_id>/events.jsonl  // one JSON-marshalled schema.Event per
 //	                                  // line, append-only — byte-for-byte
-//	                                  // compatible with vv/traces/tracelog
+//	                                  // compatible with an external trace log
 //	<root>/<session_id>/state.json    // structured state KV, atomic-rewritten
 //
 // AppendEvent intentionally does NOT touch meta.json: a typical ReAct loop
@@ -566,7 +566,7 @@ type rawLineEvent struct {
 
 // toEvent converts a rawLineEvent into a schema.Event with Data left nil.
 // Callers needing the original Data payload can read events.jsonl
-// themselves; the byte format matches vv/traces/tracelog exactly.
+// themselves; the byte format matches a compatible external trace log exactly.
 func (r *rawLineEvent) toEvent() schema.Event {
 	return schema.Event{
 		Type:      r.Type,

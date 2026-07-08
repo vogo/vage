@@ -122,7 +122,7 @@ var _ tree.SessionTreeStore = (*Store)(nil)
 // WrapStore returns inner wrapped with vector indexing. nil
 // vstore/embedder are tolerated: the wrapper logs a one-shot warning
 // and degrades to a pass-through, so callers can wire the decorator
-// unconditionally and let the vv config flag toggle activeness.
+// unconditionally and let the host config flag toggle activeness.
 //
 // Returns an error only when inner is nil — the rest is fail-open.
 func WrapStore(inner tree.SessionTreeStore, vstore vector.VectorStore, embedder vector.Embedder, opts ...Option) (*Store, error) {
