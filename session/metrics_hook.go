@@ -178,7 +178,7 @@ func (h *SessionMetricsHook) handleContextEdited(ctx context.Context, event sche
 	})
 }
 
-// RecordResume bumps ResumeCount. Both transports (CLI vv --resume
+// RecordResume bumps ResumeCount. Both transports (a CLI resume command
 // and HTTP POST .../resume) call this exactly once after a successful
 // Resume — i.e., after the underlying TaskAgent.Resume returned a
 // RunResponse. Failed resumes do NOT increment so the counter stays

@@ -32,7 +32,7 @@ import (
 )
 
 // Tool names. Kept as exported constants so callers (registry, tests, and
-// the Primary's permission gate) reference one identifier.
+// the tool registry owner's permission gate) reference one identifier.
 const (
 	AddToolName     = "tree_add"
 	UpdateToolName  = "tree_update"

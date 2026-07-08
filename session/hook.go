@@ -29,7 +29,7 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// DefaultHookBufferSize matches the default used by vv/traces/tracelog so
+// DefaultHookBufferSize matches the default used by a compatible external trace log so
 // the two hooks can be configured side-by-side without surprises.
 const DefaultHookBufferSize = 1024
 

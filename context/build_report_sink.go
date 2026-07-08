@@ -55,7 +55,7 @@ type BuildReportReader interface {
 
 // DefaultBuildReportLimit caps the per-session retention of reports for
 // FileBuildReportSink. Long Runs can produce hundreds of reports so the
-// LRU bound prevents disk explosion; vv plumbs a configurable override.
+// LRU bound prevents disk explosion; the host application plumbs a configurable override.
 const DefaultBuildReportLimit = 50
 
 // MaxListLimit caps how many reports a single List call can pull. Even

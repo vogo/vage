@@ -39,7 +39,7 @@ const (
 
 	// Session- and daily-level budget events (distinct from EventTokenBudgetExhausted,
 	// which is Run-level). Emitted by the BudgetMiddleware host closures — see
-	// vv/traces/budgets.
+	// the host budget tracker.
 	EventBudgetWarn     = "budget_warn"
 	EventBudgetExceeded = "budget_exceeded"
 

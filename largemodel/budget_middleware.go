@@ -25,7 +25,7 @@ import (
 
 // BudgetPreCheckFunc is called before each LLM invocation. Returning a
 // non-nil error aborts the call and causes that error to propagate upward.
-// The concrete error type is chosen by the caller (e.g. vv/traces/budgets
+// The concrete error type is chosen by the caller (e.g. a host budget tracker
 // returns *BudgetExceededError, which satisfies errors.Is(err, ErrBudgetExceeded)).
 type BudgetPreCheckFunc func(ctx context.Context) error
 
@@ -37,7 +37,7 @@ type BudgetPostRecordFunc func(ctx context.Context, usage aimodel.Usage)
 
 // BudgetMiddleware gates LLM calls against a host-supplied pre-check and
 // records usage via a host-supplied post-record hook. vage/largemodel stays
-// free of vv-specific Tracker types: the caller injects two closures.
+// free of caller-specific Tracker types: the caller injects two closures.
 //
 // Ordering: this middleware MUST be outermost so its rejection happens before
 // retry/circuit-breaker/cache layers get a chance to duplicate usage.
