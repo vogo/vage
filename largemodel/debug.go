@@ -187,17 +187,17 @@ func requestFields(req *aimodel.ChatRequest, streamed bool) map[string]any {
 	}
 
 	return map[string]any{
-		"model":        req.Model,
-		"messages":     req.Messages,
-		"tools":        req.Tools,
-		"temperature":  req.Temperature,
-		"max_tokens":   req.MaxTokens,
-		"top_p":        req.TopP,
-		"stream":       streamed || req.Stream,
-		"tool_choice":  req.ToolChoice,
-		"reasoning":    req.ReasoningEffort,
-		"response_fmt": req.ResponseFormat,
-		"stop":         req.Stop,
+		"model":                 req.Model,
+		"messages":              req.Messages,
+		"tools":                 req.Tools,
+		"temperature":           req.Temperature,
+		"max_completion_tokens": req.MaxCompletionTokens,
+		"top_p":                 req.TopP,
+		"stream":                streamed || req.Stream,
+		"tool_choice":           req.ToolChoice,
+		"reasoning":             req.ReasoningEffort,
+		"response_fmt":          req.ResponseFormat,
+		"stop":                  req.Stop,
 	}
 }
 

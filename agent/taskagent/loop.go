@@ -128,12 +128,12 @@ func (a *Agent) runReactLoop(
 		}
 
 		chatReq := &aimodel.ChatRequest{
-			Model:       p.model,
-			Messages:    messages,
-			Temperature: p.temperature,
-			MaxTokens:   p.maxTokens,
-			Stop:        p.stopSeq,
-			Tools:       aiTools,
+			Model:               p.model,
+			Messages:            messages,
+			Temperature:         p.temperature,
+			MaxCompletionTokens: p.maxTokens,
+			Stop:                p.stopSeq,
+			Tools:               aiTools,
 		}
 
 		assistantMsg, finishReason, err := mode.executeTurn(rc, chatReq)

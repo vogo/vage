@@ -114,8 +114,8 @@ func (p *LLMPromoter) Summarize(ctx context.Context, parent *TreeNode, children 
 	}
 
 	req := &aimodel.ChatRequest{
-		Model:     p.Model,
-		MaxTokens: &maxTok,
+		Model:               p.Model,
+		MaxCompletionTokens: &maxTok,
 		Messages: []aimodel.Message{
 			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(system)},
 			{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(buildLLMPromoterUserText(parent, children))},

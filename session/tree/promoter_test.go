@@ -97,8 +97,8 @@ func TestLLMPromoter_HappyPath(t *testing.T) {
 	if !strings.Contains(userBody, "Build OAuth") || !strings.Contains(userBody, "design schema") {
 		t.Errorf("user body missing parent/child: %q", userBody)
 	}
-	if cli.gotReq.MaxTokens == nil || *cli.gotReq.MaxTokens != defaultLLMPromoterMaxTokens {
-		t.Errorf("MaxTokens not set to default: %v", cli.gotReq.MaxTokens)
+	if cli.gotReq.MaxCompletionTokens == nil || *cli.gotReq.MaxCompletionTokens != defaultLLMPromoterMaxTokens {
+		t.Errorf("MaxCompletionTokens not set to default: %v", cli.gotReq.MaxCompletionTokens)
 	}
 }
 

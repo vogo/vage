@@ -429,8 +429,8 @@ func TestAgent_Run_OptionsOverride(t *testing.T) {
 	if req.Temperature == nil || *req.Temperature != 0.9 {
 		t.Errorf("Temperature = %v, want 0.9", req.Temperature)
 	}
-	if req.MaxTokens == nil || *req.MaxTokens != 2048 {
-		t.Errorf("MaxTokens = %v, want 2048", req.MaxTokens)
+	if req.MaxCompletionTokens == nil || *req.MaxCompletionTokens != 2048 {
+		t.Errorf("MaxCompletionTokens = %v, want 2048", req.MaxCompletionTokens)
 	}
 }
 

@@ -93,37 +93,37 @@ func (m *CacheMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 // cacheKeyData is the deterministic subset of ChatRequest used for cache keys.
 // All fields that influence model output must be included here.
 type cacheKeyData struct {
-	Model            string            `json:"model"`
-	Messages         []aimodel.Message `json:"messages"`
-	Tools            []aimodel.Tool    `json:"tools,omitempty"`
-	Temperature      *float64          `json:"temperature,omitempty"`
-	MaxTokens        *int              `json:"max_tokens,omitempty"`
-	TopP             *float64          `json:"top_p,omitempty"`
-	N                *int              `json:"n,omitempty"`
-	Stop             []string          `json:"stop,omitempty"`
-	FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
-	Seed             *int              `json:"seed,omitempty"`
-	ResponseFormat   any               `json:"response_format,omitempty"`
-	ToolChoice       any               `json:"tool_choice,omitempty"`
+	Model               string            `json:"model"`
+	Messages            []aimodel.Message `json:"messages"`
+	Tools               []aimodel.Tool    `json:"tools,omitempty"`
+	Temperature         *float64          `json:"temperature,omitempty"`
+	MaxCompletionTokens *int              `json:"max_completion_tokens,omitempty"`
+	TopP                *float64          `json:"top_p,omitempty"`
+	N                   *int              `json:"n,omitempty"`
+	Stop                []string          `json:"stop,omitempty"`
+	FrequencyPenalty    *float64          `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64          `json:"presence_penalty,omitempty"`
+	Seed                *int              `json:"seed,omitempty"`
+	ResponseFormat      any               `json:"response_format,omitempty"`
+	ToolChoice          any               `json:"tool_choice,omitempty"`
 }
 
 // cacheKey produces a SHA-256 hex digest from the deterministic request fields.
 func cacheKey(req *aimodel.ChatRequest) (string, error) {
 	data := cacheKeyData{
-		Model:            req.Model,
-		Messages:         req.Messages,
-		Tools:            req.Tools,
-		Temperature:      req.Temperature,
-		MaxTokens:        req.MaxTokens,
-		TopP:             req.TopP,
-		N:                req.N,
-		Stop:             req.Stop,
-		FrequencyPenalty: req.FrequencyPenalty,
-		PresencePenalty:  req.PresencePenalty,
-		Seed:             req.Seed,
-		ResponseFormat:   req.ResponseFormat,
-		ToolChoice:       req.ToolChoice,
+		Model:               req.Model,
+		Messages:            req.Messages,
+		Tools:               req.Tools,
+		Temperature:         req.Temperature,
+		MaxCompletionTokens: req.MaxCompletionTokens,
+		TopP:                req.TopP,
+		N:                   req.N,
+		Stop:                req.Stop,
+		FrequencyPenalty:    req.FrequencyPenalty,
+		PresencePenalty:     req.PresencePenalty,
+		Seed:                req.Seed,
+		ResponseFormat:      req.ResponseFormat,
+		ToolChoice:          req.ToolChoice,
 	}
 
 	b, err := json.Marshal(data)
