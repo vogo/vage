@@ -340,7 +340,7 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 		firstErr := fmt.Errorf("orchestrate: node %q failed: %w", comp.nodeID, comp.err)
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.abort(running, firstErr, func() {
+		_, _ = de.abort(running, firstErr, func() {
 			_ = executeBackwardCompensation(de.parentCtx, de.cfg.CompensateCfg, de.nodes, de.result)
 		})
 		return true, firstErr
@@ -350,7 +350,7 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 		firstErr := fmt.Errorf("orchestrate: node %q failed: %w", comp.nodeID, comp.err)
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.abort(running, firstErr)
+		_, _ = de.abort(running, firstErr)
 		return true, firstErr
 	}
 
@@ -377,7 +377,7 @@ func (de *dagExecutor) handleNodeSuccess(comp nodeCompletion) (bool, error) {
 	if de.cfg.EarlyExitFunc != nil && de.cfg.EarlyExitFunc(comp.nodeID, comp.resp) {
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.abort(running, nil)
+		_, _ = de.abort(running, nil)
 		return true, nil
 	}
 
@@ -385,7 +385,7 @@ func (de *dagExecutor) handleNodeSuccess(comp nodeCompletion) (bool, error) {
 	if de.ctx.Err() != nil {
 		running := countRunning(de.result)
 		de.mu.Unlock()
-		de.abort(running, de.ctx.Err())
+		_, _ = de.abort(running, de.ctx.Err())
 		return true, de.ctx.Err()
 	}
 
