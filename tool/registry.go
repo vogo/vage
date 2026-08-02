@@ -23,7 +23,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -147,22 +146,6 @@ func (r *Registry) Execute(ctx context.Context, name, args string) (schema.ToolR
 		return extCaller.CallTool(ctx, name, args)
 	}
 	return schema.ToolResult{}, fmt.Errorf("tool %q has no handler", name)
-}
-
-// ToAIModelTools converts tool definitions to the aimodel.Tool format for ChatRequest.
-func ToAIModelTools(defs []schema.ToolDef) []aimodel.Tool {
-	tools := make([]aimodel.Tool, len(defs))
-	for i, d := range defs {
-		tools[i] = aimodel.Tool{
-			Type: "function",
-			Function: aimodel.FunctionDefinition{
-				Name:        d.Name,
-				Description: d.Description,
-				Parameters:  d.Parameters,
-			},
-		}
-	}
-	return tools
 }
 
 // FilterTools returns only the tools whose names are in the whitelist.

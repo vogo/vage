@@ -26,7 +26,6 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -350,18 +349,18 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []schema.Message) map[int]str
 	// failing the whole request.
 	for i := range msgs {
 		msg := &msgs[i]
-		if msg.Role() != schema.RoleAssistant || len(msg.ToolCalls) == 0 {
+		if msg.Role() != schema.RoleAssistant || len(msg.ToolCalls()) == 0 {
 			continue
 		}
-		for _, tc := range msg.ToolCalls {
-			args := parseToolArgs(tc.Function.Arguments)
+		for _, tc := range msg.ToolCalls() {
+			args := parseToolArgs(tc.Arguments)
 			callInfo[tc.ID] = callDesc{
-				toolName:     tc.Function.Name,
+				toolName:     tc.Name,
 				args:         args,
 				assistantIdx: i,
 			}
 
-			tracker := m.resourceLookup(tc.Function.Name)
+			tracker := m.resourceLookup(tc.Name)
 			if tracker == nil || args == nil {
 				continue
 			}
@@ -390,7 +389,7 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []schema.Message) map[int]str
 		if msg.Role() != schema.RoleTool {
 			continue
 		}
-		info, ok := callInfo[msg.ToolCallID]
+		info, ok := callInfo[msg.ToolCallID()]
 		if !ok || info.args == nil {
 			continue
 		}
@@ -512,15 +511,11 @@ func (m *ContextEditorMiddleware) applyElision(
 
 		reason, detail := resolver.strategyForIndex(i)
 
-		placeholder := m.renderPlaceholder(original.ToolCallID, originalBytes, reason, detail)
+		placeholder := m.renderPlaceholder(original.ToolCallID(), originalBytes, reason, detail)
 		placeholderBytes += len(placeholder)
 
-		out[i] = schema.Message{
-			Role:            schema.RoleTool,
-			Content:         aimodel.NewTextContent(placeholder),
-			ToolCallID:      original.ToolCallID,
-			CacheBreakpoint: original.CacheBreakpoint,
-		}
+		out[i] = schema.NewToolResultMessage(
+			original.Protocol, original.ToolCallID(), placeholder, false)
 	}
 
 	return out, placeholderBytes

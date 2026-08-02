@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -73,13 +72,13 @@ func NewDebugMiddleware(sink DebugSink) *DebugMiddleware {
 // Wrap implements Middleware.
 func (m *DebugMiddleware) Wrap(next Caller) Caller {
 	return &CallerFunc{
-		Proto:  next.Protocol(),
-		chat:   m.chatCompletion(next),
-		stream: m.chatCompletionStream(next),
+		Proto:      next.Protocol(),
+		Chat:       m.call(next),
+		ChatStream: m.callStream(next),
 	}
 }
 
-func (m *DebugMiddleware) chatCompletion(next aimodel.ChatCompleter) func(ctx context.Context, req *Request) (*Response, error) {
+func (m *DebugMiddleware) call(next Caller) func(ctx context.Context, req *Request) (*Response, error) {
 	return func(ctx context.Context, req *Request) (*Response, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
@@ -104,7 +103,7 @@ func (m *DebugMiddleware) chatCompletion(next aimodel.ChatCompleter) func(ctx co
 	}
 }
 
-func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(ctx context.Context, req *Request) (*Stream, error) {
+func (m *DebugMiddleware) callStream(next Caller) func(ctx context.Context, req *Request) (*Stream, error) {
 	return func(ctx context.Context, req *Request) (*Stream, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
@@ -171,17 +170,14 @@ func requestFields(req *Request, streamed bool) map[string]any {
 	}
 
 	return map[string]any{
-		"model":                 req.Model,
-		"messages":              req.Messages,
-		"tools":                 req.Tools,
-		"temperature":           req.Temperature,
-		"max_completion_tokens": req.MaxCompletionTokens,
-		"top_p":                 req.TopP,
-		"stream":                streamed || req.Stream,
-		"tool_choice":           req.ToolChoice,
-		"reasoning":             req.ReasoningEffort,
-		"response_fmt":          req.ResponseFormat,
-		"stop":                  req.Stop,
+		"model":          req.Model,
+		"messages":       req.Messages,
+		"tools":          req.Tools,
+		"temperature":    req.Temperature,
+		"max_tokens":     req.MaxTokens,
+		"stream":         streamed,
+		"prompt_caching": req.PromptCaching,
+		"stop":           req.Stop,
 	}
 }
 
@@ -197,13 +193,9 @@ func responseFields(resp *Response, dur time.Duration, streamed bool) map[string
 
 	fields["model"] = resp.Model
 	fields["usage"] = resp.Usage
-
-	if len(resp.Choices) > 0 {
-		ch := resp.Choices[0]
-		fields["content"] = ch.Message.Text()
-		fields["tool_calls"] = ch.Message.ToolCalls
-		fields["finish_reason"] = string(ch.FinishReason)
-	}
+	fields["content"] = resp.Message.Text()
+	fields["tool_calls"] = resp.Message.ToolCalls()
+	fields["finish_reason"] = string(resp.FinishReason)
 
 	return fields
 }
