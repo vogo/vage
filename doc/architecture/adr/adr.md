@@ -28,7 +28,7 @@
 
 以下决策已体现在代码中,建议后续补记(见 [../architecture.md](../architecture.md)):
 
-- 以 `aimodel.ChatCompleter` 作为唯一模型接入点(供应商中立)。
+- 以 `largemodel.Caller` 作为唯一模型接入点,其下按协议直连各厂商 native 客户端。
 - `schema` 作为零内部依赖的根契约包。
 - `checkpoint`(迭代级)与 `orchestrate` checkpoint(DAG 级)双轨分离。
 - 上下文编辑采用"收敛策略单一判定点 + V1 兼容层隔离"。

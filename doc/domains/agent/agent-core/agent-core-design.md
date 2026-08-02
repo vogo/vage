@@ -6,7 +6,7 @@
 
 | 包 | 关键类型 | 设计角色 |
 |----|----------|----------|
-| `schema` | `RunRequest`/`RunResponse`/`RunOptions`/`Message`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | 供应商中立契约,唯一外部依赖 `aimodel`;提供与底层类型的双向转换辅助 |
+| `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | 契约层,唯一外部依赖是 `aimodel` 的 provider wire 类型;`Message` 按协议承载 OpenAI/Anthropic 原生消息,并以访问器统一读取 |
 | `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 |
 | `agent/taskagent` | `New` + 一整套 `With*` 选项、`Run`/`RunStream`/`Resume` | ReAct 循环实现,集成中枢 |
 | `agent/routeragent` | `Route`/`RouteFunc`、内置 `FirstFunc`/`IndexFunc`/`KeywordFunc`/`RandomFunc`/`LLMFunc` | 分发策略 |
@@ -32,5 +32,5 @@
 
 ## 依赖与降级
 
-- 上游依赖 `aimodel`(模型 SDK 抽象),核心不绑定任何厂商。
+- 上游依赖 `aimodel` 各 provider 的 native wire 类型;模型调用本身经 `largemodel.Caller` 按协议分派。
 - 下游各能力缺省即降级:无检查点则不写快照、无技能管理器则不注入技能提示,均不影响主答案产出。
