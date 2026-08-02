@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
@@ -121,15 +122,15 @@ func (a *Agent) injectSkillInstructions(br *buildResult, sessionID string) {
 	skillText := sb.String()
 
 	// If there is a system message, append to it; otherwise prepend a new system message.
-	if len(br.messages) > 0 && br.messages[0].Role == aimodel.RoleSystem {
-		existing := br.messages[0].Content.Text()
+	if len(br.messages) > 0 && br.messages[0].Role() == schema.RoleSystem {
+		existing := br.messages[0].Text()
 		br.messages[0].Content = aimodel.NewTextContent(existing + skillText)
 	} else {
-		sysMsg := aimodel.Message{
-			Role:    aimodel.RoleSystem,
+		sysMsg := schema.Message{
+			Role:    schema.RoleSystem,
 			Content: aimodel.NewTextContent(skillText),
 		}
-		br.messages = append([]aimodel.Message{sysMsg}, br.messages...)
+		br.messages = append([]schema.Message{sysMsg}, br.messages...)
 	}
 }
 
@@ -138,9 +139,9 @@ func (a *Agent) injectSkillInstructions(br *buildResult, sessionID string) {
 // last tool definition (if any). Messages and tools are slice-backed, so
 // mutating in place propagates to every ReAct iteration that reuses the
 // slice for the outgoing ChatRequest.
-func markPromptCacheBreakpoints(messages []aimodel.Message, tools []aimodel.Tool) {
+func markPromptCacheBreakpoints(messages []schema.Message, tools []aimodel.Tool) {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == aimodel.RoleSystem {
+		if messages[i].Role() == schema.RoleSystem {
 			messages[i].CacheBreakpoint = true
 			break
 		}

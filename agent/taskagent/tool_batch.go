@@ -28,7 +28,7 @@ import (
 )
 
 // executeToolCall runs a single tool call and returns the result.
-func (a *Agent) executeToolCall(ctx context.Context, tc aimodel.ToolCall) schema.ToolResult {
+func (a *Agent) executeToolCall(ctx context.Context, tc schema.ToolCall) schema.ToolResult {
 	if a.toolRegistry == nil {
 		return schema.ErrorResult(tc.ID, fmt.Sprintf("tool %q: no registry configured", tc.Function.Name))
 	}
@@ -61,10 +61,10 @@ func (a *Agent) executeToolBatch(
 	ctx context.Context,
 	rc *runContext,
 	agentID string,
-	toolCalls []aimodel.ToolCall,
+	toolCalls []schema.ToolCall,
 	emitResultEvent bool,
 	eventSink func(schema.Event) error,
-) ([]aimodel.Message, error) {
+) ([]schema.Message, error) {
 	n := len(toolCalls)
 	if n == 0 {
 		return nil, nil
@@ -115,7 +115,7 @@ func (a *Agent) executeToolBatch(
 		for i, tc := range toolCalls {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(i int, tc aimodel.ToolCall) {
+			go func(i int, tc schema.ToolCall) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				results[i] = a.executeToolCall(ctx, tc)
@@ -127,7 +127,7 @@ func (a *Agent) executeToolBatch(
 
 	// Dispatch End / Guard / (optional) Result events + build tool messages
 	// in ToolCalls order — matches pre-P1-7 observable sequence.
-	toolMsgs := make([]aimodel.Message, 0, n)
+	toolMsgs := make([]schema.Message, 0, n)
 	for i, tc := range toolCalls {
 		if err := eventSink(schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
 			ToolCallID: tc.ID,
@@ -154,8 +154,8 @@ func (a *Agent) executeToolBatch(
 			}
 		}
 
-		toolMsgs = append(toolMsgs, aimodel.Message{
-			Role:       aimodel.RoleTool,
+		toolMsgs = append(toolMsgs, schema.Message{
+			Role:       schema.RoleTool,
 			ToolCallID: res.ToolCallID,
 			Content:    aimodel.NewTextContent(toolResultText(res)),
 		})

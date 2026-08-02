@@ -109,9 +109,9 @@ func LLMFunc(cc aimodel.ChatCompleter, model string, fallback int) RouteFunc {
 
 		chatReq := &aimodel.ChatRequest{
 			Model: model,
-			Messages: []aimodel.Message{
-				{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(sb.String())},
-				{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(userText)},
+			Messages: []schema.Message{
+				{Role: schema.RoleSystem, Content: aimodel.NewTextContent(sb.String())},
+				{Role: schema.RoleUser, Content: aimodel.NewTextContent(userText)},
 			},
 		}
 
@@ -132,7 +132,7 @@ func LLMFunc(cc aimodel.ChatCompleter, model string, fallback int) RouteFunc {
 			return nil, fmt.Errorf("routeragent: LLM returned empty choices")
 		}
 
-		text := strings.TrimSpace(resp.Choices[0].Message.Content.Text())
+		text := strings.TrimSpace(resp.Choices[0].Message.Text())
 		idx, parseErr := strconv.Atoi(text)
 		if parseErr != nil {
 			if fallback >= 0 && fallback < len(routes) {
@@ -157,5 +157,5 @@ func lastUserMessageText(req *schema.RunRequest) string {
 	if req == nil || len(req.Messages) == 0 {
 		return ""
 	}
-	return req.Messages[len(req.Messages)-1].Content.Text()
+	return req.Messages[len(req.Messages)-1].Text()
 }

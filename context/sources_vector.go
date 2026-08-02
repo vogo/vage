@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/vector"
@@ -166,11 +165,8 @@ func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 		rep.Note = noteWithRange("", hits)
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	msg := schema.NewSystemMessage(in.Protocol, text)
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }
 
 // computeQuery selects the query text for this Fetch. QueryFn wins when
@@ -254,10 +250,7 @@ func (s *VectorRecallSource) estimateTokens(text string) int {
 	if est == nil {
 		est = memory.DefaultTokenEstimator
 	}
-	return est(schema.FromAIModelMessage(aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}))
+	return est(schema.FromAIModelMessage(schema.NewSystemMessage(in.Protocol, text)))
 }
 
 // defaultQuery is the fallback when VectorRecallSource.QueryFn is nil.
@@ -274,10 +267,10 @@ func defaultQuery(in FetchInput) string {
 	}
 	for i := len(in.Request.Messages) - 1; i >= 0; i-- {
 		m := in.Request.Messages[i]
-		if m.Role != aimodel.RoleUser {
+		if m.Role() != schema.RoleUser {
 			continue
 		}
-		if t := strings.TrimSpace(m.Content.Text()); t != "" {
+		if t := strings.TrimSpace(m.Text()); t != "" {
 			return t
 		}
 	}

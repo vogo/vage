@@ -20,7 +20,6 @@ package eval
 import (
 	"context"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -53,7 +52,7 @@ type EvalResult struct {
 	// Duration is the evaluation duration in milliseconds.
 	Duration int64
 	// Usage is the token usage (from actual response or judge call).
-	Usage *aimodel.Usage
+	Usage *schema.Usage
 	// Error is the error message if evaluation encountered an error.
 	Error string
 }
@@ -112,8 +111,8 @@ func lastAssistantText(resp *schema.RunResponse) string {
 	}
 
 	for i := len(resp.Messages) - 1; i >= 0; i-- {
-		if resp.Messages[i].Role == aimodel.RoleAssistant {
-			return resp.Messages[i].Content.Text()
+		if resp.Messages[i].Role() == schema.RoleAssistant {
+			return resp.Messages[i].Text()
 		}
 	}
 

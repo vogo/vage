@@ -19,9 +19,7 @@ package memory
 
 import (
 	"context"
-	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -32,8 +30,8 @@ type Summarizer func(ctx context.Context, messages []schema.Message) (string, er
 type SummarizeAndTruncOption func(*SummarizeAndTruncCompressor)
 
 // WithSummaryRole sets the role assigned to the summary message.
-// Defaults to aimodel.RoleUser.
-func WithSummaryRole(role aimodel.Role) SummarizeAndTruncOption {
+// Defaults to schema.RoleUser.
+func WithSummaryRole(role schema.Role) SummarizeAndTruncOption {
 	return func(c *SummarizeAndTruncCompressor) {
 		c.summaryRole = role
 	}
@@ -47,7 +45,7 @@ func WithSummaryRole(role aimodel.Role) SummarizeAndTruncOption {
 type SummarizeAndTruncCompressor struct {
 	summarizer  Summarizer
 	keepLastN   int
-	summaryRole aimodel.Role
+	summaryRole schema.Role
 	estimator   TokenEstimator
 }
 
@@ -65,7 +63,7 @@ func NewSummarizeAndTruncCompressor(summarizer Summarizer, keepLastN int, opts .
 	c := &SummarizeAndTruncCompressor{
 		summarizer:  summarizer,
 		keepLastN:   keepLastN,
-		summaryRole: aimodel.RoleUser,
+		summaryRole: schema.RoleUser,
 		estimator:   DefaultTokenEstimator,
 	}
 
@@ -125,9 +123,7 @@ func (c *SummarizeAndTruncCompressor) Compress(ctx context.Context, messages []s
 		}
 
 		// Check if summary exceeds remaining budget; truncate proportionally if necessary.
-		tmpMsg := schema.Message{
-			Message: aimodel.Message{Role: c.summaryRole, Content: aimodel.NewTextContent(summaryText)},
-		}
+		tmpMsg := schema.NewTextMessage(schema.ProtocolOf(messages), c.summaryRole, summaryText)
 		summaryTokens := c.estimator(tmpMsg)
 
 		if summaryTokens > summaryBudget {
@@ -142,14 +138,11 @@ func (c *SummarizeAndTruncCompressor) Compress(ctx context.Context, messages []s
 		}
 	}
 
-	summaryMsg := schema.Message{
-		Message:   aimodel.Message{Role: c.summaryRole, Content: aimodel.NewTextContent(summaryText)},
-		Timestamp: time.Now(),
-		Metadata: map[string]any{
-			"compressed":   true,
-			"source_count": len(older),
-			"strategy":     "summarize_and_trunc",
-		},
+	summaryMsg := schema.NewTextMessage(schema.ProtocolOf(messages), c.summaryRole, summaryText)
+	summaryMsg.Metadata = map[string]any{
+		"compressed":   true,
+		"source_count": len(older),
+		"strategy":     "summarize_and_trunc",
 	}
 
 	result := make([]schema.Message, 0, 1+len(recent))

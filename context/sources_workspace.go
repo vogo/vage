@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/workspace"
 )
@@ -115,11 +114,8 @@ func (s *WorkspaceSource) Fetch(ctx context.Context, in FetchInput) (FetchResult
 		rep.Status = StatusOK
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	msg := schema.NewSystemMessage(in.Protocol, text)
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }
 
 // renderWorkspace formats plan + notes index into a single Markdown block.

@@ -38,7 +38,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 	// Find the last user message.
 	idx := -1
 	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == aimodel.RoleUser {
+		if req.Messages[i].Role() == schema.RoleUser {
 			idx = i
 			break
 		}
@@ -50,7 +50,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 
 	msg := &guard.Message{
 		Direction: guard.DirectionInput,
-		Content:   req.Messages[idx].Content.Text(),
+		Content:   req.Messages[idx].Text(),
 		AgentID:   a.ID(),
 		SessionID: req.SessionID,
 		Metadata:  req.Metadata,
@@ -79,7 +79,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 		return respMsgs, nil
 	}
 
-	text := respMsgs[0].Content.Text()
+	text := respMsgs[0].Text()
 
 	msg := &guard.Message{
 		Direction: guard.DirectionOutput,
@@ -112,7 +112,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 // guard produced no material outcome.
 // When no guards are configured, IsError results, or non-text content, the
 // input is returned unchanged and evt is nil.
-func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc aimodel.ToolCall, result schema.ToolResult) (schema.ToolResult, *schema.Event) {
+func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc schema.ToolCall, result schema.ToolResult) (schema.ToolResult, *schema.Event) {
 	if len(a.toolResultGuards) == 0 {
 		return result, nil
 	}
@@ -216,7 +216,7 @@ func (a *Agent) maxToolResultSeverity(hits []string) string {
 // structured warning log as a side effect. The returned event must be
 // dispatched by the caller via the channel appropriate for the execution
 // mode (a.dispatch for non-streaming, send for streaming).
-func (a *Agent) buildGuardCheckEvent(rc *runContext, tc aimodel.ToolCall, text, guardName, action string, hits []string, severity, reason string) schema.Event {
+func (a *Agent) buildGuardCheckEvent(rc *runContext, tc schema.ToolCall, text, guardName, action string, hits []string, severity, reason string) schema.Event {
 	const snippetMax = 200
 
 	snippet := safeSnippet(text, snippetMax)

@@ -87,7 +87,7 @@ type reactMode interface {
 	// executeTurn performs one LLM call for the current message set,
 	// updating rc's usage and budget tracker as a side effect, and returns
 	// the accumulated assistant message together with its finish reason.
-	executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (aimodel.Message, aimodel.FinishReason, error)
+	executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error)
 
 	// toolBatchSink returns the parameters executeToolBatch needs: whether
 	// to emit user-facing EventToolResult events (stream only) and the sink
@@ -107,7 +107,7 @@ func (a *Agent) runReactLoop(
 	ctx context.Context,
 	rc *runContext,
 	p runParams,
-	messages []aimodel.Message,
+	messages []schema.Message,
 	aiTools []aimodel.Tool,
 	mode reactMode,
 	startIter int,
@@ -183,17 +183,17 @@ type syncMode struct {
 
 func (m *syncMode) emitIterationStart(_ *runContext, _ int) error { return nil }
 
-func (m *syncMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (aimodel.Message, aimodel.FinishReason, error) {
+func (m *syncMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error) {
 	resp, err := m.a.chatCompleter.ChatCompletion(m.ctx, chatReq)
 	if err != nil {
-		return aimodel.Message{}, "", fmt.Errorf("vage: chat completion: %w", err)
+		return schema.Message{}, "", fmt.Errorf("vage: chat completion: %w", err)
 	}
 
 	rc.totalUsage.Add(&resp.Usage)
 	rc.tracker.Add(resp.Usage.TotalTokens)
 
 	if len(resp.Choices) == 0 {
-		return aimodel.Message{}, "", ErrEmptyLLMResponse
+		return schema.Message{}, "", ErrEmptyLLMResponse
 	}
 
 	choice := resp.Choices[0]
@@ -225,14 +225,14 @@ func (m *streamMode) emitIterationStart(rc *runContext, iter int) error {
 	}))
 }
 
-func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (aimodel.Message, aimodel.FinishReason, error) {
+func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error) {
 	stream, err := m.a.chatCompleter.ChatCompletionStream(m.ctx, chatReq)
 	if err != nil {
-		return aimodel.Message{}, "", fmt.Errorf("vage: chat completion stream: %w", err)
+		return schema.Message{}, "", fmt.Errorf("vage: chat completion stream: %w", err)
 	}
 
-	var accumulated aimodel.Message
-	accumulated.Role = aimodel.RoleAssistant
+	var accumulated schema.Message
+	accumulated.Role = schema.RoleAssistant
 	var finishReason aimodel.FinishReason
 	var streamBytes int
 
@@ -243,7 +243,7 @@ func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (
 		}
 		if recvErr != nil {
 			_ = stream.Close()
-			return aimodel.Message{}, "", fmt.Errorf("vage: stream recv: %w", recvErr)
+			return schema.Message{}, "", fmt.Errorf("vage: stream recv: %w", recvErr)
 		}
 
 		if len(chunk.Choices) == 0 {
@@ -254,11 +254,11 @@ func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (
 		delta := &choice.Delta
 
 		// Emit text delta if present.
-		if text := delta.Content.Text(); text != "" {
+		if text := delta.Text(); text != "" {
 			streamBytes += len(text)
 			if err := m.send(schema.NewEvent(schema.EventTextDelta, m.agentID, rc.sessionID, schema.TextDeltaData{Delta: text})); err != nil {
 				_ = stream.Close()
-				return aimodel.Message{}, "", err
+				return schema.Message{}, "", err
 			}
 		}
 
@@ -308,9 +308,9 @@ func (m *streamMode) toolBatchSink() (bool, func(schema.Event) error) {
 // buildResponseMsgs builds the response message slice from the last assistant message.
 // For partial results (budget/iterations), it includes messages with tool calls.
 // For normal completion, it always includes the message.
-func (a *Agent) buildResponseMsgs(lastMsg aimodel.Message, partial bool) []schema.Message {
+func (a *Agent) buildResponseMsgs(lastMsg schema.Message, partial bool) []schema.Message {
 	if partial {
-		if lastMsg.Content.Text() != "" || len(lastMsg.ToolCalls) > 0 {
+		if lastMsg.Text() != "" || len(lastMsg.ToolCalls) > 0 {
 			return []schema.Message{schema.NewAssistantMessage(lastMsg, a.ID())}
 		}
 		return []schema.Message{}
@@ -350,7 +350,7 @@ func (a *Agent) finalizeRun(ctx context.Context, rc *runContext, stopReason sche
 
 	msg := ""
 	if len(respMsgs) > 0 {
-		msg = respMsgs[0].Content.Text()
+		msg = respMsgs[0].Text()
 	}
 
 	duration := time.Since(rc.start).Milliseconds()
@@ -411,7 +411,7 @@ func (a *Agent) finalizeStream(
 
 	msg := ""
 	if len(respMsgs) > 0 {
-		msg = respMsgs[0].Content.Text()
+		msg = respMsgs[0].Text()
 	}
 
 	return send(schema.NewEvent(schema.EventAgentEnd, a.ID(), rc.sessionID, schema.AgentEndData{

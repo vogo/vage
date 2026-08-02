@@ -20,9 +20,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -103,7 +101,7 @@ func (c *ConversationCompactor) Compact(ctx context.Context, messages []schema.M
 
 	// Identify system prompt.
 	systemIdx := -1
-	if messages[0].Role == aimodel.RoleSystem {
+	if messages[0].Role() == schema.RoleSystem {
 		systemIdx = 0
 	}
 
@@ -117,9 +115,9 @@ func (c *ConversationCompactor) Compact(ctx context.Context, messages []schema.M
 			break
 		}
 
-		if messages[i].Role == aimodel.RoleAssistant {
+		if messages[i].Role() == schema.RoleAssistant {
 			// Look for the preceding user message.
-			if i > 0 && messages[i-1].Role == aimodel.RoleUser && i-1 != systemIdx {
+			if i > 0 && messages[i-1].Role() == schema.RoleUser && i-1 != systemIdx {
 				protectedStart = i - 1
 				pairsFound++
 				i-- // skip the user message we just consumed
@@ -160,15 +158,12 @@ func (c *ConversationCompactor) Compact(ctx context.Context, messages []schema.M
 		return nil, 0, fmt.Errorf("compactor summarize: %w", err)
 	}
 
-	// Build summary message.
-	summaryMsg := schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(summaryText)},
-		Timestamp: time.Now(),
-		Metadata: map[string]any{
-			"compressed":   true,
-			"source_count": len(eligible),
-			"strategy":     "conversation_compact",
-		},
+	// Build summary message in the wire form of the conversation it replaces.
+	summaryMsg := schema.NewSystemMessage(schema.ProtocolOf(messages), summaryText)
+	summaryMsg.Metadata = map[string]any{
+		"compressed":   true,
+		"source_count": len(eligible),
+		"strategy":     "conversation_compact",
 	}
 
 	// Reassemble: [systemPrompt] + [summaryMsg] + [protectedTail].
@@ -197,15 +192,10 @@ func (c *ConversationCompactor) truncateInput(eligible []schema.Message) []schem
 	}
 
 	omitted := len(eligible) - 2*keepCount
-	marker := schema.Message{
-		Message: aimodel.Message{
-			Role: aimodel.RoleSystem,
-			Content: aimodel.NewTextContent(
-				fmt.Sprintf("[... %d messages omitted ...]", omitted),
-			),
-		},
-		Timestamp: time.Now(),
-	}
+	marker := schema.NewSystemMessage(
+		schema.ProtocolOf(eligible),
+		fmt.Sprintf("[... %d messages omitted ...]", omitted),
+	)
 
 	result := make([]schema.Message, 0, 2*keepCount+1)
 	result = append(result, eligible[:keepCount]...)

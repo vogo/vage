@@ -20,8 +20,6 @@ package largemodel
 import (
 	"errors"
 	"strings"
-
-	"github.com/vogo/aimodel"
 )
 
 // IsContextOverflowError returns true if the error indicates the request
@@ -33,7 +31,7 @@ func IsContextOverflowError(err error) bool {
 		return false
 	}
 
-	var apiErr *aimodel.APIError
+	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.StatusCode == 413 {
 			return true

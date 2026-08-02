@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -41,7 +40,7 @@ func ExecuteLoop(ctx context.Context, loop LoopNode, req *schema.RunRequest) (*s
 
 	currentReq := req
 	var prevResp *schema.RunResponse
-	var totalUsage aimodel.Usage
+	var totalUsage schema.Usage
 	hasUsage := false
 	var lastResp *schema.RunResponse
 

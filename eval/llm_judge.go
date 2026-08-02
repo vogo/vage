@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 var _ Evaluator = (*LLMJudgeEval)(nil)
@@ -65,9 +66,9 @@ func (e *LLMJudgeEval) Evaluate(ctx context.Context, c *EvalCase) (*EvalResult, 
 
 	req := &aimodel.ChatRequest{
 		Model: e.model,
-		Messages: []aimodel.Message{
+		Messages: []schema.Message{
 			{
-				Role:    aimodel.RoleUser,
+				Role:    schema.RoleUser,
 				Content: aimodel.NewTextContent(prompt),
 			},
 		},
@@ -80,7 +81,7 @@ func (e *LLMJudgeEval) Evaluate(ctx context.Context, c *EvalCase) (*EvalResult, 
 
 	var responseText string
 	if len(resp.Choices) > 0 {
-		responseText = resp.Choices[0].Message.Content.Text()
+		responseText = resp.Choices[0].Message.Text()
 	}
 
 	score, passed, reasoning, parseErr := parseJudgeResponse(responseText)
@@ -132,7 +133,7 @@ func (e *LLMJudgeEval) buildJudgePrompt(c *EvalCase) string {
 	inputText := ""
 	if c.Input != nil && len(c.Input.Messages) > 0 {
 		last := c.Input.Messages[len(c.Input.Messages)-1]
-		inputText = last.Content.Text()
+		inputText = last.Text()
 	}
 
 	fmt.Fprintf(&b, "Input: %s\n", inputText)

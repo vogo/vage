@@ -22,7 +22,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
@@ -154,7 +153,7 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 	// Per-source emitted messages and reports, slotted by declaration index
 	// so the final output is always in declaration order regardless of when
 	// each source executed.
-	emitted := make([][]aimodel.Message, len(b.sources))
+	emitted := make([][]schema.Message, len(b.sources))
 	reports := make([]schema.ContextSourceReport, len(b.sources))
 
 	mustTokens := 0
@@ -247,7 +246,7 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 		totalTokens += reports[i].Tokens
 	}
 
-	out := make([]aimodel.Message, 0, totalCount)
+	out := make([]schema.Message, 0, totalCount)
 	for _, slc := range emitted {
 		out = append(out, slc...)
 	}
@@ -288,7 +287,7 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 // it backfills Source name and Status="ok" on the report when the source
 // left them empty, and recomputes Tokens via the configured estimator when
 // the source did not provide one.
-func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput) ([]aimodel.Message, schema.ContextSourceReport, error) {
+func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput) ([]schema.Message, schema.ContextSourceReport, error) {
 	res, err := s.Fetch(ctx, in)
 	rep := res.Report
 
@@ -326,7 +325,7 @@ func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput)
 
 // sumTokens estimates the total tokens of a message slice using the
 // builder's configured estimator. nil-safe.
-func (b *DefaultBuilder) sumTokens(ms []aimodel.Message) int {
+func (b *DefaultBuilder) sumTokens(ms []schema.Message) int {
 	est := b.estimator
 	if est == nil {
 		est = memory.DefaultTokenEstimator
@@ -344,7 +343,7 @@ func (b *DefaultBuilder) sumTokens(ms []aimodel.Message) int {
 // until the running token total fits within budget. The report is updated
 // with the new OutputN / Tokens / DroppedN and Status="truncated". budget
 // is assumed to be > 0 (callers must guard).
-func (b *DefaultBuilder) trimByTokens(ms []aimodel.Message, rep schema.ContextSourceReport, budget int) ([]aimodel.Message, schema.ContextSourceReport) {
+func (b *DefaultBuilder) trimByTokens(ms []schema.Message, rep schema.ContextSourceReport, budget int) ([]schema.Message, schema.ContextSourceReport) {
 	if budget <= 0 || len(ms) == 0 {
 		return ms, rep
 	}
@@ -354,7 +353,7 @@ func (b *DefaultBuilder) trimByTokens(ms []aimodel.Message, rep schema.ContextSo
 	tokens := make([]int, len(ms))
 	total := 0
 	for i, m := range ms {
-		tokens[i] = b.sumTokens([]aimodel.Message{m})
+		tokens[i] = b.sumTokens([]schema.Message{m})
 		total += tokens[i]
 	}
 

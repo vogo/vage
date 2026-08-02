@@ -48,7 +48,7 @@ var ErrEmptyLLMResponse = errors.New("vage: empty response from LLM")
 func (a *Agent) saveIterationCheckpoint(
 	ctx context.Context,
 	rc *runContext,
-	messages []aimodel.Message,
+	messages []schema.Message,
 	final bool,
 	stopReason schema.StopReason,
 ) {
@@ -94,13 +94,13 @@ func (a *Agent) saveIterationCheckpoint(
 		}))
 }
 
-// cloneMessagesForCheckpoint copies the top-level slice; aimodel.Message
+// cloneMessagesForCheckpoint copies the top-level slice; schema.Message
 // internals are immutable post-creation by TaskAgent convention.
-func cloneMessagesForCheckpoint(in []aimodel.Message) []aimodel.Message {
+func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]aimodel.Message, len(in))
+	out := make([]schema.Message, len(in))
 	copy(out, in)
 	return out
 }
@@ -184,7 +184,7 @@ func (a *Agent) runResumeLoop(
 	ctx context.Context,
 	rc *runContext,
 	p runParams,
-	messages []aimodel.Message,
+	messages []schema.Message,
 	aiTools []aimodel.Tool,
 	startIter int,
 ) (*schema.RunResponse, error) {

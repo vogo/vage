@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -146,15 +145,15 @@ func (e *ToolCallEval) Evaluate(_ context.Context, c *EvalCase) (*EvalResult, er
 }
 
 // extractToolCalls collects all tool calls from assistant messages in a RunResponse.
-func extractToolCalls(resp *schema.RunResponse) []aimodel.ToolCall {
+func extractToolCalls(resp *schema.RunResponse) []schema.ToolCall {
 	if resp == nil {
 		return nil
 	}
 
-	var calls []aimodel.ToolCall
+	var calls []schema.ToolCall
 
 	for _, msg := range resp.Messages {
-		if msg.Role == aimodel.RoleAssistant && len(msg.ToolCalls) > 0 {
+		if msg.Role() == schema.RoleAssistant && len(msg.ToolCalls) > 0 {
 			calls = append(calls, msg.ToolCalls...)
 		}
 	}

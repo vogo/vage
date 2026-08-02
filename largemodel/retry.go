@@ -24,8 +24,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 const (
@@ -134,12 +132,13 @@ func NewRetryMiddleware(opts ...RetryOption) *RetryMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *RetryMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			var lastErr error
 			for attempt := range m.maxRetries + 1 {
-				resp, err := next.ChatCompletion(ctx, req)
+				resp, err := next.Call(ctx, req)
 				if err == nil {
 					return resp, nil
 				}
@@ -158,10 +157,10 @@ func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 
 			return nil, lastErr
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			var lastErr error
 			for attempt := range m.maxRetries + 1 {
-				s, err := next.ChatCompletionStream(ctx, req)
+				s, err := next.CallStream(ctx, req)
 				if err == nil {
 					return s, nil
 				}
@@ -187,7 +186,7 @@ func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 // It recognises API errors with retryable status codes, network timeouts,
 // temporary network conditions, and unexpected EOF signals.
 func isRetryable(err error) bool {
-	var apiErr *aimodel.APIError
+	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return retryableStatusCodes[apiErr.StatusCode]
 	}

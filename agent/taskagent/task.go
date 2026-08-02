@@ -351,7 +351,7 @@ func (a *Agent) resolveRunParams(opts *schema.RunOptions) runParams {
 
 // buildResult holds the output of buildInitialMessages.
 type buildResult struct {
-	messages        []aimodel.Message
+	messages        []schema.Message
 	sessionMsgCount int // original session message count (pre-compression), used as key offset
 }
 
@@ -361,10 +361,10 @@ type runContext struct {
 	sessionID  string
 	start      time.Time
 	tracker    *budgetTracker
-	totalUsage aimodel.Usage
+	totalUsage schema.Usage
 	br         buildResult
 	reqMsgs    []schema.Message
-	lastMsg    aimodel.Message
+	lastMsg    schema.Message
 	iteration  int
 	estimated  bool // true if token tracking is based on heuristic estimation
 }

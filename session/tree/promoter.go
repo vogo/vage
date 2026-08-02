@@ -116,9 +116,9 @@ func (p *LLMPromoter) Summarize(ctx context.Context, parent *TreeNode, children 
 	req := &aimodel.ChatRequest{
 		Model:               p.Model,
 		MaxCompletionTokens: &maxTok,
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(system)},
-			{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(buildLLMPromoterUserText(parent, children))},
+		Messages: []schema.Message{
+			{Role: schema.RoleSystem, Content: aimodel.NewTextContent(system)},
+			{Role: schema.RoleUser, Content: aimodel.NewTextContent(buildLLMPromoterUserText(parent, children))},
 		},
 	}
 
@@ -161,7 +161,7 @@ func extractFirstChoiceText(resp *aimodel.ChatResponse) string {
 	if resp == nil || len(resp.Choices) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(resp.Choices[0].Message.Content.Text())
+	return strings.TrimSpace(resp.Choices[0].Message.Text())
 }
 
 // CompressorPromoter delegates summarisation to a memory.ContextCompressor.
@@ -226,13 +226,13 @@ func compressorPromoterMessages(parent *TreeNode, children []*TreeNode) []schema
 		headBuilder.WriteString(" — ")
 		headBuilder.WriteString(parent.Summary)
 	}
-	out = append(out, schema.Message{Message: aimodel.Message{
-		Role:    aimodel.RoleSystem,
+	out = append(out, schema.Message{Message: schema.Message{
+		Role:    schema.RoleSystem,
 		Content: aimodel.NewTextContent(headBuilder.String()),
 	}})
 	for _, c := range children {
-		out = append(out, schema.Message{Message: aimodel.Message{
-			Role:    aimodel.RoleAssistant,
+		out = append(out, schema.Message{Message: schema.Message{
+			Role:    schema.RoleAssistant,
 			Content: aimodel.NewTextContent(childToCompressorBody(c)),
 		}})
 	}
@@ -257,7 +257,7 @@ func childToCompressorBody(c *TreeNode) string {
 func joinSchemaMessages(msgs []schema.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
-		text := m.Content.Text()
+		text := m.Text()
 		if text == "" {
 			continue
 		}

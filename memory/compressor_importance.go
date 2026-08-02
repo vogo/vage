@@ -21,7 +21,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -78,18 +77,18 @@ func DefaultMessageScorer(messages []schema.Message, index int) float64 {
 
 	var base float64
 
-	switch msg.Role {
-	case aimodel.RoleSystem:
+	switch msg.Role() {
+	case schema.RoleSystem:
 		base = 1000
-	case aimodel.RoleTool:
+	case schema.RoleTool:
 		base = 100
-	case aimodel.RoleAssistant:
-		if len(msg.ToolCalls) > 0 {
+	case schema.RoleAssistant:
+		if len(msg.ToolCalls()) > 0 {
 			base = 100
 		} else {
 			base = 10
 		}
-	case aimodel.RoleUser:
+	case schema.RoleUser:
 		base = 50
 	default:
 		base = 10

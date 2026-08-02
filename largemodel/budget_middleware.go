@@ -20,7 +20,7 @@ package largemodel
 import (
 	"context"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 // BudgetPreCheckFunc is called before each LLM invocation. Returning a
@@ -33,7 +33,7 @@ type BudgetPreCheckFunc func(ctx context.Context) error
 // final token usage. For streaming calls it fires on stream close. The caller
 // is responsible for aggregating usage into its own trackers and for emitting
 // any warn/exceeded events it wants downstream subscribers to see.
-type BudgetPostRecordFunc func(ctx context.Context, usage aimodel.Usage)
+type BudgetPostRecordFunc func(ctx context.Context, usage schema.Usage)
 
 // BudgetMiddleware gates LLM calls against a host-supplied pre-check and
 // records usage via a host-supplied post-record hook. vage/largemodel stays
@@ -56,16 +56,17 @@ func NewBudgetMiddleware(preCheck BudgetPreCheckFunc, postRecord BudgetPostRecor
 }
 
 // Wrap implements Middleware.
-func (m *BudgetMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *BudgetMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
 				}
 			}
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -76,14 +77,14 @@ func (m *BudgetMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplete
 
 			return resp, nil
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
 				}
 			}
 
-			s, err := next.ChatCompletionStream(ctx, req)
+			s, err := next.CallStream(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +93,7 @@ func (m *BudgetMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplete
 				return s, nil
 			}
 
-			return aimodel.WrapStream(s, func(usage *aimodel.Usage) {
+			return WrapStreamClose(s, func(usage *schema.Usage) {
 				if usage == nil {
 					return
 				}

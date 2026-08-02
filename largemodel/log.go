@@ -21,8 +21,6 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 // LogMiddleware logs chat completion requests and responses using slog.
@@ -49,9 +47,10 @@ func NewLogMiddleware(opts ...LogOption) *LogMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *LogMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *LogMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			start := time.Now()
 			m.logger.InfoContext(ctx, "chat_completion_start",
 				"model", req.Model,
@@ -59,7 +58,7 @@ func (m *LogMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
 				"tools", len(req.Tools),
 			)
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			duration := time.Since(start)
 
 			if err != nil {
@@ -82,13 +81,13 @@ func (m *LogMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
 
 			return resp, nil
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			m.logger.InfoContext(ctx, "chat_completion_stream_start",
 				"model", req.Model,
 				"messages", len(req.Messages),
 			)
 
-			s, err := next.ChatCompletionStream(ctx, req)
+			s, err := next.CallStream(ctx, req)
 			if err != nil {
 				m.logger.ErrorContext(ctx, "chat_completion_stream_error",
 					"model", req.Model,

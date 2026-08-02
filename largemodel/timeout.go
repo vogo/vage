@@ -20,8 +20,6 @@ package largemodel
 import (
 	"context"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 // TimeoutMiddleware adds a per-call context deadline to ChatCompletion calls.
@@ -37,20 +35,21 @@ func NewTimeoutMiddleware(d time.Duration) *TimeoutMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *TimeoutMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *TimeoutMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			ctx, cancel := context.WithTimeout(ctx, m.timeout)
 			defer cancel()
 
-			return next.ChatCompletion(ctx, req)
+			return next.Call(ctx, req)
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			// Pass the caller's context directly. Applying a timeout here would
 			// cancel the derived context via defer cancel() as soon as
 			// ChatCompletionStream returns, killing the stream before the caller
 			// has consumed any chunks.
-			return next.ChatCompletionStream(ctx, req)
+			return next.CallStream(ctx, req)
 		},
 	}
 }

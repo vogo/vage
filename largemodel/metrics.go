@@ -21,7 +21,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -46,9 +45,10 @@ func NewMetricsMiddleware(dispatch DispatchFunc) *MetricsMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *MetricsMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallStart, "", "", schema.LLMCallStartData{
 				Model:    req.Model,
 				Messages: len(req.Messages),
@@ -57,7 +57,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 
 			start := time.Now()
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			duration := time.Since(start).Milliseconds()
 
 			if err != nil {
@@ -81,7 +81,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 
 			return resp, nil
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallStart, "", "", schema.LLMCallStartData{
 				Model:    req.Model,
 				Messages: len(req.Messages),
@@ -91,7 +91,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 
 			start := time.Now()
 
-			s, err := next.ChatCompletionStream(ctx, req)
+			s, err := next.CallStream(ctx, req)
 			if err != nil {
 				duration := time.Since(start).Milliseconds()
 				m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallError, "", "", schema.LLMCallErrorData{
@@ -105,7 +105,7 @@ func (m *MetricsMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatComplet
 			}
 
 			// Return a wrapped stream that emits EventLLMCallEnd with usage on close.
-			return aimodel.WrapStream(s, func(usage *aimodel.Usage) {
+			return WrapStreamClose(s, func(usage *schema.Usage) {
 				duration := time.Since(start).Milliseconds()
 				data := schema.LLMCallEndData{
 					Model:    req.Model,

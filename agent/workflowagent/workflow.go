@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/orchestrate"
 	"github.com/vogo/vage/schema"
@@ -139,7 +138,7 @@ func (a *Agent) runSequence(ctx context.Context, req *schema.RunRequest) (*schem
 		}, nil
 	}
 
-	var totalUsage aimodel.Usage
+	var totalUsage schema.Usage
 	hasUsage := false
 	currentReq := req
 	var lastResp *schema.RunResponse

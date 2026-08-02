@@ -24,7 +24,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/session/tree"
 )
@@ -217,11 +216,8 @@ func (s *SessionTreeSource) Fetch(ctx context.Context, in FetchInput) (FetchResu
 		rep.Status = StatusOK
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	msg := schema.NewSystemMessage(in.Protocol, text)
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }
 
 // buildView walks the tree once, gathering everything the renderer needs.

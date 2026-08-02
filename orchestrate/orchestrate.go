@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -186,7 +185,7 @@ type DAGResult struct {
 	NodeResults map[string]*schema.RunResponse
 	NodeStatus  map[string]NodeStatus
 	FinalOutput *schema.RunResponse
-	Usage       *aimodel.Usage
+	Usage       *schema.Usage
 	Timeline    []NodeTimeline // Node execution timeline (Gantt chart data).
 }
 

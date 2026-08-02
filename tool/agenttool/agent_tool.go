@@ -169,8 +169,8 @@ func newHandler(ag agent.Agent, extract ArgExtractor, sessCfg *sessionConfig) to
 
 		var parts []string
 		for _, msg := range resp.Messages {
-			if msg.Role == aimodel.RoleAssistant {
-				text := msg.Content.Text()
+			if msg.Role() == schema.RoleAssistant {
+				text := msg.Text()
 				if text != "" {
 					parts = append(parts, text)
 				}

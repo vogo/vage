@@ -33,6 +33,11 @@ type Agent interface {
 	ID() string
 	Name() string
 	Description() string
+
+	// Protocol reports the vendor wire protocol this agent's model speaks.
+	// Messages are stored in vendor-native form, so callers building a
+	// request must construct their messages for this protocol.
+	Protocol() schema.Protocol
 }
 
 // Config holds the common configuration shared by all agent types.
@@ -40,27 +45,42 @@ type Config struct {
 	ID          string
 	Name        string
 	Description string
+
+	// Protocol is the vendor wire protocol this agent's model speaks. The
+	// zero value means ProtocolOpenAIChat, vage's default.
+	Protocol schema.Protocol
 }
 
-// Base implements ID/Name/Description for embedding into concrete agent types.
+// Base implements ID/Name/Description/Protocol for embedding into concrete
+// agent types.
 type Base struct {
 	AgentID          string
 	AgentName        string
 	AgentDescription string
+	AgentProtocol    schema.Protocol
 }
 
 // NewBase creates a Base from the given Config.
 func NewBase(cfg Config) Base {
+	proto := cfg.Protocol
+	if proto == "" {
+		proto = schema.ProtocolOpenAIChat
+	}
+
 	return Base{
 		AgentID:          cfg.ID,
 		AgentName:        cfg.Name,
 		AgentDescription: cfg.Description,
+		AgentProtocol:    proto,
 	}
 }
 
 func (m *Base) ID() string          { return m.AgentID }
 func (m *Base) Name() string        { return m.AgentName }
 func (m *Base) Description() string { return m.AgentDescription }
+
+// Protocol implements Agent.
+func (m *Base) Protocol() schema.Protocol { return m.AgentProtocol }
 
 // StreamAgent extends Agent with streaming support.
 type StreamAgent interface {
@@ -77,7 +97,7 @@ type RunFunc func(ctx context.Context, req *schema.RunRequest) (*schema.RunRespo
 // RunText is a convenience function that sends a single text message to an agent.
 func RunText(ctx context.Context, a Agent, input string) (*schema.RunResponse, error) {
 	return a.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage(input)},
+		Messages: []schema.Message{schema.NewUserMessage(a.Protocol(), input)},
 	})
 }
 
@@ -85,7 +105,7 @@ func RunText(ctx context.Context, a Agent, input string) (*schema.RunResponse, e
 // a streaming response. The agent must implement StreamAgent.
 func RunStreamText(ctx context.Context, a StreamAgent, input string) (*schema.RunStream, error) {
 	return a.RunStream(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage(input)},
+		Messages: []schema.Message{schema.NewUserMessage(a.Protocol(), input)},
 	})
 }
 
@@ -108,7 +128,7 @@ func RunToStream(ctx context.Context, a Agent, req *schema.RunRequest) *schema.R
 
 		msg := ""
 		if len(resp.Messages) > 0 {
-			msg = resp.Messages[0].Content.Text()
+			msg = resp.Messages[0].Text()
 		}
 
 		return send(schema.NewEvent(schema.EventAgentEnd, agentID, sessionID, schema.AgentEndData{
