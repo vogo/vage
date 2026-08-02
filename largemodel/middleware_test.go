@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 )
 
 // mockCompleter records calls and returns a configurable response.
@@ -49,7 +50,7 @@ func TestChainEmpty(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "test"}}
 	wrapped := Chain(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestChainOrder(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
 	wrapped := Chain(mock, mkMiddleware("A"), mkMiddleware("B"), mkMiddleware("C"))
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestDefaultChain_AllMiddlewares(t *testing.T) {
 		NewCacheMiddleware(NewMapCache()),
 	)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestDefaultChain_NilMiddlewares(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
 	wrapped := DefaultChain(mock, nil, nil, nil)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

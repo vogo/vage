@@ -907,7 +907,7 @@ func TestIntegration_OutputGuard_WithToolCalls(t *testing.T) {
 		}
 		// ToolCalls should be preserved as-is (guards only check Content field)
 		if len(msg.ToolCalls) != 1 {
-			t.Errorf("ToolCalls count = %d, want 1", len(msg.ToolCalls))
+			t.Errorf("ToolCalls count = %d, want 1", len(msg.ToolCalls()))
 		}
 	})
 }

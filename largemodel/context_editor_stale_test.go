@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -103,7 +104,7 @@ func buildReact(t *testing.T, turns []turn) *largemodel.Request {
 		})
 		msgs = append(msgs, tn.results...)
 	}
-	return &aimodel.ChatRequest{Model: "test", Messages: msgs}
+	return &openai.ChatCompletionRequest{Model: "test", Messages: msgs}
 }
 
 // dispatchCapture records the most recent EventContextEdited payload
@@ -535,7 +536,7 @@ func TestStale_UnknownToolName(t *testing.T) {
 // whose ToolCallID matches id. Fails the test if not found.
 func findToolCallResult(msgs []schema.Message, id string) int {
 	for i, m := range msgs {
-		if m.Role() == schema.RoleTool && m.ToolCallID == id {
+		if m.Role() == schema.RoleTool && m.ToolCallID() == id {
 			return i
 		}
 	}

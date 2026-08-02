@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -102,7 +103,7 @@ func TestElide_HappyPath(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "anything"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
@@ -161,7 +162,7 @@ func TestElide_DegradeNoWriter(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
@@ -198,7 +199,7 @@ func TestElide_DegradeNoSession(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
@@ -231,7 +232,7 @@ func TestElide_DegradeWriterError(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
@@ -260,7 +261,7 @@ func TestElide_BelowThreshold(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 100) // 100 < 10000
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
@@ -295,7 +296,7 @@ func TestElide_MultipleMessages(t *testing.T) {
 	bodyB := strings.Repeat("b", 5000)
 	bodyADup := strings.Repeat("a", 5000) // identical to bodyA
 
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
 			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},
@@ -348,7 +349,7 @@ func TestElide_LosesToKeepLastK_StillReportsArtifact(t *testing.T) {
 	//                            1,2 → keep_last_k.
 	body0 := strings.Repeat("a", 5000)
 	short := strings.Repeat("b", 100)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
 			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},

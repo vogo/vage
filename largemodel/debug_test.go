@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -78,7 +79,7 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	}
 	c := mw.Wrap(stub)
 
-	_, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "m"})
+	_, err := c.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func TestDebugMiddleware_Error(t *testing.T) {
 	stub := &stubCompleter{err: errors.New("bad")}
 	c := mw.Wrap(stub)
 
-	_, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "m"})
+	_, err := c.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{Model: "m"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -119,7 +120,7 @@ func TestDebugMiddleware_NoopSink(t *testing.T) {
 	mw := NewDebugMiddleware(nil)
 	stub := &stubCompleter{resp: &aimodel.ChatResponse{}}
 	c := mw.Wrap(stub)
-	if _, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{}); err != nil {
+	if _, err := c.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{}); err != nil {
 		t.Fatal(err)
 	}
 }

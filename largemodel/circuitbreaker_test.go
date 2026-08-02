@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 )
 
 // errFake is a sentinel used to simulate backend failures in circuit breaker tests.
@@ -45,7 +46,7 @@ func TestCircuitBreaker_ClosedPassesThrough(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	for i := range 5 {
-		resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+		resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 		if err != nil {
 			t.Fatalf("call %d: unexpected error: %v", i, err)
 		}
@@ -68,7 +69,7 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// Drive the circuit to open by hitting the threshold.
 	for i := range threshold {
@@ -119,7 +120,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	wrapped := cb.Wrap(custom)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// Open the circuit.
 	for i := range threshold {
@@ -171,7 +172,7 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// Open the circuit.
 	for i := range threshold {
@@ -218,7 +219,7 @@ func TestCircuitBreaker_HalfOpenSingleProbe(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// Open the circuit.
 	for range threshold {
@@ -261,7 +262,7 @@ func TestCircuitBreaker_StreamSupport(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// Open the circuit via stream calls.
 	for i := range threshold {

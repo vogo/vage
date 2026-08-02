@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -36,7 +37,7 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("preCheck error should propagate, got %v", err)
 	}
@@ -58,7 +59,7 @@ func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{}); err != nil {
+	if _, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if recorded.PromptTokens != 10 || recorded.CompletionTokens != 5 {
@@ -72,7 +73,7 @@ func TestBudgetMiddlewareTransparentWhenNilClosures(t *testing.T) {
 	mw := NewBudgetMiddleware(nil, nil)
 	wrapped := mw.Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestBudgetMiddlewareStreamPreCheckBlocks(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("stream preCheck error should propagate, got %v", err)
 	}
@@ -120,7 +121,7 @@ func TestBudgetMiddlewareStreamPassesThroughWhenUpstreamNil(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	s, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	s, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected stream err: %v", err)
 	}

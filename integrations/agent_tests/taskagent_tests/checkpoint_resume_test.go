@@ -25,11 +25,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -163,7 +163,7 @@ func TestCheckpoint_AC_2_3_NoStoreEquivalent(t *testing.T) {
 func runOnce(t *testing.T, sessionID string, withStore bool) *schema.RunResponse {
 	t.Helper()
 	mock := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"x"}`, 50),
-			makeStopResponse("hello", 50))
+		makeStopResponse("hello", 50))
 	opts := []taskagent.Option{
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(echoToolReg()),

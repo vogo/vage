@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -32,7 +33,7 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+	req := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
 
@@ -74,10 +75,10 @@ func TestCacheMiddleware_DifferentRequests(t *testing.T) {
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 	ctx := context.Background()
 
-	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
-	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "world"),
 	}}
 
@@ -106,7 +107,7 @@ func TestCacheMiddleware_Expiry(t *testing.T) {
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{Model: "gpt-4"}
+	req := &openai.ChatCompletionRequest{Model: "gpt-4"}
 
 	_, _ = wrapped.ChatCompletion(ctx, req)
 
@@ -129,7 +130,7 @@ func TestCacheMiddleware_StreamPassthrough(t *testing.T) {
 	mock := &mockCompleter{}
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
-	_, _ = wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, _ = wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 
 	if mock.streamCalls != 1 {
 		t.Fatalf("expected 1 stream call, got %d", mock.streamCalls)
@@ -142,7 +143,7 @@ func TestCacheMiddleware_ErrorNotCached(t *testing.T) {
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{Model: "gpt-4"}
+	req := &openai.ChatCompletionRequest{Model: "gpt-4"}
 
 	_, err := wrapped.ChatCompletion(ctx, req)
 	if err == nil {
@@ -173,7 +174,7 @@ func TestMapCache_GetMiss(t *testing.T) {
 }
 
 func TestCacheKey_Deterministic(t *testing.T) {
-	req := &aimodel.ChatRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "gpt-4",
 		Messages: []schema.Message{
 			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "test"),
@@ -207,8 +208,8 @@ func TestCacheKey_DifferentTemperature(t *testing.T) {
 	temp1 := 0.2
 	temp2 := 0.9
 
-	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: base, Temperature: &temp1}
-	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: base, Temperature: &temp2}
+	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Temperature: &temp1}
+	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Temperature: &temp2}
 
 	k1, err := cacheKey(req1)
 	if err != nil {
@@ -334,8 +335,8 @@ func TestCacheKey_DifferentSeed(t *testing.T) {
 	seed1 := 42
 	seed2 := 99
 
-	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: base, Seed: &seed1}
-	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: base, Seed: &seed2}
+	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Seed: &seed1}
+	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Seed: &seed2}
 
 	k1, err := cacheKey(req1)
 	if err != nil {

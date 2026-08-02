@@ -21,175 +21,85 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
-// TestMarkPromptCacheBreakpoints_SystemAndTools covers the happy path:
-// the last system message and the last tool both get flagged; nothing
-// else is touched.
-func TestMarkPromptCacheBreakpoints_SystemAndTools(t *testing.T) {
-	msgs := []schema.Message{
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
-	}
-	tools := []aimodel.Tool{
-		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
-		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t2"}},
-	}
-	markPromptCacheBreakpoints(msgs, tools)
+// Prompt caching is a vendor-specific wire concern, so the agent no longer
+// marks individual messages and tools. It states the intent on the request
+// and the Anthropic caller renders the cache_control breakpoints; OpenAI
+// ignores the flag because it caches identical prefixes on its own. These
+// tests cover the agent's half of that contract — that the intent reaches
+// the request — while largemodel's tests cover the wire rendering.
 
-	if !msgs[0].CacheBreakpoint {
-		t.Errorf("system message not marked")
-	}
-	if msgs[1].CacheBreakpoint {
-		t.Errorf("user message incorrectly marked")
-	}
-	if tools[0].CacheBreakpoint {
-		t.Errorf("first tool incorrectly marked")
-	}
-	if !tools[1].CacheBreakpoint {
-		t.Errorf("last tool not marked")
-	}
-}
-
-// TestMarkPromptCacheBreakpoints_MultipleSystem verifies the helper marks
-// only the LAST system message — matches Anthropic's "cache up to and
-// including" semantics so one breakpoint at the tail covers all of them.
-func TestMarkPromptCacheBreakpoints_MultipleSystem(t *testing.T) {
-	msgs := []schema.Message{
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s2"),
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
-	}
-	markPromptCacheBreakpoints(msgs, nil)
-	if msgs[0].CacheBreakpoint {
-		t.Errorf("first system incorrectly marked")
-	}
-	if !msgs[1].CacheBreakpoint {
-		t.Errorf("last system not marked")
-	}
-}
-
-// TestMarkPromptCacheBreakpoints_NoSystem is a regression guard — with no
-// system message at all the helper should still mark the tool cleanly.
-func TestMarkPromptCacheBreakpoints_NoSystem(t *testing.T) {
-	msgs := []schema.Message{
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
-	}
-	tools := []aimodel.Tool{
-		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
-	}
-	markPromptCacheBreakpoints(msgs, tools)
-	if msgs[0].CacheBreakpoint {
-		t.Errorf("user message incorrectly marked")
-	}
-	if !tools[0].CacheBreakpoint {
-		t.Errorf("tool not marked")
-	}
-}
-
-// TestMarkPromptCacheBreakpoints_NoTools verifies the helper handles an
-// empty tool slice without panicking and still marks the system msg.
-func TestMarkPromptCacheBreakpoints_NoTools(t *testing.T) {
-	msgs := []schema.Message{
-		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
-	}
-	markPromptCacheBreakpoints(msgs, nil)
-	if !msgs[0].CacheBreakpoint {
-		t.Errorf("system not marked")
-	}
-}
-
-// TestAgent_Run_PromptCachingDefault confirms that the default-on option
-// plumbs the CacheBreakpoint flag through to the outbound ChatRequest.
-func TestAgent_Run_PromptCachingDefault(t *testing.T) {
-	mock := newMock(stopResponse("ok"))
+// cachingTestAgent builds an agent with one tool and a system prompt, the two
+// surfaces prompt caching applies to.
+func cachingTestAgent(t *testing.T, mock *mockChatCompleter, opts ...Option) *Agent {
+	t.Helper()
 
 	reg := tool.NewRegistry()
-	_ = reg.Register(
+	if err := reg.Register(
 		schema.ToolDef{Name: "t1"},
 		func(_ context.Context, _, _ string) (schema.ToolResult, error) {
 			return schema.TextResult("", ""), nil
 		},
-	)
+	); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
 
-	a := New(
-		agent.Config{},
+	base := []Option{
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSystemPrompt(prompt.StringPrompt("you are helpful")),
-	)
+	}
 
-	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
-	})
-	if err != nil {
+	return New(agent.Config{}, append(base, opts...)...)
+}
+
+// runCachingAgent runs one turn and returns the request the agent produced.
+func runCachingAgent(t *testing.T, a *Agent, mock *mockChatCompleter) *largemodel.Request {
+	t.Helper()
+
+	if _, err := a.Run(context.Background(), &schema.RunRequest{
+		Messages: []schema.Message{schema.NewUserMessage(testProtocol, "hi")},
+	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(mock.requests) == 0 {
+	reqs := mock.Requests()
+	if len(reqs) == 0 {
 		t.Fatal("no LLM requests captured")
 	}
-	req := mock.requests[0]
 
-	foundSystem := false
-	for _, m := range req.Messages {
-		if m.Role() == schema.RoleSystem && m.CacheBreakpoint {
-			foundSystem = true
-		}
+	return reqs[0]
+}
+
+// TestAgent_Run_PromptCachingDefault confirms caching is on by default and
+// the agent asks for it on every outbound request.
+func TestAgent_Run_PromptCachingDefault(t *testing.T) {
+	mock := newMock(stopResponse("ok"))
+	req := runCachingAgent(t, cachingTestAgent(t, mock), mock)
+
+	if !req.PromptCaching {
+		t.Error("PromptCaching = false, want true by default")
 	}
-	if !foundSystem {
-		t.Errorf("expected a system message with CacheBreakpoint=true")
-	}
+
 	if len(req.Tools) == 0 {
-		t.Fatal("expected at least one tool")
-	}
-	if !req.Tools[len(req.Tools)-1].CacheBreakpoint {
-		t.Errorf("last tool CacheBreakpoint=false, want true")
+		t.Error("expected at least one tool on the request")
 	}
 }
 
-// TestAgent_Run_PromptCachingDisabled verifies that WithPromptCaching(false)
-// sends neither the system-message nor the tool-array marker.
+// TestAgent_Run_PromptCachingDisabled verifies WithPromptCaching(false)
+// suppresses the request-level intent.
 func TestAgent_Run_PromptCachingDisabled(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
+	req := runCachingAgent(t, cachingTestAgent(t, mock, WithPromptCaching(false)), mock)
 
-	reg := tool.NewRegistry()
-	_ = reg.Register(
-		schema.ToolDef{Name: "t1"},
-		func(_ context.Context, _, _ string) (schema.ToolResult, error) {
-			return schema.TextResult("", ""), nil
-		},
-	)
-
-	a := New(
-		agent.Config{},
-		WithCaller(mock),
-		WithToolRegistry(reg),
-		WithSystemPrompt(prompt.StringPrompt("you are helpful")),
-		WithPromptCaching(false),
-	)
-
-	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	req := mock.requests[0]
-	for i, m := range req.Messages {
-		if m.CacheBreakpoint {
-			t.Errorf("messages[%d] (role=%s) unexpectedly marked with CacheBreakpoint", i, m.Role)
-		}
-	}
-	for i, tl := range req.Tools {
-		if tl.CacheBreakpoint {
-			t.Errorf("tools[%d] unexpectedly marked with CacheBreakpoint", i)
-		}
+	if req.PromptCaching {
+		t.Error("PromptCaching = true, want false when disabled")
 	}
 }
 

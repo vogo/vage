@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -40,7 +41,7 @@ func TestLogMiddleware_ChatCompletion_Success(t *testing.T) {
 
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{Model: "gpt-4"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestLogMiddleware_ChatCompletion_Error(t *testing.T) {
 	mock := &mockCompleter{chatErr: errors.New("api down")}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -88,7 +89,7 @@ func TestLogMiddleware_Stream_Success(t *testing.T) {
 	mock := &mockCompleter{}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, _ = wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, _ = wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{Model: "gpt-4"})
 
 	output := buf.String()
 	if !strings.Contains(output, "chat_completion_stream_start") {
@@ -103,7 +104,7 @@ func TestLogMiddleware_Stream_Error(t *testing.T) {
 	mock := &mockCompleter{streamErr: errors.New("stream fail")}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

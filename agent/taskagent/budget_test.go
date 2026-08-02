@@ -23,7 +23,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
@@ -180,8 +179,8 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 		t.Errorf("TotalTokens = %d, want 200", resp.Usage.TotalTokens)
 	}
 	// 3rd call should not have happened.
-	if mock.calls != 2 {
-		t.Errorf("LLM calls = %d, want 2", mock.calls)
+	if mock.Calls() != 2 {
+		t.Errorf("LLM calls = %d, want 2", mock.Calls())
 	}
 }
 
@@ -451,7 +450,7 @@ func TestAgent_RunStream_BudgetExhausted_WithTextContent(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{textChunks1})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

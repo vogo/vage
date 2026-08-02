@@ -66,7 +66,7 @@ func TestImportanceRankingCompressor(t *testing.T) {
 			t.Fatalf("got %d messages, want 3", len(result))
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("result[0] role = %q, want system", result[0].Role)
+			t.Errorf("result[0] role = %q, want system", result[0].Role())
 		}
 	})
 
@@ -84,7 +84,7 @@ func TestImportanceRankingCompressor(t *testing.T) {
 			t.Fatalf("got %d messages, want 1", len(result))
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("expected system message retained, got role %q", result[0].Role)
+			t.Errorf("expected system message retained, got role %q", result[0].Role())
 		}
 	})
 

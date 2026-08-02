@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -77,7 +78,7 @@ func makeReq(n int, contentBytes int) (*largemodel.Request, []string) {
 		})
 	}
 
-	return &aimodel.ChatRequest{Model: "test", Messages: msgs}, ids
+	return &openai.ChatCompletionRequest{Model: "test", Messages: msgs}, ids
 }
 
 // TC-1: the K most recent tool_result messages stay verbatim, every
@@ -118,7 +119,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 		if !strings.Contains(text, "context_edited") {
 			t.Errorf("expected tool[%d] elided, got %q", i, text)
 		}
-		if cap.gotChat.Messages[idx].ToolCallID != ids[i] {
+		if cap.gotChat.Messages[idx].ToolCallID() != ids[i] {
 			t.Errorf("tool[%d] ToolCallID changed: got %q want %q",
 				i, cap.gotChat.Messages[idx].ToolCallID, ids[i])
 		}
@@ -128,7 +129,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 		if strings.Contains(text, "context_edited") {
 			t.Errorf("expected tool[%d] kept, got placeholder", 4+i)
 		}
-		if cap.gotChat.Messages[idx].ToolCallID != ids[4+i] {
+		if cap.gotChat.Messages[idx].ToolCallID() != ids[4+i] {
 			t.Errorf("tool[%d] ToolCallID changed", 4+i)
 		}
 	}
@@ -320,10 +321,10 @@ func TestContextEditor_PreservesNonToolMessages(t *testing.T) {
 
 	asst := got.Messages[2]
 	if asst.Role() != schema.RoleAssistant {
-		t.Fatalf("expected assistant, got %s", asst.Role)
+		t.Fatalf("expected assistant, got %s", asst.Role())
 	}
 	if len(asst.ToolCalls) != len(ids) {
-		t.Fatalf("ToolCalls count changed: got %d want %d", len(asst.ToolCalls), len(ids))
+		t.Fatalf("ToolCalls count changed: got %d want %d", len(asst.ToolCalls()), len(ids))
 	}
 	for i, tc := range asst.ToolCalls {
 		if tc.ID != ids[i] {
@@ -395,7 +396,7 @@ func TestContextEditor_NilOrEmptyRequest(t *testing.T) {
 	mw := NewContextEditorMiddleware()
 	wrapped := mw.Wrap(cap)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{}); err != nil {
+	if _, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cap.gotChat == nil {

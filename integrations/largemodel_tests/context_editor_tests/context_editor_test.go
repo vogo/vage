@@ -35,6 +35,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/hook"
@@ -65,7 +66,7 @@ func (r *recordingCompleter) ChatCompletion(_ context.Context, req *largemodel.R
 	// ReAct loop cannot retroactively change what we recorded.
 	snap := *req
 	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	r.requests = append(r.requests, &snap)
+	r.Requests() = append(r.Requests(), &snap)
 	idx := r.chatCalls
 	r.chatCalls++
 	r.mu.Unlock()
@@ -87,8 +88,8 @@ func (r *recordingCompleter) ChatCompletionStream(_ context.Context, _ *largemod
 func (r *recordingCompleter) snapshot() []*largemodel.Request {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]*largemodel.Request, len(r.requests))
-	copy(out, r.requests)
+	out := make([]*largemodel.Request, len(r.Requests()))
+	copy(out, r.Requests())
 	return out
 }
 
@@ -245,7 +246,7 @@ func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 
 		// Every tool_result must still carry a non-empty ToolCallID.
 		for _, m := range reqs[i].Messages {
-			if m.Role() == schema.RoleTool && m.ToolCallID == "" {
+			if m.Role() == schema.RoleTool && m.ToolCallID() == "" {
 				t.Errorf("req[%d] tool_result missing ToolCallID: %+v", i, m)
 			}
 		}
@@ -394,7 +395,7 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 	// Build a request directly so we can compare slice headers — the
 	// TaskAgent path always re-allocates messages, so we exercise the
 	// middleware in isolation here.
-	req := &aimodel.ChatRequest{
+	req := &openai.ChatCompletionRequest{
 		Model: "test",
 		Messages: []schema.Message{
 			{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
@@ -499,9 +500,9 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	cap := &streamCapturer{inner: client}
@@ -708,7 +709,7 @@ func (s *streamCapturer) ChatCompletion(ctx context.Context, req *largemodel.Req
 	s.mu.Lock()
 	snap := *req
 	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	s.requests = append(s.requests, &snap)
+	s.Requests() = append(s.Requests(), &snap)
 	s.mu.Unlock()
 	return s.inner.ChatCompletion(ctx, req)
 }
@@ -717,7 +718,7 @@ func (s *streamCapturer) ChatCompletionStream(ctx context.Context, req *largemod
 	s.mu.Lock()
 	snap := *req
 	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	s.requests = append(s.requests, &snap)
+	s.Requests() = append(s.Requests(), &snap)
 	s.mu.Unlock()
 	return s.inner.ChatCompletionStream(ctx, req)
 }
@@ -725,8 +726,8 @@ func (s *streamCapturer) ChatCompletionStream(ctx context.Context, req *largemod
 func (s *streamCapturer) snapshot() []*largemodel.Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*largemodel.Request, len(s.requests))
-	copy(out, s.requests)
+	out := make([]*largemodel.Request, len(s.Requests()))
+	copy(out, s.Requests())
 	return out
 }
 

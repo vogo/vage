@@ -101,7 +101,7 @@ func TestConversationCompactor_CompactsEligibleMessages(t *testing.T) {
 
 	// First message should be system prompt.
 	if result[0].Role() != schema.RoleSystem {
-		t.Errorf("first message role = %q, want system", result[0].Role)
+		t.Errorf("first message role = %q, want system", result[0].Role())
 	}
 
 	if result[0].Text() != "system prompt" {
@@ -110,7 +110,7 @@ func TestConversationCompactor_CompactsEligibleMessages(t *testing.T) {
 
 	// Second message should be the summary.
 	if result[1].Role() != schema.RoleSystem {
-		t.Errorf("summary role = %q, want system", result[1].Role)
+		t.Errorf("summary role = %q, want system", result[1].Role())
 	}
 
 	if result[1].Text() != "conversation summary" {
@@ -167,7 +167,7 @@ func TestConversationCompactor_NoSystemPrompt(t *testing.T) {
 	}
 
 	if result[0].Role() != schema.RoleSystem {
-		t.Errorf("summary role = %q, want system", result[0].Role)
+		t.Errorf("summary role = %q, want system", result[0].Role())
 	}
 }
 

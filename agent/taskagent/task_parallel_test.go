@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/largemodel"
@@ -36,25 +35,13 @@ import (
 // batchToolCallResponse returns a single-assistant-message response whose
 // ToolCalls slice contains one entry per (id, name, args) triple.
 func batchToolCallResponse(calls ...[3]string) *largemodel.Response {
-	tcs := make([]aimodel.ToolCall, 0, len(calls))
+	tcs := make([]schema.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		tcs = append(tcs, aimodel.ToolCall{
-			ID:       c[0],
-			Type:     "function",
-			Function: aimodel.FunctionCall{Name: c[1], Arguments: c[2]},
-		})
+		tcs = append(tcs, schema.ToolCall{ID: c[0], Name: c[1], Arguments: c[2]})
 	}
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: schema.Message{
-				Role:      schema.RoleAssistant,
-				Content:   aimodel.NewTextContent(""),
-				ToolCalls: tcs,
-			},
-			FinishReason: largemodel.FinishReasonToolCalls,
-		}},
-		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-	}
+
+	return largemodel.FakeToolCallResponse(testProtocol, tcs,
+		schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
 }
 
 // captureHook collects every event dispatched through hook.Manager in the
@@ -361,7 +348,7 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 
 	// Inspect the second LLM request: the three tool-result messages must
 	// follow the assistant message in the same ToolCalls order.
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	var toolMsgs []schema.Message
 	for _, m := range secondReq.Messages {
 		if m.Role() == schema.RoleTool {
@@ -373,8 +360,8 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 	}
 	wantIDs := []string{"tc-1", "tc-2", "tc-3"}
 	for i, m := range toolMsgs {
-		if m.ToolCallID != wantIDs[i] {
-			t.Errorf("tool msg %d: ToolCallID = %q, want %q", i, m.ToolCallID, wantIDs[i])
+		if m.ToolCallID() != wantIDs[i] {
+			t.Errorf("tool msg %d: ToolCallID = %q, want %q", i, m.ToolCallID(), wantIDs[i])
 		}
 	}
 	// Middle message carries the error text surfaced by executeToolCall.
@@ -453,11 +440,11 @@ func TestSingleToolCall_UsesFastPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	last := secondReq.Messages[len(secondReq.Messages)-1]
-	if last.Role() != schema.RoleTool || last.ToolCallID != "tc-1" || last.Text() != `{"v":"hi"}` {
+	if last.Role() != schema.RoleTool || last.ToolCallID() != "tc-1" || last.Text() != `{"v":"hi"}` {
 		t.Errorf("single-call transcript mismatch: role=%s id=%s body=%q",
-			last.Role, last.ToolCallID, last.Text())
+			last.Role(), last.ToolCallID(), last.Text())
 	}
 }
 

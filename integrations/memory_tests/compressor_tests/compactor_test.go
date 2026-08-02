@@ -112,7 +112,7 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 
 	// Verify system prompt is preserved as the first message.
 	if result[0].Role() != schema.RoleSystem {
-		t.Errorf("first message role = %q, want system", result[0].Role)
+		t.Errorf("first message role = %q, want system", result[0].Role())
 	}
 	if result[0].Text() != "You are a helpful coding assistant." {
 		t.Errorf("system prompt not preserved: %q", result[0].Text())
@@ -126,7 +126,7 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 				foundSummary = true
 
 				if m.Role() != schema.RoleSystem {
-					t.Errorf("summary message role = %q, want system", m.Role)
+					t.Errorf("summary message role = %q, want system", m.Role())
 				}
 
 				if strategy, ok := m.Metadata["strategy"].(string); !ok || strategy != "conversation_compact" {
@@ -449,7 +449,7 @@ func TestIntegration_ConversationCompactor_NoSystemPrompt(t *testing.T) {
 
 	// First message should be the summary (no system prompt prefix).
 	if result[0].Role() != schema.RoleSystem {
-		t.Errorf("first message role = %q, want system (summary)", result[0].Role)
+		t.Errorf("first message role = %q, want system (summary)", result[0].Role())
 	}
 	if result[0].Metadata == nil {
 		t.Fatal("first message should be the summary with metadata")

@@ -62,47 +62,47 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(mock.requests) != 4 {
-		t.Fatalf("expected 4 LLM requests, got %d", len(mock.requests))
+	if len(mock.Requests()) != 4 {
+		t.Fatalf("expected 4 LLM requests, got %d", len(mock.Requests()))
 	}
 
-	// Iteration 0 -> mock.requests[0]: no tool_results yet, nothing to elide.
-	for _, m := range mock.requests[0].Messages {
+	// Iteration 0 -> mock.Requests()[0]: no tool_results yet, nothing to elide.
+	for _, m := range mock.Requests()[0].Messages {
 		if m.Role() == schema.RoleTool {
 			t.Errorf("iter0 should not contain tool_result, found one: %+v", m)
 		}
 	}
 
-	// Iteration 1 -> mock.requests[1]: one tool_result, kept verbatim.
-	if got := countToolResults(mock.requests[1].Messages); got != 1 {
+	// Iteration 1 -> mock.Requests()[1]: one tool_result, kept verbatim.
+	if got := countToolResults(mock.Requests()[1].Messages); got != 1 {
 		t.Fatalf("iter1 expected 1 tool_result, got %d", got)
 	}
-	if elided := countElided(mock.requests[1].Messages); elided != 0 {
+	if elided := countElided(mock.Requests()[1].Messages); elided != 0 {
 		t.Errorf("iter1 expected 0 elided, got %d", elided)
 	}
 
-	// Iteration 2 -> mock.requests[2]: two tool_results; the older one
+	// Iteration 2 -> mock.Requests()[2]: two tool_results; the older one
 	// elided, the newer one verbatim.
-	if got := countToolResults(mock.requests[2].Messages); got != 2 {
+	if got := countToolResults(mock.Requests()[2].Messages); got != 2 {
 		t.Fatalf("iter2 expected 2 tool_results, got %d", got)
 	}
-	if elided := countElided(mock.requests[2].Messages); elided != 1 {
+	if elided := countElided(mock.Requests()[2].Messages); elided != 1 {
 		t.Errorf("iter2 expected 1 elided, got %d", elided)
 	}
 
-	// Iteration 3 -> mock.requests[3]: three tool_results; two older
+	// Iteration 3 -> mock.Requests()[3]: three tool_results; two older
 	// elided, the latest verbatim.
-	if got := countToolResults(mock.requests[3].Messages); got != 3 {
+	if got := countToolResults(mock.Requests()[3].Messages); got != 3 {
 		t.Fatalf("iter3 expected 3 tool_results, got %d", got)
 	}
-	if elided := countElided(mock.requests[3].Messages); elided != 2 {
+	if elided := countElided(mock.Requests()[3].Messages); elided != 2 {
 		t.Errorf("iter3 expected 2 elided, got %d", elided)
 	}
 
 	// All elided messages must keep their tool_call_id.
-	for _, req := range mock.requests {
+	for _, req := range mock.Requests() {
 		for _, m := range req.Messages {
-			if m.Role() == schema.RoleTool && m.ToolCallID == "" {
+			if m.Role() == schema.RoleTool && m.ToolCallID() == "" {
 				t.Errorf("tool_result lost tool_call_id: %+v", m)
 			}
 		}
@@ -138,7 +138,7 @@ func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
 	}
 
 	// Last request has 2 tool_results; none should be elided.
-	last := mock.requests[len(mock.requests)-1]
+	last := mock.Requests()[len(mock.Requests())-1]
 	if elided := countElided(last.Messages); elided != 0 {
 		t.Errorf("expected 0 elided without WithContextEditor, got %d", elided)
 	}

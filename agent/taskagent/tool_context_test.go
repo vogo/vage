@@ -23,8 +23,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 	"github.com/vogo/vage/tool/todo"
@@ -97,9 +97,9 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	a := New(
@@ -155,9 +155,9 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	a := New(agent.Config{ID: "todo-e2e"}, WithCaller(client), WithToolRegistry(reg))

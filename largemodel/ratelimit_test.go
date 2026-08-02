@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -37,7 +38,7 @@ func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// First two should succeed.
 	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
@@ -67,7 +68,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
 		t.Fatalf("call 1: unexpected error: %v", err)
@@ -99,7 +100,7 @@ func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	// First call: 600 tokens used.
 	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
@@ -129,7 +130,7 @@ func TestRateLimitMiddleware_StreamRateLimit(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	if _, err := wrapped.ChatCompletionStream(ctx, req); err != nil {
 		t.Fatalf("stream call 1: unexpected error: %v", err)
@@ -146,7 +147,7 @@ func TestRateLimitMiddleware_NoLimits(t *testing.T) {
 	wrapped := NewRateLimitMiddleware().Wrap(mock)
 
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{}
+	req := &openai.ChatCompletionRequest{}
 
 	for range 100 {
 		if _, err := wrapped.ChatCompletion(ctx, req); err != nil {

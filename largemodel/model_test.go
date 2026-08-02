@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -36,7 +37,7 @@ func TestModel_New_NoMiddleware(t *testing.T) {
 	mock := &mockCompleter{chatResp: resp}
 	m := New(mock)
 
-	got, err := m.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	got, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestModel_New_WithMiddleware(t *testing.T) {
 
 	m := New(mock, WithMiddleware(mw))
 
-	got, err := m.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	got, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestModel_ChatCompletionStream(t *testing.T) {
 	mock := &mockCompleter{streamErr: errors.New("stream error")}
 	m := New(mock)
 
-	_, err := m.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := m.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -125,7 +126,7 @@ func TestModel_MultipleMiddlewares_Order(t *testing.T) {
 	}
 
 	m := New(mock, WithMiddleware(makeMW("first"), makeMW("second")))
-	_, err := m.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

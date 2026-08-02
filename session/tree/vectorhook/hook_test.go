@@ -120,7 +120,7 @@ func TestAddNode_IndexesChild(t *testing.T) {
 		if d.ID == wantID {
 			found = true
 			if d.Text != "child summary" {
-				t.Errorf("Text = %q", d.Text)
+				t.Errorf("Text = %q", d.Text())
 			}
 		}
 	}
@@ -146,7 +146,7 @@ func TestUpdateNode_UpsertsVector(t *testing.T) {
 		t.Fatalf("len = %d, want 1", len(docs))
 	}
 	if docs[0].Text != "after" {
-		t.Errorf("Text = %q, want 'after'", docs[0].Text)
+		t.Errorf("Text = %q, want 'after'", docs[0].Text())
 	}
 }
 
@@ -252,7 +252,7 @@ func TestPromoteNode_ReindexesParent(t *testing.T) {
 	docs, _ := vstore.List(ctx)
 	for _, d := range docs {
 		if d.ID == DocumentID("sess", root.ID) && d.Text != "ROLLED-UP" {
-			t.Errorf("root Text = %q, want ROLLED-UP", d.Text)
+			t.Errorf("root Text = %q, want ROLLED-UP", d.Text())
 		}
 	}
 }

@@ -180,7 +180,7 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("summary role = %q, want %q", result[0].Role, schema.RoleSystem)
+			t.Errorf("summary role = %q, want %q", result[0].Role(), schema.RoleSystem)
 		}
 	})
 

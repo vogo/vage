@@ -70,7 +70,7 @@ func TestVectorRecallSource_HappyPath(t *testing.T) {
 		t.Fatalf("expected 1 message, got %d", len(res.Messages))
 	}
 	if res.Messages[0].Role() != schema.RoleSystem {
-		t.Fatalf("role = %q, want system", res.Messages[0].Role)
+		t.Fatalf("role = %q, want system", res.Messages[0].Role())
 	}
 	body := res.Messages[0].Text()
 	if !strings.Contains(body, "brown fox") {

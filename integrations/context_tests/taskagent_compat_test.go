@@ -80,7 +80,7 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 
 	// 0: system
 	if got[0].Role() != schema.RoleSystem {
-		t.Errorf("messages[0].Role = %q, want %q", got[0].Role, schema.RoleSystem)
+		t.Errorf("messages[0].Role = %q, want %q", got[0].Role(), schema.RoleSystem)
 	}
 	if got[0].Text() != "Be helpful." {
 		t.Errorf("messages[0].Content = %q, want %q", got[0].Text(), "Be helpful.")
@@ -91,7 +91,7 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 	for i, w := range want {
 		idx := 1 + i
 		if got[idx].Role() != schema.RoleUser {
-			t.Errorf("messages[%d].Role = %q, want %q", idx, got[idx].Role, schema.RoleUser)
+			t.Errorf("messages[%d].Role = %q, want %q", idx, got[idx].Role(), schema.RoleUser)
 		}
 		if got[idx].Text() != w {
 			t.Errorf("messages[%d].Content = %q, want %q", idx, got[idx].Text(), w)
@@ -100,7 +100,7 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 
 	// 4: current request
 	if got[4].Role() != schema.RoleUser {
-		t.Errorf("messages[4].Role = %q, want %q", got[4].Role, schema.RoleUser)
+		t.Errorf("messages[4].Role = %q, want %q", got[4].Role(), schema.RoleUser)
 	}
 	if got[4].Text() != "current question" {
 		t.Errorf("messages[4].Content = %q, want %q", got[4].Text(), "current question")

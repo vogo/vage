@@ -117,7 +117,7 @@ type capturingChatCompleter struct {
 
 func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	c.mu.Lock()
-	c.requests = append(c.requests, req)
+	c.Requests() = append(c.Requests(), req)
 	c.mu.Unlock()
 
 	return &aimodel.ChatResponse{
@@ -136,8 +136,8 @@ func (c *capturingChatCompleter) ChatCompletionStream(_ context.Context, _ *larg
 func (c *capturingChatCompleter) getRequests() []*largemodel.Request {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cp := make([]*largemodel.Request, len(c.requests))
-	copy(cp, c.requests)
+	cp := make([]*largemodel.Request, len(c.Requests()))
+	copy(cp, c.Requests())
 	return cp
 }
 

@@ -463,7 +463,7 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		// Verify summary message structure
 		summary := result[0]
 		if summary.Role() != schema.RoleUser {
-			t.Errorf("summary role = %q, want %q", summary.Role, schema.RoleUser)
+			t.Errorf("summary role = %q, want %q", summary.Role(), schema.RoleUser)
 		}
 		if !strings.Contains(summary.Text(), "Previous conversation") {
 			t.Error("summary should contain 'Previous conversation'")
@@ -514,7 +514,7 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("summary role = %q, want %q", result[0].Role, schema.RoleSystem)
+			t.Errorf("summary role = %q, want %q", result[0].Role(), schema.RoleSystem)
 		}
 	})
 
@@ -1101,7 +1101,7 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 			t.Fatalf("got %d messages, want 1", len(result))
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("expected system message, got role %q", result[0].Role)
+			t.Errorf("expected system message, got role %q", result[0].Role())
 		}
 	})
 
@@ -1115,7 +1115,7 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
 		if result[0].Role() != schema.RoleSystem {
-			t.Errorf("expected system as first, got %q", result[0].Role)
+			t.Errorf("expected system as first, got %q", result[0].Role())
 		}
 	})
 }

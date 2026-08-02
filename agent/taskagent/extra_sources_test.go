@@ -80,7 +80,7 @@ func TestWithExtraSources_Order(t *testing.T) {
 	if got := br.messages[1].Text(); got != "MARKER:beta" {
 		t.Errorf("messages[1] = %q, want MARKER:beta", got)
 	}
-	if got := br.messages[2].Role; got != schema.RoleUser {
+	if got := br.messages[2].Role(); got != schema.RoleUser {
 		t.Errorf("messages[2].Role = %q, want user", got)
 	}
 }
@@ -115,6 +115,6 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 		t.Fatalf("messages = %d, want 1: %+v", len(br.messages), br.messages)
 	}
 	if br.messages[0].Role() != schema.RoleUser {
-		t.Errorf("role = %q, want user", br.messages[0].Role)
+		t.Errorf("role = %q, want user", br.messages[0].Role())
 	}
 }

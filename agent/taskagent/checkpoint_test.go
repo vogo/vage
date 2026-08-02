@@ -22,7 +22,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/schema"
@@ -53,8 +52,8 @@ func TestRun_NoCheckpointStore_NoOp(t *testing.T) {
 // only the last one Final.
 func TestRun_WritesCheckpointPerIteration(t *testing.T) {
 	mock := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-			toolCallResponse("tc-2", "echo", `{"v":"b"}`),
-			stopResponse("final"))
+		toolCallResponse("tc-2", "echo", `{"v":"b"}`),
+		stopResponse("final"))
 	store := checkpoint.NewMapIterationStore()
 	registry := newEchoRegistry()
 

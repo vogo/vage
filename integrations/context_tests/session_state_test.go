@@ -78,7 +78,7 @@ func TestSessionStateSource_EndToEnd(t *testing.T) {
 
 	stateMsg := res.Messages[1]
 	if stateMsg.Role() != schema.RoleSystem {
-		t.Errorf("state message Role = %q, want %q", stateMsg.Role, schema.RoleSystem)
+		t.Errorf("state message Role = %q, want %q", stateMsg.Role(), schema.RoleSystem)
 	}
 	body := stateMsg.Text()
 	if !strings.Contains(body, "user_name: alice") {

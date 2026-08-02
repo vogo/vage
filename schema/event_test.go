@@ -105,7 +105,7 @@ func TestPhaseEndData_NewFields(t *testing.T) {
 	}
 
 	if d.ToolCalls != 5 {
-		t.Errorf("ToolCalls = %d, want 5", d.ToolCalls)
+		t.Errorf("ToolCalls = %d, want 5", d.ToolCalls())
 	}
 	if d.PromptTokens != 100 {
 		t.Errorf("PromptTokens = %d, want 100", d.PromptTokens)

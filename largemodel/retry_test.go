@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 )
 
 // noSleep is a test sleep function that returns immediately.
@@ -56,7 +57,7 @@ func TestRetryMiddleware_SuccessNoRetry(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
 	wrapped := NewRetryMiddleware(withSleepFn(noSleep)).Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestRetryMiddleware_RetryOnRetryableError(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestRetryMiddleware_NoRetryOnNonRetryableError(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -124,7 +125,7 @@ func TestRetryMiddleware_ExhaustedRetries(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(2), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
@@ -164,7 +165,7 @@ func TestRetryMiddleware_StreamRetry(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestRetryMiddleware_StreamNoRetryOnNonRetryable(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -203,7 +204,7 @@ func TestRetryMiddleware_StreamExhaustedRetries(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(2), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
@@ -225,7 +226,7 @@ func TestRetryMiddleware_NonAPIError(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -298,7 +299,7 @@ func TestRetryMiddleware_ContextCancelled(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(5), withSleepFn(sleepFn)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(ctx, &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(ctx, &openai.ChatCompletionRequest{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -359,7 +360,7 @@ func TestRetryMiddleware_WithCustomBackoff(t *testing.T) {
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), WithBackoff(fixed)).Wrap(fc)
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

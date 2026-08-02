@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"
@@ -55,7 +56,7 @@ type mockChatCompleter struct {
 }
 
 func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	m.requests = append(m.requests, req)
+	m.Requests() = append(m.Requests(), req)
 	if m.calls >= len(m.responses) {
 		return nil, errors.New("mock: no more responses")
 	}
@@ -137,7 +138,7 @@ func sseStreamServerTR(t *testing.T, responseSets [][]string) *httptest.Server {
 	callIdx := 0
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req aimodel.ChatRequest
+		var req openai.ChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
@@ -214,14 +215,14 @@ func TestIntegration_ToolResultGuard_EndToEnd_Block(t *testing.T) {
 		t.Fatalf("Run err: %v", err)
 	}
 
-	if len(mock.requests) < 2 {
-		t.Fatalf("expected 2 LLM requests, got %d", len(mock.requests))
+	if len(mock.Requests()) < 2 {
+		t.Fatalf("expected 2 LLM requests, got %d", len(mock.Requests()))
 	}
 
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	if lastMsg.Role() != schema.RoleTool {
-		t.Fatalf("last message role = %q, want tool", lastMsg.Role)
+		t.Fatalf("last message role = %q, want tool", lastMsg.Role())
 	}
 
 	content := lastMsg.Text()
@@ -264,7 +265,7 @@ func TestIntegration_ToolResultGuard_EndToEnd_Rewrite(t *testing.T) {
 		t.Fatalf("Run err: %v", err)
 	}
 
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	content := lastMsg.Text()
 
@@ -313,7 +314,7 @@ func TestIntegration_ToolResultGuard_EndToEnd_Log(t *testing.T) {
 		t.Fatalf("Run err: %v", err)
 	}
 
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	if lastMsg.Text() != poison {
 		t.Errorf("log action must not mutate content, got %q", lastMsg.Text())
@@ -333,8 +334,8 @@ func TestIntegration_ToolResultGuard_EndToEnd_Log(t *testing.T) {
 	if got.ToolName != "fetch" {
 		t.Errorf("event.ToolName = %q, want fetch", got.ToolName)
 	}
-	if got.ToolCallID != "tc-1" {
-		t.Errorf("event.ToolCallID = %q, want tc-1", got.ToolCallID)
+	if got.ToolCallID() != "tc-1" {
+		t.Errorf("event.ToolCallID = %q, want tc-1", got.ToolCallID())
 	}
 	if !slices.Contains(got.RuleHits, "ignore_instructions") {
 		t.Errorf("expected ignore_instructions in rule_hits, got %v", got.RuleHits)
@@ -384,7 +385,7 @@ func TestIntegration_ToolResultGuard_HighSeverity_EscalatesToBlock(t *testing.T)
 		t.Fatalf("Run err: %v", err)
 	}
 
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	content := lastMsg.Text()
 	if strings.Contains(content, "im_start") {
@@ -428,7 +429,7 @@ func TestIntegration_ToolResultGuard_Stream_EventOrder(t *testing.T) {
 	srv := sseStreamServerTR(t, [][]string{tcChunks, textChunks})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -555,7 +556,7 @@ func TestIntegration_ToolResultGuard_NoGuard_ZeroImpact(t *testing.T) {
 		t.Fatalf("Run err: %v", err)
 	}
 
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	if lastMsg.Text() != raw {
 		t.Errorf("no-guard path must not mutate tool content; got %q want %q", lastMsg.Text(), raw)
@@ -686,7 +687,7 @@ func TestIntegration_ToolResultGuard_CleanContent_NoEvent(t *testing.T) {
 	}
 
 	// Also verify content reaches model unchanged.
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
 	if !strings.Contains(lastMsg.Text(), "Weather is sunny") {
 		t.Errorf("clean content must pass through, got %q", lastMsg.Text())

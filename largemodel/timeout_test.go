@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/aimodel/provider/openai"
 )
 
 func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
 	wrapped := NewTimeoutMiddleware(5 * time.Second).Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
 
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(slow)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -70,7 +71,7 @@ func TestTimeoutMiddleware_Stream_Passthrough(t *testing.T) {
 	mock := &mockCompleter{streamResp: nil, streamErr: nil}
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

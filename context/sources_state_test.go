@@ -65,7 +65,7 @@ func TestSessionStateSource_RenderKeys(t *testing.T) {
 		t.Fatalf("expected 1 message, got %d", len(res.Messages))
 	}
 	if res.Messages[0].Role() != schema.RoleSystem {
-		t.Errorf("Role = %q, want system", res.Messages[0].Role)
+		t.Errorf("Role = %q, want system", res.Messages[0].Role())
 	}
 	text := res.Messages[0].Text()
 	if !strings.Contains(text, "plan: do X") {

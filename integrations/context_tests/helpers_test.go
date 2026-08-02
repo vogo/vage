@@ -53,7 +53,7 @@ func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Re
 	// after this call returns, so we keep a defensive copy of Messages.
 	cloned := *req
 	cloned.Messages = append([]schema.Message(nil), req.Messages...)
-	m.requests = append(m.requests, &cloned)
+	m.Requests() = append(m.Requests(), &cloned)
 
 	if m.calls >= len(m.responses) {
 		return nil, errors.New("fake: no more responses")
@@ -71,10 +71,10 @@ func (m *fakeChatCompleter) firstRequest(t *testing.T) *largemodel.Request {
 	t.Helper()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.requests) == 0 {
+	if len(m.Requests()) == 0 {
 		t.Fatalf("fake: no chat requests captured")
 	}
-	return m.requests[0]
+	return m.Requests()[0]
 }
 
 // stopResponse builds a ChatResponse whose finish reason terminates the
