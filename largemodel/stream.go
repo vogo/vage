@@ -270,6 +270,14 @@ func (a *StreamAccumulator) Thinking() string { return string(a.thinking) }
 // not reported one.
 func (a *StreamAccumulator) FinishReason() FinishReason { return a.finishReason }
 
+// AssistantMessage renders the accumulated turn as one assistant message in
+// the wire form of proto, so a streamed turn can be appended to the
+// conversation and replayed on the next iteration exactly like a
+// non-streamed one.
+func (a *StreamAccumulator) AssistantMessage(proto schema.Protocol) schema.Message {
+	return schema.NewAssistantTurn(proto, a.Text(), a.Thinking(), a.ToolCalls())
+}
+
 // ToolCalls returns the fully merged tool calls, dropping any index that never
 // received a name (a placeholder grown for an out-of-order fragment that no
 // call ever filled).

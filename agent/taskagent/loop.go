@@ -25,7 +25,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -40,8 +40,8 @@ import (
 // RunStream builds the context up front and sends AgentStart inside the
 // stream body.
 func (a *Agent) preflightRun(ctx context.Context, req *schema.RunRequest) (runParams, error) {
-	if a.chatCompleter == nil {
-		return runParams{}, errors.New("vage: ChatCompleter is required")
+	if a.caller == nil {
+		return runParams{}, errors.New("vage: model caller is required")
 	}
 
 	if err := a.runInputGuards(ctx, req); err != nil {
@@ -56,7 +56,7 @@ func (a *Agent) preflightRun(ctx context.Context, req *schema.RunRequest) (runPa
 // instructions, resolves the AI tool set (merging skill and request filters),
 // and marks prompt-cache breakpoints when caching is enabled. The returned
 // buildResult and tool slice feed directly into runReactLoop.
-func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p runParams) (buildResult, []aimodel.Tool, error) {
+func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p runParams) (buildResult, []schema.ToolDef, error) {
 	br, err := a.buildInitialMessages(ctx, req)
 	if err != nil {
 		return buildResult{}, nil, err
@@ -66,10 +66,6 @@ func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p ru
 	a.injectSkillInstructions(&br, req.SessionID)
 
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, req.SessionID))
-
-	if a.promptCaching {
-		markPromptCacheBreakpoints(br.messages, aiTools)
-	}
 
 	return br, aiTools, nil
 }
@@ -87,7 +83,7 @@ type reactMode interface {
 	// executeTurn performs one LLM call for the current message set,
 	// updating rc's usage and budget tracker as a side effect, and returns
 	// the accumulated assistant message together with its finish reason.
-	executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error)
+	executeTurn(rc *runContext, chatReq *largemodel.Request) (schema.Message, largemodel.FinishReason, error)
 
 	// toolBatchSink returns the parameters executeToolBatch needs: whether
 	// to emit user-facing EventToolResult events (stream only) and the sink
@@ -108,7 +104,7 @@ func (a *Agent) runReactLoop(
 	rc *runContext,
 	p runParams,
 	messages []schema.Message,
-	aiTools []aimodel.Tool,
+	aiTools []schema.ToolDef,
 	mode reactMode,
 	startIter int,
 ) (schema.StopReason, error) {
@@ -127,13 +123,14 @@ func (a *Agent) runReactLoop(
 			return "", err
 		}
 
-		chatReq := &aimodel.ChatRequest{
-			Model:               p.model,
-			Messages:            messages,
-			Temperature:         p.temperature,
-			MaxCompletionTokens: p.maxTokens,
-			Stop:                p.stopSeq,
-			Tools:               aiTools,
+		chatReq := &largemodel.Request{
+			Model:         p.model,
+			Messages:      messages,
+			Temperature:   p.temperature,
+			MaxTokens:     p.maxTokens,
+			Stop:          p.stopSeq,
+			Tools:         aiTools,
+			PromptCaching: a.promptCaching,
 		}
 
 		assistantMsg, finishReason, err := mode.executeTurn(rc, chatReq)
@@ -144,7 +141,7 @@ func (a *Agent) runReactLoop(
 		rc.lastMsg = assistantMsg
 		messages = append(messages, assistantMsg)
 
-		if finishReason != aimodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls) == 0 {
+		if finishReason != largemodel.FinishReasonToolCalls || len(assistantMsg.ToolCalls()) == 0 {
 			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonComplete)
 			return schema.StopReasonComplete, nil
 		}
@@ -158,7 +155,7 @@ func (a *Agent) runReactLoop(
 		// Execute tool calls with bounded concurrency; events and messages
 		// emerge in ToolCalls order.
 		emitResultEvent, sink := mode.toolBatchSink()
-		toolMsgs, err := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls, emitResultEvent, sink)
+		toolMsgs, err := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls(), emitResultEvent, sink)
 		if err != nil {
 			return "", err
 		}
@@ -183,8 +180,8 @@ type syncMode struct {
 
 func (m *syncMode) emitIterationStart(_ *runContext, _ int) error { return nil }
 
-func (m *syncMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error) {
-	resp, err := m.a.chatCompleter.ChatCompletion(m.ctx, chatReq)
+func (m *syncMode) executeTurn(rc *runContext, chatReq *largemodel.Request) (schema.Message, largemodel.FinishReason, error) {
+	resp, err := m.a.caller.Call(m.ctx, chatReq)
 	if err != nil {
 		return schema.Message{}, "", fmt.Errorf("vage: chat completion: %w", err)
 	}
@@ -192,12 +189,7 @@ func (m *syncMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (sc
 	rc.totalUsage.Add(&resp.Usage)
 	rc.tracker.Add(resp.Usage.TotalTokens)
 
-	if len(resp.Choices) == 0 {
-		return schema.Message{}, "", ErrEmptyLLMResponse
-	}
-
-	choice := resp.Choices[0]
-	return choice.Message, choice.FinishReason, nil
+	return resp.Message, resp.FinishReason, nil
 }
 
 func (m *syncMode) toolBatchSink() (bool, func(schema.Event) error) {
@@ -225,48 +217,39 @@ func (m *streamMode) emitIterationStart(rc *runContext, iter int) error {
 	}))
 }
 
-func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (schema.Message, aimodel.FinishReason, error) {
-	stream, err := m.a.chatCompleter.ChatCompletionStream(m.ctx, chatReq)
+func (m *streamMode) executeTurn(rc *runContext, chatReq *largemodel.Request) (schema.Message, largemodel.FinishReason, error) {
+	stream, err := m.a.caller.CallStream(m.ctx, chatReq)
 	if err != nil {
 		return schema.Message{}, "", fmt.Errorf("vage: chat completion stream: %w", err)
 	}
 
-	var accumulated schema.Message
-	accumulated.Role = schema.RoleAssistant
-	var finishReason aimodel.FinishReason
-	var streamBytes int
+	var (
+		acc         largemodel.StreamAccumulator
+		streamBytes int
+	)
 
 	for {
 		chunk, recvErr := stream.Recv()
 		if errors.Is(recvErr, io.EOF) {
 			break
 		}
+
 		if recvErr != nil {
 			_ = stream.Close()
 			return schema.Message{}, "", fmt.Errorf("vage: stream recv: %w", recvErr)
 		}
 
-		if len(chunk.Choices) == 0 {
-			continue
-		}
-
-		choice := chunk.Choices[0]
-		delta := &choice.Delta
-
 		// Emit text delta if present.
-		if text := delta.Text(); text != "" {
+		if text := chunk.TextDelta; text != "" {
 			streamBytes += len(text)
+
 			if err := m.send(schema.NewEvent(schema.EventTextDelta, m.agentID, rc.sessionID, schema.TextDeltaData{Delta: text})); err != nil {
 				_ = stream.Close()
 				return schema.Message{}, "", err
 			}
 		}
 
-		accumulated.AppendDelta(delta)
-
-		if choice.FinishReason != nil {
-			finishReason = aimodel.FinishReason(*choice.FinishReason)
-		}
+		acc.Add(chunk)
 	}
 
 	// Read actual usage from stream before closing (populated from final chunk).
@@ -298,11 +281,18 @@ func (m *streamMode) executeTurn(rc *runContext, chatReq *aimodel.ChatRequest) (
 		rc.tracker.Add(estimatedTokens)
 	}
 
-	return accumulated, finishReason, nil
+	return acc.AssistantMessage(m.a.Protocol()), acc.FinishReason(), nil
 }
 
 func (m *streamMode) toolBatchSink() (bool, func(schema.Event) error) {
 	return true, m.send
+}
+
+// withAgentID stamps the agent id onto a message produced by this agent.
+func withAgentID(msg schema.Message, agentID string) schema.Message {
+	msg.AgentID = agentID
+
+	return msg
 }
 
 // buildResponseMsgs builds the response message slice from the last assistant message.
@@ -310,12 +300,12 @@ func (m *streamMode) toolBatchSink() (bool, func(schema.Event) error) {
 // For normal completion, it always includes the message.
 func (a *Agent) buildResponseMsgs(lastMsg schema.Message, partial bool) []schema.Message {
 	if partial {
-		if lastMsg.Text() != "" || len(lastMsg.ToolCalls) > 0 {
-			return []schema.Message{schema.NewAssistantMessage(lastMsg, a.ID())}
+		if lastMsg.Text() != "" || len(lastMsg.ToolCalls()) > 0 {
+			return []schema.Message{withAgentID(lastMsg, a.ID())}
 		}
 		return []schema.Message{}
 	}
-	return []schema.Message{schema.NewAssistantMessage(lastMsg, a.ID())}
+	return []schema.Message{withAgentID(lastMsg, a.ID())}
 }
 
 // finalizeRun is the unified termination path for Run(). It runs output guards,

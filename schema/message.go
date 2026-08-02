@@ -185,6 +185,63 @@ func NewToolResultMessage(proto Protocol, toolCallID, text string, isError bool)
 	return m
 }
 
+// NewAssistantTurn builds a complete assistant message from its parts. It is
+// how a streamed turn — reassembled from deltas rather than received whole —
+// re-enters the conversation in the vendor's own wire form, so the next
+// iteration replays it exactly like a non-streamed turn.
+func NewAssistantTurn(proto Protocol, text, thinking string, calls []ToolCall) Message {
+	m := Message{Protocol: proto, Timestamp: time.Now()}
+
+	if proto == ProtocolAnthropicMessages {
+		// Anthropic orders blocks thinking → text → tool_use, and requires
+		// the thinking block to come first when extended thinking is on.
+		var blocks []anthropicBlock
+
+		if thinking != "" {
+			blocks = append(blocks, anthropicBlock{Type: anthropicBlockThinking, Thinking: thinking})
+		}
+
+		if text != "" {
+			blocks = append(blocks, anthropicBlock{Type: anthropicBlockText, Text: text})
+		}
+
+		for _, call := range calls {
+			blocks = append(blocks, anthropicBlock{
+				Type:  anthropicBlockToolUse,
+				ID:    call.ID,
+				Name:  call.Name,
+				Input: json.RawMessage(call.Arguments),
+			})
+		}
+
+		m.Anthropic = newAnthropicMessage(anthropicRoleAssistant, blocks...)
+
+		return m
+	}
+
+	wire := &openai.ChatCompletionMessage{
+		Role:             string(RoleAssistant),
+		Content:          openai.NewTextContent(text),
+		ReasoningContent: thinking,
+	}
+
+	for i, call := range calls {
+		wire.ToolCalls = append(wire.ToolCalls, openai.ChatCompletionToolCall{
+			Index: i,
+			ID:    call.ID,
+			Type:  "function",
+			Function: openai.ChatCompletionFunctionCall{
+				Name:      call.Name,
+				Arguments: call.Arguments,
+			},
+		})
+	}
+
+	m.OpenAI = wire
+
+	return m
+}
+
 // NewOpenAIMessage wraps a native OpenAI message produced by the model.
 func NewOpenAIMessage(proto Protocol, msg openai.ChatCompletionMessage, agentID string) Message {
 	return Message{

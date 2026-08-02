@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	vctx "github.com/vogo/vage/context"
@@ -42,12 +41,13 @@ const (
 	defaultPromptCaching        = true
 )
 
-// Agent implements the agent.Agent interface using a ChatCompleter with ReAct-style tool calling.
+// Agent implements the agent.Agent interface using a model caller with
+// ReAct-style tool calling.
 type Agent struct {
 	agent.Base
 	systemPrompt     prompt.PromptTemplate
 	model            string
-	chatCompleter    aimodel.ChatCompleter
+	caller           largemodel.Caller
 	toolRegistry     tool.ToolRegistry
 	memoryManager    *memory.Manager
 	maxIterations    int
@@ -88,7 +88,7 @@ type Agent struct {
 	// vctx.WithBuildReportSink so callers do not have to replace the
 	// whole Builder to get the report archive.
 	buildReportSink vctx.BuildReportSink
-	// contextEditor, when non-nil, is wrapped around chatCompleter at
+	// contextEditor, when non-nil, is wrapped around caller at
 	// the end of New so multi-iteration ReAct loops automatically fold
 	// older tool_result messages into placeholders. See WithContextEditor.
 	contextEditor *largemodel.ContextEditorMiddleware
@@ -110,9 +110,11 @@ func WithSystemPrompt(p prompt.PromptTemplate) Option {
 // WithModel sets the model name.
 func WithModel(model string) Option { return func(a *Agent) { a.model = model } }
 
-// WithChatCompleter sets the chat completion provider.
-func WithChatCompleter(cc aimodel.ChatCompleter) Option {
-	return func(a *Agent) { a.chatCompleter = cc }
+// WithCaller sets the model caller the agent invokes. The caller carries the
+// wire protocol, so it also determines which vendor wire form the agent's
+// messages are built and stored in.
+func WithCaller(c largemodel.Caller) Option {
+	return func(a *Agent) { a.caller = c }
 }
 
 // WithToolRegistry sets the tool registry.
@@ -233,15 +235,15 @@ func WithBuildReportSink(sink vctx.BuildReportSink) Option {
 	return func(a *Agent) { a.buildReportSink = sink }
 }
 
-// WithContextEditor wraps the agent's ChatCompleter with a Context
+// WithContextEditor wraps the agent's model caller with a Context
 // Editing middleware so multi-iteration ReAct loops automatically
 // fold older tool_result messages into short placeholders before each
 // LLM request leaves the agent.
 //
-// Wrapping happens at New time AFTER WithChatCompleter is resolved, so
-// option order does not matter. Pass nil to leave the chain untouched.
-// If chatCompleter is itself nil at New time the option is a no-op
-// (the agent will fail at first Run as before).
+// Wrapping happens at New time AFTER WithCaller is resolved, so option
+// order does not matter. Pass nil to leave the chain untouched. If the
+// caller is itself nil at New time the option is a no-op (the agent will
+// fail at first Run as before).
 func WithContextEditor(mw *largemodel.ContextEditorMiddleware) Option {
 	return func(a *Agent) { a.contextEditor = mw }
 }
@@ -283,12 +285,12 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 		o(a)
 	}
 
-	// WithContextEditor is order-insensitive: wrap chatCompleter at the
-	// innermost layer once all options have resolved. nil chatCompleter
-	// means the agent will fail at first Run as before — wrapping nil
-	// would just defer the same failure.
-	if a.contextEditor != nil && a.chatCompleter != nil {
-		a.chatCompleter = largemodel.Chain(a.chatCompleter, a.contextEditor)
+	// WithContextEditor is order-insensitive: wrap the caller at the
+	// innermost layer once all options have resolved. A nil caller means
+	// the agent will fail at first Run as before — wrapping nil would just
+	// defer the same failure.
+	if a.contextEditor != nil && a.caller != nil {
+		a.caller = largemodel.Chain(a.caller, a.contextEditor)
 	}
 
 	return a

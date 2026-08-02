@@ -50,7 +50,7 @@ func (s *RequestMessagesSource) Fetch(_ context.Context, in FetchInput) (FetchRe
 		return FetchResult{Report: rep}, nil
 	}
 
-	out := schema.ToAIModelMessages(in.Request.Messages)
+	out := in.Request.Messages
 	rep.Status = StatusOK
 	rep.InputN = len(out)
 	rep.OutputN = len(out)

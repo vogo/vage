@@ -334,7 +334,7 @@ func (b *DefaultBuilder) sumTokens(ms []schema.Message) int {
 	total := 0
 	for _, m := range ms {
 		// memory.TokenEstimator works on schema.Message, so wrap.
-		total += est(schema.FromAIModelMessage(m))
+		total += est(m)
 	}
 	return total
 }

@@ -92,13 +92,13 @@ func (e *ToolCallEval) Evaluate(_ context.Context, c *EvalCase) (*EvalResult, er
 			actual := actualCalls[actualIdx]
 			actualIdx++
 
-			if actual.Function.Name == expected.Function.Name {
-				if e.strictArgs && actual.Function.Arguments != expected.Function.Arguments {
+			if actual.Name == expected.Name {
+				if e.strictArgs && actual.Arguments != expected.Arguments {
 					details = append(details, EvalDetail{
-						Name:    expected.Function.Name,
+						Name:    expected.Name,
 						Score:   0,
 						Passed:  false,
-						Message: fmt.Sprintf("tool %q found but arguments differ: expected %q, got %q", expected.Function.Name, expected.Function.Arguments, actual.Function.Arguments),
+						Message: fmt.Sprintf("tool %q found but arguments differ: expected %q, got %q", expected.Name, expected.Arguments, actual.Arguments),
 					})
 
 					found = true
@@ -109,10 +109,10 @@ func (e *ToolCallEval) Evaluate(_ context.Context, c *EvalCase) (*EvalResult, er
 				matched++
 
 				details = append(details, EvalDetail{
-					Name:    expected.Function.Name,
+					Name:    expected.Name,
 					Score:   1.0,
 					Passed:  true,
-					Message: fmt.Sprintf("tool %q matched", expected.Function.Name),
+					Message: fmt.Sprintf("tool %q matched", expected.Name),
 				})
 
 				found = true
@@ -123,10 +123,10 @@ func (e *ToolCallEval) Evaluate(_ context.Context, c *EvalCase) (*EvalResult, er
 
 		if !found {
 			details = append(details, EvalDetail{
-				Name:    expected.Function.Name,
+				Name:    expected.Name,
 				Score:   0,
 				Passed:  false,
-				Message: fmt.Sprintf("tool %q not found in actual calls", expected.Function.Name),
+				Message: fmt.Sprintf("tool %q not found in actual calls", expected.Name),
 			})
 		}
 	}
@@ -153,8 +153,8 @@ func extractToolCalls(resp *schema.RunResponse) []schema.ToolCall {
 	var calls []schema.ToolCall
 
 	for _, msg := range resp.Messages {
-		if msg.Role() == schema.RoleAssistant && len(msg.ToolCalls) > 0 {
-			calls = append(calls, msg.ToolCalls...)
+		if msg.Role() == schema.RoleAssistant && len(msg.ToolCalls()) > 0 {
+			calls = append(calls, msg.ToolCalls()...)
 		}
 	}
 

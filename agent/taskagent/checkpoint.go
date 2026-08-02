@@ -24,7 +24,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/schema"
 )
@@ -120,8 +119,8 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // input). Output guards run on the resumed final response. Tool result
 // guards continue to run on every fresh tool execution.
 func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunResponse, error) {
-	if a.chatCompleter == nil {
-		return nil, errors.New("vage: ChatCompleter is required")
+	if a.caller == nil {
+		return nil, errors.New("vage: model caller is required")
 	}
 	if a.iterationStore == nil {
 		return nil, fmt.Errorf("%w: no IterationStore configured", checkpoint.ErrInvalidArgument)
@@ -167,7 +166,6 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 	messages := cp.Messages
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
 	if a.promptCaching {
-		markPromptCacheBreakpoints(messages, aiTools)
 	}
 
 	startIter := cp.Iteration + 1
@@ -185,7 +183,7 @@ func (a *Agent) runResumeLoop(
 	rc *runContext,
 	p runParams,
 	messages []schema.Message,
-	aiTools []aimodel.Tool,
+	aiTools []schema.ToolDef,
 	startIter int,
 ) (*schema.RunResponse, error) {
 	mode := &syncMode{a: a, ctx: ctx}

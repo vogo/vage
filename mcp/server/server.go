@@ -147,7 +147,7 @@ func (s *Server) RegisterAgent(a agent.Agent) error {
 		}
 
 		runReq := &schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage(input)},
+			Messages: []schema.Message{schema.NewUserMessage(a.Protocol(), input)},
 		}
 
 		resp, err := a.Run(ctx, runReq)
@@ -160,7 +160,7 @@ func (s *Server) RegisterAgent(a agent.Agent) error {
 
 		text := ""
 		if len(resp.Messages) > 0 {
-			text = resp.Messages[0].Content.Text()
+			text = resp.Messages[0].Text()
 		}
 
 		text, outBlock := s.applyOutboundTextScan(ctx, a.ID(), text)

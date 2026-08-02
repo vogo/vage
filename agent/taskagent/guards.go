@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/schema"
 )
@@ -66,7 +65,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 	}
 
 	if result.Action == guard.ActionRewrite {
-		req.Messages[idx].Content = aimodel.NewTextContent(msg.Content)
+		req.Messages[idx].SetText(msg.Content)
 	}
 
 	return nil
@@ -99,7 +98,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 	}
 
 	if result.Action == guard.ActionRewrite {
-		respMsgs[0].Content = aimodel.NewTextContent(msg.Content)
+		respMsgs[0].SetText(msg.Content)
 	}
 
 	return respMsgs, nil
@@ -145,7 +144,7 @@ func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc sche
 		SessionID: rc.sessionID,
 		Metadata: map[string]any{
 			guard.MetaToolCallID: tc.ID,
-			guard.MetaToolName:   tc.Function.Name,
+			guard.MetaToolName:   tc.Name,
 		},
 	}
 
@@ -223,7 +222,7 @@ func (a *Agent) buildGuardCheckEvent(rc *runContext, tc schema.ToolCall, text, g
 
 	attrs := []any{
 		"guard", guardName,
-		"tool", tc.Function.Name,
+		"tool", tc.Name,
 		"tool_call_id", tc.ID,
 		"action", action,
 		"rules", hits,
@@ -242,7 +241,7 @@ func (a *Agent) buildGuardCheckEvent(rc *runContext, tc schema.ToolCall, text, g
 	return schema.NewEvent(schema.EventGuardCheck, a.ID(), rc.sessionID, schema.GuardCheckData{
 		GuardName:  guardName,
 		ToolCallID: tc.ID,
-		ToolName:   tc.Function.Name,
+		ToolName:   tc.Name,
 		Action:     action,
 		RuleHits:   hits,
 		Severity:   severity,

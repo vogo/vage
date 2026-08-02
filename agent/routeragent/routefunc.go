@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -86,12 +86,12 @@ func RandomFunc(_ context.Context, _ *schema.RunRequest, routes []Route) (*Route
 
 // LLMFunc returns a RouteFunc that uses an LLM to select the best route based
 // on route descriptions and the user's message. It sends a prompt listing all
-// routes to the ChatCompleter and parses the returned index.
+// routes to the model caller and parses the returned index.
 //
 // If the LLM call fails or returns an unparseable/out-of-range response,
 // the fallback index is used when >= 0; otherwise an error is returned.
 // Pass fallback < 0 to disable fallback behavior.
-func LLMFunc(cc aimodel.ChatCompleter, model string, fallback int) RouteFunc {
+func LLMFunc(cc largemodel.Caller, model string, fallback int) RouteFunc {
 	return func(ctx context.Context, req *schema.RunRequest, routes []Route) (*RouteResult, error) {
 		if len(routes) == 0 {
 			return nil, fmt.Errorf("routeragent: no routes available")
@@ -107,15 +107,17 @@ func LLMFunc(cc aimodel.ChatCompleter, model string, fallback int) RouteFunc {
 
 		userText := lastUserMessageText(req)
 
-		chatReq := &aimodel.ChatRequest{
+		proto := cc.Protocol()
+
+		chatReq := &largemodel.Request{
 			Model: model,
 			Messages: []schema.Message{
-				{Role: schema.RoleSystem, Content: aimodel.NewTextContent(sb.String())},
-				{Role: schema.RoleUser, Content: aimodel.NewTextContent(userText)},
+				schema.NewSystemMessage(proto, sb.String()),
+				schema.NewUserMessage(proto, userText),
 			},
 		}
 
-		resp, err := cc.ChatCompletion(ctx, chatReq)
+		resp, err := cc.Call(ctx, chatReq)
 		if err != nil {
 			if fallback >= 0 && fallback < len(routes) {
 				return &RouteResult{Agent: routes[fallback].Agent}, nil
@@ -125,14 +127,7 @@ func LLMFunc(cc aimodel.ChatCompleter, model string, fallback int) RouteFunc {
 
 		usage := &resp.Usage
 
-		if len(resp.Choices) == 0 {
-			if fallback >= 0 && fallback < len(routes) {
-				return &RouteResult{Agent: routes[fallback].Agent, Usage: usage}, nil
-			}
-			return nil, fmt.Errorf("routeragent: LLM returned empty choices")
-		}
-
-		text := strings.TrimSpace(resp.Choices[0].Message.Text())
+		text := strings.TrimSpace(resp.Message.Text())
 		idx, parseErr := strconv.Atoi(text)
 		if parseErr != nil {
 			if fallback >= 0 && fallback < len(routes) {
