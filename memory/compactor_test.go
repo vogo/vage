@@ -38,6 +38,14 @@ func errSummarizer(err error) Summarizer {
 	}
 }
 
+// withMetadata stamps metadata onto a message, which the constructors leave
+// empty.
+func withMetadata(msg schema.Message, md map[string]any) schema.Message {
+	msg.Metadata = md
+
+	return msg
+}
+
 func sysMsg(text string) schema.Message {
 	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
@@ -399,13 +407,10 @@ func TestConversationCompactor_ExistingSummaryMessage(t *testing.T) {
 
 	msgs := []schema.Message{
 		sysMsg("system"),
-		{
-			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "old summary"),
-			Metadata: map[string]any{
-				"compressed": true,
-				"strategy":   "conversation_compact",
-			},
-		},
+		withMetadata(
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "old summary"),
+			map[string]any{"compressed": true, "strategy": "conversation_compact"},
+		),
 		userMsg("q1"),
 		assistantMsg("a1"),
 		userMsg("q2"),

@@ -21,30 +21,20 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vogo/vage/schema"
 )
 
 func newSystemMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text),
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func newAssistantMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func newToolMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleTool, text),
-		Timestamp: time.Now(),
-	}
+	return schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "call-1", text, false)
 }
 
 func TestImportanceRankingCompressor(t *testing.T) {

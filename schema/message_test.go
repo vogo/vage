@@ -236,8 +236,8 @@ func TestProtocolOf(t *testing.T) {
 
 func TestTextResult(t *testing.T) {
 	r := TextResult("call-1", "sunny weather")
-	if r.ToolCallID() != "call-1" {
-		t.Errorf("ToolCallID = %q, want %q", r.ToolCallID(), "call-1")
+	if r.ToolCallID != "call-1" {
+		t.Errorf("ToolCallID = %q, want %q", r.ToolCallID, "call-1")
 	}
 	if r.IsError {
 		t.Error("IsError should be false")
@@ -255,8 +255,8 @@ func TestTextResult(t *testing.T) {
 
 func TestErrorResult(t *testing.T) {
 	r := ErrorResult("call-2", "something failed")
-	if r.ToolCallID() != "call-2" {
-		t.Errorf("ToolCallID = %q, want %q", r.ToolCallID(), "call-2")
+	if r.ToolCallID != "call-2" {
+		t.Errorf("ToolCallID = %q, want %q", r.ToolCallID, "call-2")
 	}
 	if !r.IsError {
 		t.Error("IsError should be true")
