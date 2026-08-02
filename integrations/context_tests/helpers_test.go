@@ -27,7 +27,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
@@ -39,55 +38,30 @@ import (
 // pre-configured response and stores the request that produced it so tests
 // can assert on the exact prompt assembly.
 type fakeChatCompleter struct {
-	mu        sync.Mutex
-	calls     int
-	requests  []*largemodel.Request
-	responses []*largemodel.Response
+	*largemodel.FakeCaller
 }
 
-func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Snapshot the request — the slice may be reused/extended by the agent
-	// after this call returns, so we keep a defensive copy of Messages.
-	cloned := *req
-	cloned.Messages = append([]schema.Message(nil), req.Messages...)
-	m.Requests() = append(m.Requests(), &cloned)
-
-	if m.calls >= len(m.responses) {
-		return nil, errors.New("fake: no more responses")
-	}
-	resp := m.responses[m.calls]
-	m.calls++
-	return resp, nil
-}
-
-func (m *fakeChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("fake: stream not implemented")
+func newFake(responses ...*largemodel.Response) *fakeChatCompleter {
+	return &fakeChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
 func (m *fakeChatCompleter) firstRequest(t *testing.T) *largemodel.Request {
 	t.Helper()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.Requests()) == 0 {
+
+	reqs := m.Requests()
+	if len(reqs) == 0 {
 		t.Fatalf("fake: no chat requests captured")
 	}
-	return m.Requests()[0]
+
+	return reqs[0]
 }
 
-// stopResponse builds a ChatResponse whose finish reason terminates the
-// ReAct loop on the first iteration — exactly what we need to capture the
+// stopResponse builds a response whose finish reason terminates the ReAct
+// loop on the first iteration — exactly what we need to capture the
 // initial-prompt message slice and bail out.
 func stopResponse(text string) *largemodel.Response {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
-		Usage: schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
-	}
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, text,
+		schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2})
 }
 
 // recordingHook collects every dispatched event so tests can fish out

@@ -54,44 +54,10 @@ import (
 // is returned from ChatCompletionStream — the streaming path is exercised
 // via a real SSE httptest.Server in the dedicated stream test below.
 type recordingCompleter struct {
-	mu            sync.Mutex
-	requests      []*largemodel.Request
-	chatResponses []*largemodel.Response
-	chatCalls     int
+	*largemodel.FakeCaller
 }
 
-func (r *recordingCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	r.mu.Lock()
-	// Snapshot the messages slice so subsequent appends by the agent's
-	// ReAct loop cannot retroactively change what we recorded.
-	snap := *req
-	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	r.Requests() = append(r.Requests(), &snap)
-	idx := r.chatCalls
-	r.chatCalls++
-	r.mu.Unlock()
-
-	if idx >= len(r.chatResponses) {
-		return nil, fmt.Errorf("recordingCompleter: no response at call %d", idx)
-	}
-	resp := r.chatResponses[idx]
-	if resp == nil {
-		return stopResponse("ok"), nil
-	}
-	return resp, nil
-}
-
-func (r *recordingCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("recordingCompleter: streaming not implemented")
-}
-
-func (r *recordingCompleter) snapshot() []*largemodel.Request {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]*largemodel.Request, len(r.Requests()))
-	copy(out, r.Requests())
-	return out
-}
+func (r *recordingCompleter) snapshot() []*largemodel.Request { return r.Requests() }
 
 // stopResponse returns a minimal assistant "stop" response.
 func stopResponse(text string) *largemodel.Response {
@@ -398,8 +364,8 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 	req := &openai.ChatCompletionRequest{
 		Model: "test",
 		Messages: []schema.Message{
-			{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
-			{Role: schema.RoleUser, Content: aimodel.NewTextContent("hi")},
+			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi"),
 			{Role: schema.RoleAssistant, ToolCalls: []aimodel.ToolCall{
 				{ID: "t-1", Function: aimodel.FunctionCall{Name: "x"}},
 				{ID: "t-2", Function: aimodel.FunctionCall{Name: "x"}},

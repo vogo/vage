@@ -79,21 +79,7 @@ func routeNil(_ context.Context, _ *schema.RunRequest, _ []routeragent.Route) (*
 // --- mockChatCompleter for LLM integration tests ---
 
 type mockChatCompleter struct {
-	response *largemodel.Response
-	err      error
-	captured *largemodel.Request
-}
-
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	m.captured = req
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.response, nil
-}
-
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+	*largemodel.FakeCaller
 }
 
 func llmResponse(text string, prompt, completion, total int) *largemodel.Response {

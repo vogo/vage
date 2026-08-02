@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -37,43 +35,34 @@ import (
 // multiple user/assistant turn pairs, and interleaved tool messages.
 // Returns the message slice and the count of user/assistant pairs.
 func buildConversation(turnCount int) []schema.Message {
+	const proto = schema.ProtocolOpenAIChat
+
 	msgs := []schema.Message{
-		{
-			Message:   schema.Message{Role: schema.RoleSystem, Content: aimodel.NewTextContent("You are a helpful coding assistant.")},
-			Timestamp: time.Now(),
-		},
+		schema.NewSystemMessage(proto, "You are a helpful coding assistant."),
 	}
 
 	for i := 1; i <= turnCount; i++ {
 		// User message.
-		msgs = append(msgs, schema.Message{
-			Message:   schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent(fmt.Sprintf("User question %d: %s", i, strings.Repeat("x", 40)))},
-			Timestamp: time.Now(),
-		})
+		msgs = append(msgs, schema.NewUserMessage(proto,
+			fmt.Sprintf("User question %d: %s", i, strings.Repeat("x", 40))))
 
 		// Occasionally add a tool call/result pair (every 3rd turn).
 		if i%3 == 0 {
-			msgs = append(msgs, schema.Message{
-				Message: schema.Message{
-					Role:    schema.RoleAssistant,
-					Content: aimodel.NewTextContent(fmt.Sprintf("Let me look that up (turn %d)...", i)),
-					ToolCalls: []aimodel.ToolCall{
-						{ID: fmt.Sprintf("call-%d", i), Function: aimodel.FunctionCall{Name: "search", Arguments: "{}"}},
-					},
-				},
-				Timestamp: time.Now(),
-			})
-			msgs = append(msgs, schema.Message{
-				Message:   schema.Message{Role: schema.RoleTool, Content: aimodel.NewTextContent(fmt.Sprintf("Tool result for turn %d: found relevant info", i))},
-				Timestamp: time.Now(),
-			})
+			msgs = append(msgs, schema.NewAssistantTurn(proto,
+				fmt.Sprintf("Let me look that up (turn %d)...", i), "",
+				[]schema.ToolCall{{
+					ID:        fmt.Sprintf("call-%d", i),
+					Name:      "search",
+					Arguments: "{}",
+				}}))
+			msgs = append(msgs, schema.NewToolResultMessage(proto,
+				fmt.Sprintf("call-%d", i),
+				fmt.Sprintf("Tool result for turn %d: found relevant info", i), false))
 		}
 
 		// Assistant response.
-		msgs = append(msgs, schema.Message{
-			Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent(fmt.Sprintf("Assistant answer %d: %s", i, strings.Repeat("y", 60)))},
-			Timestamp: time.Now(),
-		})
+		msgs = append(msgs, schema.NewTextMessage(proto, schema.RoleAssistant,
+			fmt.Sprintf("Assistant answer %d: %s", i, strings.Repeat("y", 60))))
 	}
 
 	return msgs
@@ -253,22 +242,10 @@ func TestIntegration_ConversationCompactor_ReCompaction(t *testing.T) {
 
 	// Add more messages after the first compaction.
 	firstResult = append(firstResult,
-		schema.Message{
-			Message:   schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("New question after compaction")},
-			Timestamp: time.Now(),
-		},
-		schema.Message{
-			Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent("New answer after compaction")},
-			Timestamp: time.Now(),
-		},
-		schema.Message{
-			Message:   schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("Another question")},
-			Timestamp: time.Now(),
-		},
-		schema.Message{
-			Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent("Another answer")},
-			Timestamp: time.Now(),
-		},
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "New question after compaction"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "New answer after compaction"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "Another question"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Another answer"),
 	)
 
 	// Compact again -- the old summary should be included in eligible messages.
@@ -432,14 +409,8 @@ func TestIntegration_ConversationCompactor_NoSystemPrompt(t *testing.T) {
 	// Build conversation without system prompt.
 	msgs := []schema.Message{}
 	for i := 1; i <= 8; i++ {
-		msgs = append(msgs, schema.Message{
-			Message:   schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent(fmt.Sprintf("Q%d: %s", i, strings.Repeat("a", 40)))},
-			Timestamp: time.Now(),
-		})
-		msgs = append(msgs, schema.Message{
-			Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent(fmt.Sprintf("A%d: %s", i, strings.Repeat("b", 60)))},
-			Timestamp: time.Now(),
-		})
+		msgs = append(msgs, schema.NewUserMessage(schema.ProtocolOpenAIChat, fmt.Sprintf("Q%d: %s", i, strings.Repeat("a", 40))))
+		msgs = append(msgs, schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, fmt.Sprintf("A%d: %s", i, strings.Repeat("b", 60))))
 	}
 
 	result, _, err := compactor.Compact(context.Background(), msgs)

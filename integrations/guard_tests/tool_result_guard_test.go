@@ -31,7 +31,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
@@ -50,23 +49,7 @@ import (
 
 // mockChatCompleter implements aimodel.ChatCompleter for non-streaming tests.
 type mockChatCompleter struct {
-	calls     int
-	responses []*largemodel.Response
-	requests  []*largemodel.Request
-}
-
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	m.Requests() = append(m.Requests(), req)
-	if m.calls >= len(m.responses) {
-		return nil, errors.New("mock: no more responses")
-	}
-	resp := m.responses[m.calls]
-	m.calls++
-	return resp, nil
-}
-
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+	*largemodel.FakeCaller
 }
 
 // toolCallResponseTR builds a ChatResponse that triggers a single tool call.

@@ -36,37 +36,21 @@ import (
 // =============================================================================
 
 func newSystemMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.Message{Role: schema.RoleSystem, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func newAssistantMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func newToolMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   schema.Message{Role: schema.RoleTool, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleTool, text)
 }
 
 func newAssistantWithToolCalls(text string) schema.Message {
-	return schema.Message{
-		Message: schema.Message{
-			Role:    schema.RoleAssistant,
-			Content: aimodel.NewTextContent(text),
-			ToolCalls: []aimodel.ToolCall{
-				{ID: "call-1", Function: aimodel.FunctionCall{Name: "test_tool", Arguments: "{}"}},
-			},
-		},
-		Timestamp: time.Now(),
-	}
+	return schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", []schema.ToolCall{
+		{ID: "call-1", Function: aimodel.FunctionCall{Name: "test_tool", Arguments: "{}"}},
+	})
 }
 
 // =============================================================================
@@ -651,10 +635,10 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	t.Run("output in chronological order", func(t *testing.T) {
 		now := time.Now()
 		msgs := []schema.Message{
-			{Message: schema.Message{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")}, Timestamp: now},
-			{Message: schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("q1")}, Timestamp: now.Add(1 * time.Second)},
-			{Message: schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent("a1")}, Timestamp: now.Add(2 * time.Second)},
-			{Message: schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("q2")}, Timestamp: now.Add(3 * time.Second)},
+			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "q1"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "a1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "q2"),
 		}
 
 		result, err := c.Compress(context.Background(), msgs, 4)

@@ -374,12 +374,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 						{
 							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "First line"),
 						},
-						{
-							Message: schema.Message{
-								Role:    schema.RoleUser, // should be filtered out
-								Content: aimodel.NewTextContent("User line"),
-							},
-						},
+						schema.NewUserMessage(schema.ProtocolOpenAIChat, ""),
 						{
 							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Second line"),
 						},

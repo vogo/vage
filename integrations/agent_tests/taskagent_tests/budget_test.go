@@ -24,7 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"
@@ -37,35 +36,10 @@ import (
 // mockChatCompleter implements aimodel.ChatCompleter for integration tests.
 // It returns pre-configured responses with known usage data.
 type mockChatCompleter struct {
-	mu        sync.Mutex
-	calls     int
-	responses []*largemodel.Response
+	*largemodel.FakeCaller
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.calls >= len(m.responses) {
-		return nil, errors.New("mock: no more responses")
-	}
-
-	resp := m.responses[m.calls]
-	m.calls++
-
-	return resp, nil
-}
-
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented in mock")
-}
-
-func (m *mockChatCompleter) getCalls() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.calls
-}
+func (m *mockChatCompleter) getCalls() int { return m.Calls() }
 
 // makeStopResponse creates a stop response with the given text and total token usage.
 func makeStopResponse(text string, totalTokens int) *largemodel.Response {

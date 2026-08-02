@@ -409,11 +409,11 @@ func TestElide_ThreeStrategiesStack(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	r1, _ := mkRead("c1", "/a", t) // read /a — will become stale
-	rr1 := schema.Message{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent("short read of /a")}
+	rr1 := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", "short read of /a", false)
 	r2, _ := mkRead("c2", "/b", t) // read /b — keep_last_k victim only
-	rr2 := schema.Message{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent("short read of /b")}
+	rr2 := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c2", "short read of /b", false)
 	r3, _ := mkRead("c3", "/c", t) // read /c — oversized -> elide
-	rr3 := schema.Message{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(strings.Repeat("c", 5000))}
+	rr3 := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c3", strings.Repeat("c", 5000), false)
 	r4, rr4 := mkRead("c4", "/d", t) // read /d — kept by keep_last_k
 	r5, rr5 := mkRead("c5", "/e", t) // read /e — kept by keep_last_k
 	w1, wr1 := mkWrite("cw", "/a", t)

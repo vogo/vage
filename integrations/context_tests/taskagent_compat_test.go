@@ -24,7 +24,6 @@ import (
 
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
-	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -54,7 +53,7 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 
 	mm := memory.NewManager(memory.WithSession(sess))
 
-	fake := &fakeChatCompleter{responses: []*largemodel.Response{stopResponse("done")}}
+	fake := newFake(stopResponse("done"))
 
 	a := taskagent.New(agent.Config{ID: "compat-agent", Name: "Compat"},
 		taskagent.WithCaller(fake),
@@ -107,11 +106,12 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 	}
 }
 
-// TestTaskAgent_PromptCacheBreakpointPreserved exercises AC-3.4: the
-// prompt-cache breakpoint must still be marked on the system message
-// after the Builder runs (markPromptCacheBreakpoints is the post-step).
-func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
-	fake := &fakeChatCompleter{responses: []*largemodel.Response{stopResponse("ok")}}
+// TestTaskAgent_PromptCachingReachesRequest exercises AC-3.4: the
+// prompt-caching intent must survive context assembly and reach the request.
+// The vendor breakpoints themselves are rendered by the protocol caller, so
+// this asserts the agent's half of that contract.
+func TestTaskAgent_PromptCachingReachesRequest(t *testing.T) {
+	fake := newFake(stopResponse("ok"))
 
 	a := taskagent.New(agent.Config{ID: "cache-agent"},
 		taskagent.WithCaller(fake),
@@ -135,8 +135,8 @@ func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
 	if req.Messages[0].Role() != schema.RoleSystem {
 		t.Fatalf("first message is not system: %+v", req.Messages[0])
 	}
-	if !req.Messages[0].CacheBreakpoint {
-		t.Errorf("system message CacheBreakpoint = false, want true")
+	if !req.PromptCaching {
+		t.Errorf("PromptCaching = false, want true")
 	}
 }
 
@@ -145,7 +145,7 @@ func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
 func describeMessages(msgs []schema.Message) []string {
 	out := make([]string, len(msgs))
 	for i, m := range msgs {
-		out[i] = fmt.Sprintf("(%s, %q)", m.Role, m.Text())
+		out[i] = fmt.Sprintf("(%s, %q)", m.Role(), m.Text())
 	}
 	return out
 }

@@ -33,12 +33,7 @@ import (
 func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: schema.Message{
-					Role:    schema.RoleAssistant,
-					Content: aimodel.NewTextContent(text),
-				},
-			},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 		},
 	}
 }
@@ -63,13 +58,7 @@ func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: schema.Message{
-					Role:      schema.RoleAssistant,
-					Content:   aimodel.NewTextContent(""),
-					ToolCalls: calls,
-				},
-			},
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", calls),
 		},
 	}
 }
@@ -1104,12 +1093,7 @@ type mockCompleter struct {
 func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{
-			{
-				Message: schema.Message{
-					Role:    schema.RoleAssistant,
-					Content: aimodel.NewTextContent(m.response),
-				},
-			},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, m.response),
 		},
 	}, nil
 }
