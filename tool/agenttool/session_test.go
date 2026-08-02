@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/session"
 	"github.com/vogo/vage/sessionview"
@@ -41,7 +40,7 @@ func makeEchoAgent(t *testing.T, gotCtx *context.Context) *mockAgent {
 			input := req.Messages[0].Text()
 			return &schema.RunResponse{
 				Messages: []schema.Message{{
-					Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: " + input),
+					Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
 				}},
 			}, nil
 		})

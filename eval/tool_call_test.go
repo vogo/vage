@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestToolCallEval_NilConfig(t *testing.T) {

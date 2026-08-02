@@ -21,7 +21,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestMapIterationStore_Conformance(t *testing.T) {

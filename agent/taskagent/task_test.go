@@ -31,6 +31,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -38,55 +39,33 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// mockChatCompleter implements aimodel.ChatCompleter for testing.
+// mockChatCompleter scripts model responses for the ReAct loop. It wraps
+// largemodel.FakeCaller so tests keep their terse constructor style while the
+// dual-track envelope handling lives in one shared place.
 type mockChatCompleter struct {
-	calls     int
-	responses []*aimodel.ChatResponse
-	err       error
-	requests  []*aimodel.ChatRequest // captured requests
+	*largemodel.FakeCaller
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	m.requests = append(m.requests, req)
-	if m.err != nil {
-		return nil, m.err
-	}
-	if m.calls >= len(m.responses) {
-		return nil, errors.New("mock: no more responses")
-	}
-	resp := m.responses[m.calls]
-	m.calls++
-	return resp, nil
+func newMock(responses ...*largemodel.Response) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+func newMockErr(err error) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Err: err}}
 }
 
-func stopResponse(text string) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
-		}},
-		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-	}
+// testProtocol is the wire form the taskagent unit tests script against.
+const testProtocol = schema.ProtocolOpenAIChat
+
+func stopResponse(text string) *largemodel.Response {
+	return largemodel.FakeStopResponse(testProtocol, text,
+		schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
 }
 
-func toolCallResponse(toolCallID, funcName, args string) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
-				ToolCalls: []schema.ToolCall{{
-					ID:       toolCallID,
-					Type:     "function",
-					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
-				}},
-			},
-			FinishReason: aimodel.FinishReasonToolCalls,
-		}},
-		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-	}
+func toolCallResponse(toolCallID, funcName, args string) *largemodel.Response {
+	return largemodel.FakeToolCallResponse(testProtocol,
+		[]schema.ToolCall{{ID: toolCallID, Name: funcName, Arguments: args}},
+		schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
 }
 
 // --- Tests ---
@@ -159,10 +138,10 @@ func TestAgent_Run_NoChatCompleter(t *testing.T) {
 }
 
 func TestAgent_Run_SimpleResponse(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("Hello!")}}
+	mock := newMock(stopResponse("Hello!"))
 	a := New(
 		agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
@@ -189,9 +168,9 @@ func TestAgent_Run_SimpleResponse(t *testing.T) {
 }
 
 func TestAgent_Run_WithSystemPrompt(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 	)
 
@@ -216,9 +195,9 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 }
 
 func TestAgent_Run_WithTemplateSystemPrompt(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("Hello, {{.User}}!")),
 	)
 
@@ -240,11 +219,8 @@ func TestAgent_Run_WithTemplateSystemPrompt(t *testing.T) {
 }
 
 func TestAgent_Run_ToolCallLoop(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "get_weather", `{"city":"Paris"}`),
-			stopResponse("The weather in Paris is sunny."),
-	}
+	mock := newMock(toolCallResponse("tc-1", "get_weather", `{"city":"Paris"}`),
+			stopResponse("The weather in Paris is sunny."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -256,7 +232,7 @@ func TestAgent_Run_ToolCallLoop(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "weather-agent"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
 
@@ -292,12 +268,8 @@ func TestAgent_Run_ToolCallLoop(t *testing.T) {
 }
 
 func TestAgent_Run_ToolExecutionError(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "failing_tool", "{}"),
-			stopResponse("Sorry, the tool failed."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "failing_tool", "{}"),
+			stopResponse("Sorry, the tool failed."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -308,7 +280,7 @@ func TestAgent_Run_ToolExecutionError(t *testing.T) {
 	)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
 
@@ -330,13 +302,9 @@ func TestAgent_Run_ToolExecutionError(t *testing.T) {
 }
 
 func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "loop", "{}"),
+	mock := newMock(toolCallResponse("tc-1", "loop", "{}"),
 			toolCallResponse("tc-2", "loop", "{}"),
-			toolCallResponse("tc-3", "loop", "{}"),
-		},
-	}
+			toolCallResponse("tc-3", "loop", "{}"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -347,7 +315,7 @@ func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
 	)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxIterations(2),
 	)
@@ -367,8 +335,8 @@ func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
 }
 
 func TestAgent_Run_ChatCompletionError(t *testing.T) {
-	mock := &mockChatCompleter{err: errors.New("API error")}
-	a := New(agent.Config{}, WithChatCompleter(mock))
+	mock := newMockErr(errors.New("API error"))
+	a := New(agent.Config{}, WithCaller(mock))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -382,10 +350,10 @@ func TestAgent_Run_ChatCompletionError(t *testing.T) {
 }
 
 func TestAgent_Run_EmptyResponse(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{{Choices: nil, Usage: schema.Usage{}}},
-	}
-	a := New(agent.Config{}, WithChatCompleter(mock))
+	// A response with no message text and no tool calls: the turn carries
+	// nothing for the agent to act on.
+	mock := newMock(&largemodel.Response{})
+	a := New(agent.Config{}, WithCaller(mock))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -399,9 +367,9 @@ func TestAgent_Run_EmptyResponse(t *testing.T) {
 }
 
 func TestAgent_Run_OptionsOverride(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithModel("default-model"),
 		WithTemperature(0.5),
 	)
@@ -432,14 +400,14 @@ func TestAgent_Run_OptionsOverride(t *testing.T) {
 }
 
 func TestAgent_Run_ToolFilter(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "allowed"}, echoToolHandler)
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
 
@@ -461,8 +429,8 @@ func TestAgent_Run_ToolFilter(t *testing.T) {
 }
 
 func TestAgent_Run_SessionIDPassthrough(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
-	a := New(agent.Config{}, WithChatCompleter(mock))
+	mock := newMock(stopResponse("ok"))
+	a := New(agent.Config{}, WithCaller(mock))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -490,8 +458,8 @@ func TestAgent_Tools_WithRegistry(t *testing.T) {
 }
 
 func TestRunText(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("world")}}
-	a := New(agent.Config{}, WithChatCompleter(mock))
+	mock := newMock(stopResponse("world"))
+	a := New(agent.Config{}, WithCaller(mock))
 
 	resp, err := agent.RunText(context.Background(), a, "hello")
 	if err != nil {
@@ -515,8 +483,8 @@ func TestAgent_Run_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	mock := &mockChatCompleter{err: ctx.Err()}
-	a := New(agent.Config{}, WithChatCompleter(mock))
+	mock := newMockErr(ctx.Err())
+	a := New(agent.Config{}, WithCaller(mock))
 
 	_, err := a.Run(ctx, &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -599,7 +567,7 @@ func TestAgent_RunStream_SimpleText(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "test-agent"},
-		WithChatCompleter(client),
+		WithCaller(client),
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
@@ -689,7 +657,7 @@ func TestAgent_RunStream_ToolCallLoop(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "weather-agent"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 	)
 
@@ -747,7 +715,7 @@ func TestAgent_RunStream_CloseEarly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := New(agent.Config{}, WithChatCompleter(client))
+	a := New(agent.Config{}, WithCaller(client))
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
@@ -794,7 +762,7 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 	)
 
 	a := New(agent.Config{},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 		WithMaxIterations(1),
 	)
@@ -859,7 +827,7 @@ func TestRunStreamText(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := New(agent.Config{}, WithChatCompleter(client))
+	a := New(agent.Config{}, WithCaller(client))
 	rs, err := agent.RunStreamText(context.Background(), a, "hello")
 	if err != nil {
 		t.Fatalf("RunStreamText error: %v", err)
@@ -913,7 +881,7 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 	}
 
 	a := New(agent.Config{},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithStreamMiddleware(countMiddleware),
 	)
 
@@ -940,14 +908,14 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 }
 
 func TestAgent_Run_WithMemory(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("Hello!")}}
+	mock := newMock(stopResponse("Hello!"))
 
 	session := memory.NewSessionMemory("agent-1", "sess-1")
 	mgr := memory.NewManager(memory.WithSession(session))
 
 	a := New(
 		agent.Config{ID: "agent-1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithMemory(mgr),
 	)
 
@@ -975,10 +943,10 @@ func TestAgent_Run_WithMemory_MultiTurn(t *testing.T) {
 	session := memory.NewSessionMemory("agent-1", "sess-1")
 	mgr := memory.NewManager(memory.WithSession(session))
 
-	mock1 := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("I'm fine!")}}
+	mock1 := newMock(stopResponse("I'm fine!"))
 	a1 := New(
 		agent.Config{ID: "agent-1"},
-		WithChatCompleter(mock1),
+		WithCaller(mock1),
 		WithMemory(mgr),
 	)
 
@@ -990,10 +958,10 @@ func TestAgent_Run_WithMemory_MultiTurn(t *testing.T) {
 		t.Fatalf("Run 1 error: %v", err)
 	}
 
-	mock2 := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("Your name is Alice!")}}
+	mock2 := newMock(stopResponse("Your name is Alice!"))
 	a2 := New(
 		agent.Config{ID: "agent-1"},
-		WithChatCompleter(mock2),
+		WithCaller(mock2),
 		WithMemory(mgr),
 	)
 
@@ -1032,10 +1000,10 @@ func TestAgent_Run_WithMemory_Compressor(t *testing.T) {
 	_ = session.Set(ctx, "msg:1", schema.NewUserMessage(schema.ProtocolOpenAIChat, "second"), 0)
 	_ = session.Set(ctx, "msg:2", schema.NewUserMessage(schema.ProtocolOpenAIChat, "third"), 0)
 
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	a := New(
 		agent.Config{ID: "agent-1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithMemory(mgr),
 	)
 
@@ -1060,10 +1028,10 @@ func TestAgent_Run_WithMemory_Compressor(t *testing.T) {
 }
 
 func TestAgent_Run_WithoutMemory_Unchanged(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	a := New(
 		agent.Config{ID: "agent-1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
@@ -1083,8 +1051,8 @@ func TestAgent_Run_WithoutMemory_Unchanged(t *testing.T) {
 }
 
 func TestRunToStream(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("hello")}}
-	a := New(agent.Config{ID: "test-agent"}, WithChatCompleter(mock))
+	mock := newMock(stopResponse("hello"))
+	a := New(agent.Config{ID: "test-agent"}, WithCaller(mock))
 
 	req := &schema.RunRequest{
 		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -1143,14 +1111,14 @@ func setupSkillManager(t *testing.T) skill.Manager {
 }
 
 func TestAgent_Run_WithSkillManager_PromptInjection(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 	ctx := context.Background()
 
 	_, _ = mgr.Activate(ctx, "test-skill", "sess-1")
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 		WithSkillManager(mgr),
 	)
@@ -1177,11 +1145,11 @@ func TestAgent_Run_WithSkillManager_PromptInjection(t *testing.T) {
 }
 
 func TestAgent_Run_WithSkillManager_NoActiveSkills(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 		WithSkillManager(mgr),
 	)
@@ -1202,7 +1170,7 @@ func TestAgent_Run_WithSkillManager_NoActiveSkills(t *testing.T) {
 }
 
 func TestAgent_Run_WithSkillManager_ToolFiltering(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 	ctx := context.Background()
 
@@ -1213,7 +1181,7 @@ func TestAgent_Run_WithSkillManager_ToolFiltering(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSkillManager(mgr),
 	)
@@ -1236,7 +1204,7 @@ func TestAgent_Run_WithSkillManager_ToolFiltering(t *testing.T) {
 }
 
 func TestAgent_Run_WithSkillManager_ToolFilterIntersection(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 	ctx := context.Background()
 
@@ -1247,7 +1215,7 @@ func TestAgent_Run_WithSkillManager_ToolFilterIntersection(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "other"}, echoToolHandler)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSkillManager(mgr),
 	)
@@ -1272,7 +1240,7 @@ func TestAgent_Run_WithSkillManager_ToolFilterIntersection(t *testing.T) {
 }
 
 func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 	ctx := context.Background()
 
@@ -1284,7 +1252,7 @@ func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("Base prompt.")),
 		WithToolRegistry(reg),
 		WithSkillManager(mgr),
@@ -1323,14 +1291,14 @@ func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
 }
 
 func TestAgent_Run_WithSkillManager_NoSystemPrompt(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 	ctx := context.Background()
 
 	_, _ = mgr.Activate(ctx, "test-skill", "sess-1")
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithSkillManager(mgr),
 	)
 

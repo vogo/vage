@@ -140,7 +140,7 @@ func (e *echoAgent) Run(_ context.Context, req *schema.RunRequest) (*schema.RunR
 		input = req.Messages[0].Text()
 	}
 	return &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "echo: " + input)},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "echo: "+input)},
 	}, nil
 }
 

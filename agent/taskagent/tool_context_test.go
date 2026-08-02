@@ -49,14 +49,10 @@ func TestToolCtxInjection_SyncPath(t *testing.T) {
 		},
 	)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse([3]string{"tc-1", "probe", "{}"}),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse([3]string{"tc-1", "probe", "{}"}),
+		stopResponse("done"))
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-sync",
@@ -108,7 +104,7 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "stream-ctx"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 	)
 
@@ -164,7 +160,7 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 		t.Fatalf("aimodel.NewClient: %v", err)
 	}
 
-	a := New(agent.Config{ID: "todo-e2e"}, WithChatCompleter(client), WithToolRegistry(reg))
+	a := New(agent.Config{ID: "todo-e2e"}, WithCaller(client), WithToolRegistry(reg))
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
 		SessionID: "sess-e2e",

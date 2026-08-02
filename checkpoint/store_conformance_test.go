@@ -22,7 +22,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -262,8 +261,8 @@ func newTestCheckpoint(sessionID string, iter int, final bool, reason schema.Sto
 			return ""
 		}(),
 		Messages: []schema.Message{
-			{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
-			{Role: schema.RoleUser, Content: aimodel.NewTextContent("hi")},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hi"),
 		},
 		SessionMsgCount: 0,
 		Usage:           schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},

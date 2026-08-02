@@ -90,11 +90,11 @@ type turn struct {
 	results []schema.Message // RoleTool entries; ToolCallID must match a call.ID
 }
 
-func buildReact(t *testing.T, turns []turn) *aimodel.ChatRequest {
+func buildReact(t *testing.T, turns []turn) *largemodel.Request {
 	t.Helper()
 	msgs := []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 	for _, tn := range turns {
 		msgs = append(msgs, schema.Message{

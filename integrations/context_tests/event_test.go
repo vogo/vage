@@ -21,10 +21,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	vctx "github.com/vogo/vage/context"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 )
@@ -37,10 +37,10 @@ func TestTaskAgent_EmitsEventContextBuilt(t *testing.T) {
 	rec := newRecordingHook()
 	hm := installHook(rec)
 
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	fake := &fakeChatCompleter{responses: []*largemodel.Response{stopResponse("ok")}}
 
 	a := taskagent.New(agent.Config{ID: "evt-agent"},
-		taskagent.WithChatCompleter(fake),
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithHookManager(hm),
 	)

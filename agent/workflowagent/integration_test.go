@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/orchestrate"
 	"github.com/vogo/vage/schema"
@@ -41,7 +40,7 @@ func intMakeStep(id, suffix string) agent.Agent {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -108,21 +107,21 @@ func TestIntegration_DAG_DiamondWithUsage(t *testing.T) {
 	stepA := agent.NewCustomAgent(agent.Config{ID: "a"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-A")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-A")},
 			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 		}, nil
 	})
 	stepB := agent.NewCustomAgent(agent.Config{ID: "b"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-B")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-B")},
 			Usage:    &schema.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
 		}, nil
 	})
 	stepC := agent.NewCustomAgent(agent.Config{ID: "c"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-C")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-C")},
 			Usage:    &schema.Usage{PromptTokens: 15, CompletionTokens: 8, TotalTokens: 23},
 		}, nil
 	})
@@ -326,7 +325,7 @@ func TestIntegration_DAG_InputMapper(t *testing.T) {
 				aText := upstream["A"].Messages[0].Text()
 				bText := upstream["B"].Messages[0].Text()
 				return &schema.RunRequest{
-					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText + "+" + bText)},
+					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText+"+"+bText)},
 				}, nil
 			},
 		},
@@ -681,7 +680,7 @@ func TestIntegration_Loop_ConditionTermination(t *testing.T) {
 		callCount++
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-iter")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-iter")},
 		}, nil
 	})
 	condition := func(resp *schema.RunResponse) bool {
@@ -743,7 +742,7 @@ func TestIntegration_Loop_OutputChaining(t *testing.T) {
 		text := req.Messages[0].Text()
 		received = append(received, text)
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "+")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"+")},
 		}, nil
 	})
 	wf := NewLoop(agent.Config{ID: "wf-loop"}, body, nil, 3)

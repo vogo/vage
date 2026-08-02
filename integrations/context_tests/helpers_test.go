@@ -29,6 +29,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 )
@@ -40,11 +41,11 @@ import (
 type fakeChatCompleter struct {
 	mu        sync.Mutex
 	calls     int
-	requests  []*aimodel.ChatRequest
-	responses []*aimodel.ChatResponse
+	requests  []*largemodel.Request
+	responses []*largemodel.Response
 }
 
-func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -62,11 +63,11 @@ func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 	return resp, nil
 }
 
-func (m *fakeChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *fakeChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("fake: stream not implemented")
 }
 
-func (m *fakeChatCompleter) firstRequest(t *testing.T) *aimodel.ChatRequest {
+func (m *fakeChatCompleter) firstRequest(t *testing.T) *largemodel.Request {
 	t.Helper()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -79,11 +80,11 @@ func (m *fakeChatCompleter) firstRequest(t *testing.T) *aimodel.ChatRequest {
 // stopResponse builds a ChatResponse whose finish reason terminates the
 // ReAct loop on the first iteration — exactly what we need to capture the
 // initial-prompt message slice and bail out.
-func stopResponse(text string) *aimodel.ChatResponse {
+func stopResponse(text string) *largemodel.Response {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 		Usage: schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}

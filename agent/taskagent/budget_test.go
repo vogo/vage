@@ -27,6 +27,7 @@ import (
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -122,40 +123,31 @@ func TestBudgetTracker_AddReturnValue(t *testing.T) {
 
 // --- Agent budget enforcement tests ---
 
-func stopResponseWithUsage(text string, total int) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
-		}},
-		Usage: schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
+func stopResponseWithUsage(text string, total int) *largemodel.Response {
+	return &largemodel.Response{
+		Message:      schema.NewAssistantTurn(testProtocol, text, "", nil),
+		FinishReason: largemodel.FinishReasonStop,
+		Usage:        schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
 	}
 }
 
-func toolCallResponseWithUsage(toolCallID, funcName, args string, total int) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
-				ToolCalls: []schema.ToolCall{{
-					ID:       toolCallID,
-					Type:     "function",
-					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
-				}},
-			},
-			FinishReason: aimodel.FinishReasonToolCalls,
-		}},
-		Usage: schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
+func toolCallResponseWithUsage(toolCallID, funcName, args string, total int) *largemodel.Response {
+	return &largemodel.Response{
+		Message: schema.NewAssistantTurn(testProtocol, "", "", []schema.ToolCall{{
+			ID:        toolCallID,
+			Name:      funcName,
+			Arguments: args,
+		}}),
+		FinishReason: largemodel.FinishReasonToolCalls,
+		Usage:        schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
 	}
 }
 
 func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 	// Budget allows 2 calls (100 tokens each), exhausts before 3rd call.
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponseWithUsage("tc-1", "do_thing", "{}", 100),
-			toolCallResponseWithUsage("tc-2", "do_thing", "{}", 100),
-			stopResponseWithUsage("should not reach", 100),
-	}
+	mock := newMock(toolCallResponseWithUsage("tc-1", "do_thing", "{}", 100),
+		toolCallResponseWithUsage("tc-2", "do_thing", "{}", 100),
+		stopResponseWithUsage("should not reach", 100))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -166,7 +158,7 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 	)
 
 	a := New(agent.Config{ID: "budget-agent"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(200),
 		WithMaxIterations(10),
@@ -195,11 +187,7 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 
 func TestAgent_Run_BudgetExhausted_SkipsToolCalls(t *testing.T) {
 	// Budget exhausted after first tool-call response; tool execution skipped.
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponseWithUsage("tc-1", "expensive", "{}", 500),
-		},
-	}
+	mock := newMock(toolCallResponseWithUsage("tc-1", "expensive", "{}", 500))
 
 	toolExecuted := false
 	reg := tool.NewRegistry()
@@ -212,7 +200,7 @@ func TestAgent_Run_BudgetExhausted_SkipsToolCalls(t *testing.T) {
 	)
 
 	a := New(agent.Config{ID: "budget-agent"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(100),
 	)
@@ -232,8 +220,8 @@ func TestAgent_Run_BudgetExhausted_SkipsToolCalls(t *testing.T) {
 }
 
 func TestAgent_Run_BudgetUnlimited_PreservesExistingBehavior(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("Hello!")}}
-	a := New(agent.Config{ID: "a1"}, WithChatCompleter(mock))
+	mock := newMock(stopResponse("Hello!"))
+	a := New(agent.Config{ID: "a1"}, WithCaller(mock))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -252,11 +240,7 @@ func TestAgent_Run_BudgetUnlimited_PreservesExistingBehavior(t *testing.T) {
 func TestAgent_Run_BudgetPerRequestOverride(t *testing.T) {
 	// Agent default budget is 10000. Request overrides to 50.
 	// The response uses 100 tokens, so budget exhausts in post-call check.
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponseWithUsage("tc-1", "tool1", "{}", 100),
-		},
-	}
+	mock := newMock(toolCallResponseWithUsage("tc-1", "tool1", "{}", 100))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -267,7 +251,7 @@ func TestAgent_Run_BudgetPerRequestOverride(t *testing.T) {
 	)
 
 	a := New(agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(10000),
 	)
@@ -292,18 +276,14 @@ func TestAgent_Run_BudgetExhausted_EmitsEvents(t *testing.T) {
 		return nil
 	}))
 
-	mock2 := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponseWithUsage("tc-1", "t", "{}", 100),
-		},
-	}
+	mock2 := newMock(toolCallResponseWithUsage("tc-1", "t", "{}", 100))
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "t"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
 		return schema.TextResult("", "ok"), nil
 	})
 
 	a2 := New(agent.Config{ID: "evt-agent"},
-		WithChatCompleter(mock2),
+		WithCaller(mock2),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(50),
 		WithHookManager(hm),
@@ -359,12 +339,8 @@ func TestAgent_Run_BudgetExhausted_OutputGuardsRun(t *testing.T) {
 	// Second response: text "partial result" (should not be called because budget is exhausted).
 	// The pre-call budget check on the second iteration triggers buildBudgetExhaustedResult
 	// with lastAssistantMsg from iteration 1.
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponseWithUsage("tc-1", "t", "{}", 500),
-			stopResponseWithUsage("should not reach", 100),
-		},
-	}
+	mock := newMock(toolCallResponseWithUsage("tc-1", "t", "{}", 500),
+		stopResponseWithUsage("should not reach", 100))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "t"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -377,7 +353,7 @@ func TestAgent_Run_BudgetExhausted_OutputGuardsRun(t *testing.T) {
 	}
 
 	a := New(agent.Config{ID: "guard-agent"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(100),
 		WithOutputGuards(rewriteGuard),
@@ -491,7 +467,7 @@ func TestAgent_RunStream_BudgetExhausted_WithTextContent(t *testing.T) {
 	)
 
 	a := New(agent.Config{ID: "stream-budget"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(5),
 	)

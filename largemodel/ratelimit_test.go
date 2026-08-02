@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {

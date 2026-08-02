@@ -42,7 +42,7 @@ func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
 
 func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
 	slow := &completerFunc{
-		chat: func(ctx context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+		chat: func(ctx context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -50,7 +50,7 @@ func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
 				return &aimodel.ChatResponse{}, nil
 			}
 		},
-		stream: func(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		stream: func(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 			return nil, nil
 		},
 	}

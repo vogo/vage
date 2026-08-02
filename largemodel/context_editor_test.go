@@ -30,12 +30,12 @@ import (
 // captureCompleter records the request the middleware finally sent
 // downstream, so tests can compare it against the caller's request.
 type captureCompleter struct {
-	gotChat   *aimodel.ChatRequest
-	gotStream *aimodel.ChatRequest
-	chatResp  *aimodel.ChatResponse
+	gotChat   *largemodel.Request
+	gotStream *largemodel.Request
+	chatResp  *largemodel.Response
 }
 
-func (c *captureCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (c *captureCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	c.gotChat = req
 	if c.chatResp == nil {
 		return &aimodel.ChatResponse{ID: "ok"}, nil
@@ -43,7 +43,7 @@ func (c *captureCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRe
 	return c.chatResp, nil
 }
 
-func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
 	c.gotStream = req
 	return nil, nil
 }
@@ -51,10 +51,10 @@ func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *aimodel.
 // makeReq builds a ReAct-style request: user prompt → assistant tool_calls →
 // n tool_result messages, all with synthetic content of size bytes each.
 // Returns the request plus the original tool_call_ids in order.
-func makeReq(n int, contentBytes int) (*aimodel.ChatRequest, []string) {
+func makeReq(n int, contentBytes int) (*largemodel.Request, []string) {
 	msgs := []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
 	calls := make([]schema.ToolCall, 0, n)

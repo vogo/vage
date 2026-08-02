@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestLogMiddleware_ChatCompletion_Success(t *testing.T) {

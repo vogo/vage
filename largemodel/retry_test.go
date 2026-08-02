@@ -36,10 +36,10 @@ type failingCompleter struct {
 	failCount int
 	calls     int
 	failErr   error
-	resp      *aimodel.ChatResponse
+	resp      *largemodel.Response
 }
 
-func (f *failingCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (f *failingCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	f.calls++
 	if f.calls <= f.failCount {
 		return nil, f.failErr
@@ -48,7 +48,7 @@ func (f *failingCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequ
 	return f.resp, nil
 }
 
-func (f *failingCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (f *failingCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, nil
 }
 
@@ -142,11 +142,11 @@ type failingStreamCompleter struct {
 	failErr   error
 }
 
-func (f *failingStreamCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (f *failingStreamCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	return nil, nil
 }
 
-func (f *failingStreamCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (f *failingStreamCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	f.calls++
 	if f.calls <= f.failCount {
 		return nil, f.failErr

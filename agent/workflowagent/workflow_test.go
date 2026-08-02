@@ -24,7 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/orchestrate"
 	"github.com/vogo/vage/schema"
@@ -40,7 +39,7 @@ func makeStep(id, suffix string) agent.Agent {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -120,7 +119,7 @@ func TestAgent_Run_OutputChaining(t *testing.T) {
 	stepB := agent.NewCustomAgent(agent.Config{ID: "b"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + " world")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+" world")},
 		}, nil
 	})
 
@@ -513,7 +512,7 @@ func TestAgent_RunLoop_Condition(t *testing.T) {
 		callCount++
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-iter")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-iter")},
 		}, nil
 	})
 	condition := func(resp *schema.RunResponse) bool {

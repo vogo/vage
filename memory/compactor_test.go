@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -40,9 +39,7 @@ func errSummarizer(err error) Summarizer {
 }
 
 func sysMsg(text string) schema.Message {
-	return schema.Message{
-		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func userMsg(text string) schema.Message {
@@ -50,9 +47,7 @@ func userMsg(text string) schema.Message {
 }
 
 func assistantMsg(text string) schema.Message {
-	return schema.Message{
-		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func TestConversationCompactor_NoCompactionFewMessages(t *testing.T) {

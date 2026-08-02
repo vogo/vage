@@ -22,8 +22,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/prompt"
+	"github.com/vogo/vage/schema"
 )
 
 // errPrompt is a PromptTemplate whose Render always returns the configured

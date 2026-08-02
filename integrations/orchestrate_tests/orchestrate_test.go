@@ -54,7 +54,7 @@ func appendRunner(suffix string) *mockRunner {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }

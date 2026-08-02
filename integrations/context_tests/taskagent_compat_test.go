@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -54,10 +54,10 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 
 	mm := memory.NewManager(memory.WithSession(sess))
 
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("done")}}
+	fake := &fakeChatCompleter{responses: []*largemodel.Response{stopResponse("done")}}
 
 	a := taskagent.New(agent.Config{ID: "compat-agent", Name: "Compat"},
-		taskagent.WithChatCompleter(fake),
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Be helpful.")),
 		taskagent.WithMemory(mm),
 	)
@@ -111,10 +111,10 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 // prompt-cache breakpoint must still be marked on the system message
 // after the Builder runs (markPromptCacheBreakpoints is the post-step).
 func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	fake := &fakeChatCompleter{responses: []*largemodel.Response{stopResponse("ok")}}
 
 	a := taskagent.New(agent.Config{ID: "cache-agent"},
-		taskagent.WithChatCompleter(fake),
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithPromptCaching(true),
 	)

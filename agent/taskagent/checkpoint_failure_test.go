@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/schema"
@@ -55,13 +54,9 @@ func (s *failingIterationStore) Save(ctx context.Context, cp *checkpoint.Checkpo
 // Save. The callback must fire exactly 3 times; Run must still
 // complete normally because checkpointing is best-effort.
 func TestSaveCheckpointFailure_InvokesCallback(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-			toolCallResponse("tc-2", "echo", `{"v":"b"}`),
-			stopResponse("final"),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`),
+		toolCallResponse("tc-2", "echo", `{"v":"b"}`),
+		stopResponse("final"))
 	saveErr := errors.New("disk full")
 	store := newFailingIterationStore(saveErr)
 	registry := newEchoRegistry()
@@ -73,7 +68,7 @@ func TestSaveCheckpointFailure_InvokesCallback(t *testing.T) {
 	)
 
 	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
 		WithCheckpointFailureCallback(func(_ context.Context, sid string, err error) {
@@ -116,13 +111,11 @@ func TestSaveCheckpointFailure_InvokesCallback(t *testing.T) {
 // value path: when no callback is configured, save failures must
 // continue to fall through to slog.Warn alone without nil-deref.
 func TestSaveCheckpointFailure_NilCallback_NoPanic(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("done")},
-	}
+	mock := newMock(stopResponse("done"))
 	store := newFailingIterationStore(errors.New("disk full"))
 
 	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithIterationStore(store),
 		// no WithCheckpointFailureCallback
 	)
@@ -143,14 +136,12 @@ func TestSaveCheckpointFailure_NilCallback_NoPanic(t *testing.T) {
 // the SessionMetricsHook's CheckpointSaveFailures counter remains a
 // faithful "failure count" rather than a generic "save attempt".
 func TestSaveCheckpointFailure_OnSuccess_NoCallbackInvoke(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("done")},
-	}
+	mock := newMock(stopResponse("done"))
 	store := checkpoint.NewMapIterationStore()
 
 	var cbHits atomic.Int32
 	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithIterationStore(store),
 		WithCheckpointFailureCallback(func(context.Context, string, error) {
 			cbHits.Add(1)

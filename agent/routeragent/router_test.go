@@ -24,7 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 )
@@ -39,7 +38,7 @@ func makeAgent(id, suffix string) agent.Agent {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }

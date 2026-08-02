@@ -24,7 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/schema"
 )

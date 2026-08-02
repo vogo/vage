@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -53,7 +52,7 @@ func TestRegister(t *testing.T) {
 			return &schema.RunResponse{
 				Messages: []schema.Message{
 					{
-						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: " + input),
+						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
 					},
 				},
 			}, nil
@@ -283,7 +282,7 @@ func TestRegister(t *testing.T) {
 			return &schema.RunResponse{
 				Messages: []schema.Message{
 					{
-						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Got: " + input),
+						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Got: "+input),
 					},
 				},
 			}, nil

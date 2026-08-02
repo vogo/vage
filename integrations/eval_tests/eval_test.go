@@ -25,6 +25,7 @@ import (
 
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/eval"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -33,7 +34,10 @@ func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
+				Message: schema.Message{
+					Role:    schema.RoleAssistant,
+					Content: aimodel.NewTextContent(text),
+				},
 			},
 		},
 	}
@@ -56,11 +60,13 @@ func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 }
 
 // makeResponseWithToolCalls creates a RunResponse with assistant tool call messages.
-func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				Message: schema.Message{
+					Role:      schema.RoleAssistant,
+					Content:   aimodel.NewTextContent(""),
 					ToolCalls: calls,
 				},
 			},
@@ -89,7 +95,8 @@ func TestIntegration_ExactMatch_PassAndFail(t *testing.T) {
 	c1 := &eval.EvalCase{
 		ID:       "match-1",
 		Expected: makeResponse("Hello world"),
-		Actual:   makeResponse("Hello world")
+		Actual:   makeResponse("Hello world"),
+	}
 
 	result, err := evaluator.Evaluate(ctx, c1)
 	if err != nil {
@@ -300,8 +307,8 @@ func TestIntegration_ToolCall_SequenceMatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	searchCall := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calcCall := schema.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	searchCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
+	calcCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
 
 	// Full match.
 	c1 := &eval.EvalCase{
@@ -375,13 +382,13 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 
 	ctx := context.Background()
 
-	expectedCall := schema.ToolCall{
+	expectedCall := aimodel.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
 	}
-	matchingCall := schema.ToolCall{
+	matchingCall := aimodel.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
 	}
-	differentArgsCall := schema.ToolCall{
+	differentArgsCall := aimodel.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"world"}`},
 	}
 
@@ -1094,16 +1101,19 @@ type mockCompleter struct {
 	response string
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{
 			{
-				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, m.response),
+				Message: schema.Message{
+					Role:    schema.RoleAssistant,
+					Content: aimodel.NewTextContent(m.response),
+				},
 			},
 		},
 	}, nil
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/routeragent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -40,7 +41,7 @@ func newTextAgent(id, suffix string) agent.Agent {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -78,12 +79,12 @@ func routeNil(_ context.Context, _ *schema.RunRequest, _ []routeragent.Route) (*
 // --- mockChatCompleter for LLM integration tests ---
 
 type mockChatCompleter struct {
-	response *aimodel.ChatResponse
+	response *largemodel.Response
 	err      error
-	captured *aimodel.ChatRequest
+	captured *largemodel.Request
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	m.captured = req
 	if m.err != nil {
 		return nil, m.err
@@ -91,15 +92,15 @@ func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 	return m.response, nil
 }
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }
 
-func llmResponse(text string, prompt, completion, total int) *aimodel.ChatResponse {
+func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	}
@@ -729,7 +730,7 @@ func TestIntegration_RouterWithWorkflowSubAgent(t *testing.T) {
 	pipeline := agent.NewCustomAgent(agent.Config{ID: "pipeline"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[processed] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[processed] "+text)},
 		}, nil
 	})
 
@@ -890,7 +891,7 @@ func TestIntegration_LLMRouting_Fallback(t *testing.T) {
 		{Agent: newTextAgent("other", " [other]"), Description: "other agent"},
 	}
 
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -916,7 +917,7 @@ func TestIntegration_LLMRouting_NoFallback_Error(t *testing.T) {
 		{Agent: newTextAgent("sub", ""), Description: "agent"},
 	}
 
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,

@@ -141,7 +141,7 @@ func TestTaskAgentIntegration(t *testing.T) {
 		ID:   "weather-agent",
 		Name: "Weather Assistant",
 	},
-		taskagent.WithChatCompleter(model),
+		taskagent.WithCaller(model),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant. Use tools to answer questions. Be concise.",

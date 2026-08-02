@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/service"
@@ -65,7 +64,7 @@ func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 
 		return &schema.RunResponse{
 			Messages: []schema.Message{schema.NewAssistantMessage(
-				schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "echo: " + text),
+				schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "echo: "+text),
 				"echo",
 			)},
 			SessionID: req.SessionID,

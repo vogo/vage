@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -48,7 +47,7 @@ func TestExecuteLoop_ConditionTermination(t *testing.T) {
 		callCount++
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-iter")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-iter")},
 		}, nil
 	})
 
@@ -84,7 +83,7 @@ func TestExecuteLoop_ConvergenceDetection(t *testing.T) {
 			}, nil
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, req.Messages[0].Text() + "-change")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, req.Messages[0].Text()+"-change")},
 		}, nil
 	})
 
@@ -210,7 +209,7 @@ func TestExecuteLoop_OutputChaining(t *testing.T) {
 		text := req.Messages[0].Text()
 		received = append(received, text)
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "+")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"+")},
 		}, nil
 	})
 

@@ -94,7 +94,7 @@ func TestAgentAsToolIntegration(t *testing.T) {
 		ID:   "coordinator-agent",
 		Name: "Coordinator",
 	},
-		taskagent.WithChatCompleter(model),
+		taskagent.WithCaller(model),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant. When the user asks you to translate text to French, "+
@@ -159,7 +159,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 			return &schema.RunResponse{
 				Messages: []schema.Message{
 					{
-						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: " + input),
+						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
 					},
 				},
 			}, nil

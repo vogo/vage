@@ -37,33 +37,36 @@ import (
 
 func newSystemMessage(text string) schema.Message {
 	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text),
+		Message:   schema.Message{Role: schema.RoleSystem, Content: aimodel.NewTextContent(text)},
 		Timestamp: time.Now(),
 	}
 }
 
 func newAssistantMessage(text string) schema.Message {
 	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
+		Message:   schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent(text)},
 		Timestamp: time.Now(),
 	}
 }
 
 func newToolMessage(text string) schema.Message {
 	return schema.Message{
-		Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleTool, text),
+		Message:   schema.Message{Role: schema.RoleTool, Content: aimodel.NewTextContent(text)},
 		Timestamp: time.Now(),
 	}
 }
 
 func newAssistantWithToolCalls(text string) schema.Message {
 	return schema.Message{
-		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			ToolCalls: []schema.ToolCall{
+		Message: schema.Message{
+			Role:    schema.RoleAssistant,
+			Content: aimodel.NewTextContent(text),
+			ToolCalls: []aimodel.ToolCall{
 				{ID: "call-1", Function: aimodel.FunctionCall{Name: "test_tool", Arguments: "{}"}},
 			},
 		},
-		Timestamp: time.Now()
+		Timestamp: time.Now(),
+	}
 }
 
 // =============================================================================
@@ -207,12 +210,12 @@ func TestIntegration_CompressorChaining(t *testing.T) {
 	// then summarizes remaining older messages.
 	t.Run("ImportanceRanking then SummarizeAndTrunc", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("system prompt"),            // high priority
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 1"),     // medium
-			newAssistantMessage(strings.Repeat("a", 80)), // low, 20 tokens
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 2"),     // medium
-			newAssistantMessage("short answer"),          // low
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 3"),     // medium
+			newSystemMessage("system prompt"),                                   // high priority
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 1"), // medium
+			newAssistantMessage(strings.Repeat("a", 80)),                        // low, 20 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 2"), // medium
+			newAssistantMessage("short answer"),                                 // low
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 3"), // medium
 		}
 
 		// Step 1: ImportanceRanking with budget that drops long assistant message
@@ -370,12 +373,12 @@ func TestIntegration_TokenBudget_DiverseMessages(t *testing.T) {
 	// Test: conversation with mixed roles — budget keeps most recent that fit.
 	t.Run("mixed role conversation under budget pressure", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("You are a helpful assistant"),       // ~8 tokens
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "What is the weather?"),         // ~5 tokens
-			newAssistantMessage("Let me check the weather tool."), // ~8 tokens
-			newToolMessage("Weather: sunny, 25C"),                 // ~5 tokens
-			newAssistantMessage("The weather is sunny and 25C."),  // ~8 tokens
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Thanks!"),                      // ~1 token
+			newSystemMessage("You are a helpful assistant"),                          // ~8 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "What is the weather?"), // ~5 tokens
+			newAssistantMessage("Let me check the weather tool."),                    // ~8 tokens
+			newToolMessage("Weather: sunny, 25C"),                                    // ~5 tokens
+			newAssistantMessage("The weather is sunny and 25C."),                     // ~8 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Thanks!"),              // ~1 token
 		}
 
 		// Budget of 10 should keep the last few messages
@@ -576,12 +579,12 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	// Test: system messages always preserved under budget pressure.
 	t.Run("system messages preserved under pressure", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),                             // 1 token, score ~1000
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 1"),                 // ~2 tokens, score ~50
-			newAssistantMessage(strings.Repeat("verbose ", 20)), // ~35 tokens, score ~10
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 2"),                 // ~2 tokens, score ~50
-			newAssistantMessage("short"),                        // 1 token, score ~10
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 3"),                 // ~2 tokens, score ~50
+			newSystemMessage("sys"), // 1 token, score ~1000
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 1"), // ~2 tokens, score ~50
+			newAssistantMessage(strings.Repeat("verbose ", 20)),            // ~35 tokens, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 2"), // ~2 tokens, score ~50
+			newAssistantMessage("short"),                                   // 1 token, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 3"), // ~2 tokens, score ~50
 		}
 
 		// Budget=8 should keep system + all users + short assistant
@@ -648,10 +651,10 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	t.Run("output in chronological order", func(t *testing.T) {
 		now := time.Now()
 		msgs := []schema.Message{
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"), Timestamp: now},
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "q1"), Timestamp: now.Add(1 * time.Second)},
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "a1"), Timestamp: now.Add(2 * time.Second)},
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "q2"), Timestamp: now.Add(3 * time.Second)},
+			{Message: schema.Message{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")}, Timestamp: now},
+			{Message: schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("q1")}, Timestamp: now.Add(1 * time.Second)},
+			{Message: schema.Message{Role: schema.RoleAssistant, Content: aimodel.NewTextContent("a1")}, Timestamp: now.Add(2 * time.Second)},
+			{Message: schema.Message{Role: schema.RoleUser, Content: aimodel.NewTextContent("q2")}, Timestamp: now.Add(3 * time.Second)},
 		}
 
 		result, err := c.Compress(context.Background(), msgs, 4)
@@ -683,8 +686,8 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 		rc := memory.NewImportanceRankingCompressor(reverseScorer)
 		msgs := []schema.Message{
-			newSystemMessage("sys"),      // 1 token, score=1
-			newAssistantMessage("asst"),  // 1 token, score=1000
+			newSystemMessage("sys"),                                 // 1 token, score=1
+			newAssistantMessage("asst"),                             // 1 token, score=1000
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr"), // 1 token, score=50
 		}
 
@@ -1081,11 +1084,11 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 
 	// Create messages of each type with enough tokens to test individual selection
 	msgs := []schema.Message{
-		newSystemMessage("sys"),         // score ~1000
-		newToolMessage("tool"),          // score ~100
-		newAssistantWithToolCalls("tc"), // score ~100
-		schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr"),    // score ~50
-		newAssistantMessage("plain"),    // score ~10
+		newSystemMessage("sys"),                                 // score ~1000
+		newToolMessage("tool"),                                  // score ~100
+		newAssistantWithToolCalls("tc"),                         // score ~100
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr"), // score ~50
+		newAssistantMessage("plain"),                            // score ~10
 	}
 
 	// Budget=1 should keep system message (highest score)

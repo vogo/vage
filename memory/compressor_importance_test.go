@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -53,10 +52,10 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("mixed roles budget forces drops", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),                      // 1 token, score ~1000
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr1"),                // 1 token, score ~50
-			newAssistantMessage(strings.Repeat("a", 40)), // 10 tokens, score ~10
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr2"),                // 1 token, score ~50
+			newSystemMessage("sys"),                                  // 1 token, score ~1000
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr1"), // 1 token, score ~50
+			newAssistantMessage(strings.Repeat("a", 40)),             // 10 tokens, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr2"), // 1 token, score ~50
 		}
 		// Budget=3: system(1) + usr1(1) + usr2(1) = 3, assistant(10) skipped
 		result, err := c.Compress(context.Background(), msgs, 3)
@@ -73,7 +72,7 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("system always retained first", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),           // 1 token
+			newSystemMessage("sys"), // 1 token
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user msg"), // 1 token
 		}
 		// Budget=1: system message fits, user doesn't
@@ -150,11 +149,11 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("chronological order preserved", func(t *testing.T) {
 		msgs := []schema.Message{
-			newAssistantMessage("early"),  // low score
-			newSystemMessage("sys"),       // high score
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, "mid"),  // medium score
-			newToolMessage("tool"),        // medium-high score
-			newAssistantMessage("recent"), // low score
+			newAssistantMessage("early"),                            // low score
+			newSystemMessage("sys"),                                 // high score
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "mid"), // medium score
+			newToolMessage("tool"),                                  // medium-high score
+			newAssistantMessage("recent"),                           // low score
 		}
 		// Budget enough for system + tool + user (3 tokens)
 		result, err := c.Compress(context.Background(), msgs, 3)

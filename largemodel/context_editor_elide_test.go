@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 // memArtifactWriter records every Write call and lets a test inject an
@@ -62,7 +63,7 @@ func (w *memArtifactWriter) all() []memArtifactWrite {
 }
 
 func staticSID(sid string) SessionIDFunc {
-	return func(*aimodel.ChatRequest) string { return sid }
+	return func(*largemodel.Request) string { return sid }
 }
 
 // TestElide_DisabledByDefault: without WithMaxBytesPerMessage no
@@ -102,7 +103,7 @@ func TestElide_HappyPath(t *testing.T) {
 
 	body := strings.Repeat("a", 5000)
 	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "anything"}}}},
 		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}

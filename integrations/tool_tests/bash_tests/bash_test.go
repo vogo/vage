@@ -657,7 +657,7 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 		ID:   "bash-test-agent",
 		Name: "Bash Test Agent",
 	},
-		taskagent.WithChatCompleter(client),
+		taskagent.WithCaller(client),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant with access to a bash tool. Use it to execute shell commands when asked.",

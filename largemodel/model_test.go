@@ -23,13 +23,14 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestModel_New_NoMiddleware(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "hello"),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 	}
 	mock := &mockCompleter{chatResp: resp}
@@ -51,7 +52,7 @@ func TestModel_New_WithMiddleware(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 	}
 	mock := &mockCompleter{chatResp: resp}
@@ -59,11 +60,11 @@ func TestModel_New_WithMiddleware(t *testing.T) {
 	var mwCalls int
 	mw := MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
 		return &completerFunc{
-			chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+			chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 				mwCalls++
 				return next.ChatCompletion(ctx, req)
 			},
-			stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+			stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
 				return next.ChatCompletionStream(ctx, req)
 			},
 		}
@@ -103,7 +104,7 @@ func TestModel_MultipleMiddlewares_Order(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 	}
 	mock := &mockCompleter{chatResp: resp}
@@ -112,11 +113,11 @@ func TestModel_MultipleMiddlewares_Order(t *testing.T) {
 	makeMW := func(name string) Middleware {
 		return MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
 			return &completerFunc{
-				chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+				chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 					order = append(order, name)
 					return next.ChatCompletion(ctx, req)
 				},
-				stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+				stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
 					return next.ChatCompletionStream(ctx, req)
 				},
 			}

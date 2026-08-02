@@ -29,18 +29,18 @@ import (
 type mockCompleter struct {
 	chatCalls   int
 	streamCalls int
-	chatResp    *aimodel.ChatResponse
+	chatResp    *largemodel.Response
 	chatErr     error
 	streamResp  *aimodel.Stream
 	streamErr   error
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	m.chatCalls++
 	return m.chatResp, m.chatErr
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	m.streamCalls++
 	return m.streamResp, m.streamErr
 }
@@ -69,14 +69,14 @@ func TestChainOrder(t *testing.T) {
 	mkMiddleware := func(name string) Middleware {
 		return MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
 			return &completerFunc{
-				chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+				chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 					order = append(order, name+"-before")
 					resp, err := next.ChatCompletion(ctx, req)
 					order = append(order, name+"-after")
 
 					return resp, err
 				},
-				stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+				stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
 					return next.ChatCompletionStream(ctx, req)
 				},
 			}

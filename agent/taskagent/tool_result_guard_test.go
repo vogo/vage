@@ -35,12 +35,8 @@ import (
 )
 
 func TestAgent_Run_ToolResultGuard_Block(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
-			stopResponse("noted."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
+		stopResponse("noted."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -49,7 +45,7 @@ func TestAgent_Run_ToolResultGuard_Block(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
 			Action: guard.InjectionActionBlock,
@@ -83,12 +79,8 @@ func TestAgent_Run_ToolResultGuard_Block(t *testing.T) {
 }
 
 func TestAgent_Run_ToolResultGuard_Rewrite(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
-			stopResponse("understood."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
+		stopResponse("understood."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -97,7 +89,7 @@ func TestAgent_Run_ToolResultGuard_Rewrite(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
 			Action: guard.InjectionActionRewrite,
@@ -122,12 +114,8 @@ func TestAgent_Run_ToolResultGuard_Rewrite(t *testing.T) {
 }
 
 func TestAgent_Run_ToolResultGuard_LogPassThrough(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
-			stopResponse("ok."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
+		stopResponse("ok."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -160,7 +148,7 @@ func TestAgent_Run_ToolResultGuard_LogPassThrough(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithHookManager(hm),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
@@ -207,12 +195,8 @@ func TestAgent_Run_ToolResultGuard_LogPassThrough(t *testing.T) {
 }
 
 func TestAgent_Run_ToolResultGuard_HighSeverityEscalates(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
-			stopResponse("blocked."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{"url":"..."}`),
+		stopResponse("blocked."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -222,7 +206,7 @@ func TestAgent_Run_ToolResultGuard_HighSeverityEscalates(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
 			Action:          guard.InjectionActionLog,
@@ -248,12 +232,8 @@ func TestAgent_Run_ToolResultGuard_HighSeverityEscalates(t *testing.T) {
 }
 
 func TestAgent_Run_ToolResultGuard_NotConfigured_ZeroImpact(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{}`),
-			stopResponse("ok."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{}`),
+		stopResponse("ok."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -262,7 +242,7 @@ func TestAgent_Run_ToolResultGuard_NotConfigured_ZeroImpact(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
 
@@ -280,12 +260,8 @@ func TestAgent_Run_ToolResultGuard_NotConfigured_ZeroImpact(t *testing.T) {
 }
 
 func TestAgent_Run_ToolResultGuard_IsErrorSkipped(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "fetch", `{}`),
-			stopResponse("handled."),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "fetch", `{}`),
+		stopResponse("handled."))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(schema.ToolDef{Name: "fetch"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -298,7 +274,7 @@ func TestAgent_Run_ToolResultGuard_IsErrorSkipped(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
 			Action: guard.InjectionActionBlock,
@@ -338,7 +314,7 @@ func TestAgent_RunStream_ToolResultGuard_Block(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "stream-guard"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 		WithToolResultGuards(guard.NewToolResultInjectionGuard(guard.ToolResultInjectionConfig{
 			Action: guard.InjectionActionBlock,

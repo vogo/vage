@@ -242,7 +242,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 
 	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)
@@ -333,7 +333,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 
 	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)

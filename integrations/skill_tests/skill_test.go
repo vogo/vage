@@ -30,6 +30,7 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/service"
@@ -111,10 +112,10 @@ func must(t *testing.T, err error) {
 // the system prompt and tools list.
 type capturingChatCompleter struct {
 	mu       sync.Mutex
-	requests []*aimodel.ChatRequest
+	requests []*largemodel.Request
 }
 
-func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	c.mu.Lock()
 	c.requests = append(c.requests, req)
 	c.mu.Unlock()
@@ -122,20 +123,20 @@ func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *aimodel.
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 		Usage: schema.Usage{TotalTokens: 10},
 	}, nil
 }
 
-func (c *capturingChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (c *capturingChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (c *capturingChatCompleter) getRequests() []*aimodel.ChatRequest {
+func (c *capturingChatCompleter) getRequests() []*largemodel.Request {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cp := make([]*aimodel.ChatRequest, len(c.requests))
+	cp := make([]*largemodel.Request, len(c.requests))
 	copy(cp, c.requests)
 	return cp
 }
@@ -330,7 +331,7 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	cc := &capturingChatCompleter{}
 
 	a := taskagent.New(agent.Config{ID: "skill-test-agent"},
-		taskagent.WithChatCompleter(cc),
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Base system prompt.")),
@@ -428,7 +429,7 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 
 	cc := &capturingChatCompleter{}
 	a := taskagent.New(agent.Config{ID: "multi-skill-agent"},
-		taskagent.WithChatCompleter(cc),
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)
@@ -495,7 +496,7 @@ func TestSkillNoAllowedToolsPassesAllTools(t *testing.T) {
 
 	cc := &capturingChatCompleter{}
 	a := taskagent.New(agent.Config{ID: "no-tools-agent"},
-		taskagent.WithChatCompleter(cc),
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)
@@ -544,7 +545,7 @@ func TestSkillMixedAllowedToolsPassesAll(t *testing.T) {
 
 	cc := &capturingChatCompleter{}
 	a := taskagent.New(agent.Config{ID: "mixed-agent"},
-		taskagent.WithChatCompleter(cc),
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)

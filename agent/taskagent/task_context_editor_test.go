@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
@@ -34,14 +33,10 @@ import (
 // LLM request should already see the first tool_result placeholdered;
 // the third request sees both first and second placeholdered.
 func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-			toolCallResponse("tc-2", "echo", `{"v":"b"}`),
-			toolCallResponse("tc-3", "echo", `{"v":"c"}`),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`),
+		toolCallResponse("tc-2", "echo", `{"v":"b"}`),
+		toolCallResponse("tc-3", "echo", `{"v":"c"}`),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -56,7 +51,7 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithContextEditor(editor),
 	)
@@ -118,13 +113,9 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 // guard: the same scenario without the option should keep every
 // tool_result verbatim across iterations.
 func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-			toolCallResponse("tc-2", "echo", `{"v":"b"}`),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`),
+		toolCallResponse("tc-2", "echo", `{"v":"b"}`),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -136,7 +127,7 @@ func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
 
@@ -156,11 +147,11 @@ func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
 // TestAgent_WithContextEditor_NilOption keeps the chain untouched —
 // guards against accidentally wrapping ChatCompleter with a nil mw.
 func TestAgent_WithContextEditor_NilOption(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithContextEditor(nil),
 	)
 

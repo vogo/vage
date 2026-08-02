@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"

@@ -28,16 +28,17 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
 // batchToolCallResponse returns a single-assistant-message response whose
 // ToolCalls slice contains one entry per (id, name, args) triple.
-func batchToolCallResponse(calls ...[3]string) *aimodel.ChatResponse {
-	tcs := make([]schema.ToolCall, 0, len(calls))
+func batchToolCallResponse(calls ...[3]string) *largemodel.Response {
+	tcs := make([]aimodel.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		tcs = append(tcs, schema.ToolCall{
+		tcs = append(tcs, aimodel.ToolCall{
 			ID:       c[0],
 			Type:     "function",
 			Function: aimodel.FunctionCall{Name: c[1], Arguments: c[2]},
@@ -45,10 +46,12 @@ func batchToolCallResponse(calls ...[3]string) *aimodel.ChatResponse {
 	}
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+			Message: schema.Message{
+				Role:      schema.RoleAssistant,
+				Content:   aimodel.NewTextContent(""),
 				ToolCalls: tcs,
 			},
-			FinishReason: aimodel.FinishReasonToolCalls,
+			FinishReason: largemodel.FinishReasonToolCalls,
 		}},
 		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
@@ -76,14 +79,11 @@ func (c *captureHook) Filter() []string { return nil }
 // TestParallelToolCalls_WallClockIsMax verifies AC-1.1: two concurrent 200ms
 // tool calls complete in ~200ms (max), not ~400ms (sum).
 func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "slow", `{"delay_ms":200}`},
-				[3]string{"tc-2", "slow", `{"delay_ms":200}`},
-			),
-			stopResponse("done"),
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "slow", `{"delay_ms":200}`},
+		[3]string{"tc-2", "slow", `{"delay_ms":200}`},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -94,7 +94,7 @@ func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
@@ -118,21 +118,17 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "sleep100", "{}"},
-				[3]string{"tc-2", "sleep100", "{}"},
-				[3]string{"tc-3", "sleep100", "{}"},
-				[3]string{"tc-4", "sleep100", "{}"},
-				[3]string{"tc-5", "sleep100", "{}"},
-				[3]string{"tc-6", "sleep100", "{}"},
-				[3]string{"tc-7", "sleep100", "{}"},
-				[3]string{"tc-8", "sleep100", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "sleep100", "{}"},
+		[3]string{"tc-2", "sleep100", "{}"},
+		[3]string{"tc-3", "sleep100", "{}"},
+		[3]string{"tc-4", "sleep100", "{}"},
+		[3]string{"tc-5", "sleep100", "{}"},
+		[3]string{"tc-6", "sleep100", "{}"},
+		[3]string{"tc-7", "sleep100", "{}"},
+		[3]string{"tc-8", "sleep100", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -153,7 +149,7 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 	)
@@ -182,17 +178,13 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 // Start events precede all End events, and both sequences follow ToolCalls
 // slice order even when tools finish out-of-order.
 func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "wait", `{"ms":120}`}, // slowest
-				[3]string{"tc-2", "wait", `{"ms":40}`},
-				[3]string{"tc-3", "wait", `{"ms":80}`},
-				[3]string{"tc-4", "wait", `{"ms":20}`}, // fastest
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "wait", `{"ms":120}`}, // slowest
+		[3]string{"tc-2", "wait", `{"ms":40}`},
+		[3]string{"tc-3", "wait", `{"ms":80}`},
+		[3]string{"tc-4", "wait", `{"ms":20}`}, // fastest
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -214,7 +206,7 @@ func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 		WithHookManager(mgr),
@@ -279,15 +271,11 @@ func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
 // TestParallelToolCalls_DurationIsPerCall verifies AC-2.3: the Duration field
 // on EventToolCallEnd reflects each tool's own wall-clock, not the batch total.
 func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "wait", `{"ms":50}`},
-				[3]string{"tc-2", "wait", `{"ms":150}`},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "wait", `{"ms":50}`},
+		[3]string{"tc-2", "wait", `{"ms":150}`},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -306,7 +294,7 @@ func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
 	_ = mgr.Start(context.Background())
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg), WithHookManager(mgr))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg), WithHookManager(mgr))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "two waits")},
 	})
@@ -342,16 +330,12 @@ func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
 // one failing tool does not abort the batch, and tool-result messages line
 // up 1:1 with the ToolCalls slice in original order.
 func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "ok", "{}"},
-				[3]string{"tc-2", "fail", "{}"},
-				[3]string{"tc-3", "ok", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "ok", "{}"},
+		[3]string{"tc-2", "fail", "{}"},
+		[3]string{"tc-3", "ok", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -367,7 +351,7 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "mixed")},
 	})
@@ -402,16 +386,12 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 // TestSerialToolCalls_WhenCapIsOne verifies AC-4.1: cap=1 forces serial
 // execution, which is visible as summed rather than maxed latency.
 func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "sleep50", "{}"},
-				[3]string{"tc-2", "sleep50", "{}"},
-				[3]string{"tc-3", "sleep50", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "sleep50", "{}"},
+		[3]string{"tc-2", "sleep50", "{}"},
+		[3]string{"tc-3", "sleep50", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -424,7 +404,7 @@ func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(1),
 	)
@@ -449,12 +429,8 @@ func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
 // cap being irrelevant. Also smoke-tests that the behaviour is identical
 // to the pre-P1-7 single-call code.
 func TestSingleToolCall_UsesFastPath(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse([3]string{"tc-1", "echo", `{"v":"hi"}`}),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse([3]string{"tc-1", "echo", `{"v":"hi"}`}),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -466,7 +442,7 @@ func TestSingleToolCall_UsesFastPath(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(8), // high cap but only one call
 	)

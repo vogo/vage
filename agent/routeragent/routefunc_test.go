@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -38,12 +39,12 @@ func testRoutes() []Route {
 // --- mockChatCompleter ---
 
 type mockChatCompleter struct {
-	response *aimodel.ChatResponse
+	response *largemodel.Response
 	err      error
-	captured *aimodel.ChatRequest
+	captured *largemodel.Request
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	m.captured = req
 	if m.err != nil {
 		return nil, m.err
@@ -51,15 +52,15 @@ func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 	return m.response, nil
 }
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }
 
-func llmResponse(text string, prompt, completion, total int) *aimodel.ChatResponse {
+func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
 			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
+			FinishReason: largemodel.FinishReasonStop,
 		}},
 		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	}
@@ -350,7 +351,7 @@ func TestLLMFunc_PromptContainsDescriptions(t *testing.T) {
 
 func TestLLMFunc_LLMError_NoFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -367,7 +368,7 @@ func TestLLMFunc_LLMError_NoFallback(t *testing.T) {
 
 func TestLLMFunc_LLMError_WithFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	fn := LLMFunc(mock, "test-model", 0) // fallback to first
 
 	req := &schema.RunRequest{

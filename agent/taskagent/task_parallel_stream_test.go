@@ -100,7 +100,7 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "stream-parallel"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 	)

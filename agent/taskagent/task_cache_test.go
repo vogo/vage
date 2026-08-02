@@ -33,8 +33,8 @@ import (
 // else is touched.
 func TestMarkPromptCacheBreakpoints_SystemAndTools(t *testing.T) {
 	msgs := []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
 	}
 	tools := []aimodel.Tool{
 		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
@@ -61,9 +61,9 @@ func TestMarkPromptCacheBreakpoints_SystemAndTools(t *testing.T) {
 // including" semantics so one breakpoint at the tail covers all of them.
 func TestMarkPromptCacheBreakpoints_MultipleSystem(t *testing.T) {
 	msgs := []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s2")},
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s2"),
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
 	}
 	markPromptCacheBreakpoints(msgs, nil)
 	if msgs[0].CacheBreakpoint {
@@ -78,7 +78,7 @@ func TestMarkPromptCacheBreakpoints_MultipleSystem(t *testing.T) {
 // system message at all the helper should still mark the tool cleanly.
 func TestMarkPromptCacheBreakpoints_NoSystem(t *testing.T) {
 	msgs := []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "u1"),
 	}
 	tools := []aimodel.Tool{
 		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
@@ -96,7 +96,7 @@ func TestMarkPromptCacheBreakpoints_NoSystem(t *testing.T) {
 // empty tool slice without panicking and still marks the system msg.
 func TestMarkPromptCacheBreakpoints_NoTools(t *testing.T) {
 	msgs := []schema.Message{
-		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "s1"),
 	}
 	markPromptCacheBreakpoints(msgs, nil)
 	if !msgs[0].CacheBreakpoint {
@@ -107,7 +107,7 @@ func TestMarkPromptCacheBreakpoints_NoTools(t *testing.T) {
 // TestAgent_Run_PromptCachingDefault confirms that the default-on option
 // plumbs the CacheBreakpoint flag through to the outbound ChatRequest.
 func TestAgent_Run_PromptCachingDefault(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -119,7 +119,7 @@ func TestAgent_Run_PromptCachingDefault(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSystemPrompt(prompt.StringPrompt("you are helpful")),
 	)
@@ -156,7 +156,7 @@ func TestAgent_Run_PromptCachingDefault(t *testing.T) {
 // TestAgent_Run_PromptCachingDisabled verifies that WithPromptCaching(false)
 // sends neither the system-message nor the tool-array marker.
 func TestAgent_Run_PromptCachingDisabled(t *testing.T) {
-	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	mock := newMock(stopResponse("ok"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -168,7 +168,7 @@ func TestAgent_Run_PromptCachingDisabled(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSystemPrompt(prompt.StringPrompt("you are helpful")),
 		WithPromptCaching(false),

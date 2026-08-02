@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 type captureSink struct {
@@ -52,16 +53,16 @@ func (s *captureSink) NewCorrelationID() string {
 }
 
 type stubCompleter struct {
-	resp   *aimodel.ChatResponse
+	resp   *largemodel.Response
 	err    error
 	stream *aimodel.Stream
 }
 
-func (s *stubCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (s *stubCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	return s.resp, s.err
 }
 
-func (s *stubCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (s *stubCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return s.stream, s.err
 }
 

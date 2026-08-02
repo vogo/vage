@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -50,7 +49,7 @@ func appendRunner(suffix string) *mockRunner {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -494,7 +493,7 @@ func TestExecuteDAG_InputMapper(t *testing.T) {
 				aText := upstream["A"].Messages[0].Text()
 				bText := upstream["B"].Messages[0].Text()
 				return &schema.RunRequest{
-					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText + "+" + bText)},
+					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText+"+"+bText)},
 				}, nil
 			},
 		},

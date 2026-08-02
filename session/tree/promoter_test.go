@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -33,13 +34,13 @@ import (
 // streaming path; ChatCompletionStream returns ErrNotImplemented to make
 // any accidental use noisy.
 type stubChatCompleter struct {
-	gotReq      *aimodel.ChatRequest
+	gotReq      *largemodel.Request
 	respText    string
 	respErr     error
 	streamCalls int
 }
 
-func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	s.gotReq = req
 	if s.respErr != nil {
 		return nil, s.respErr
@@ -49,7 +50,7 @@ func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 	}}}, nil
 }
 
-func (s *stubChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (s *stubChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	s.streamCalls++
 	return nil, errors.New("not implemented")
 }
@@ -147,7 +148,7 @@ func (f *fakeCompressor) Compress(_ context.Context, msgs []schema.Message, maxT
 	if f.respErr != nil {
 		return nil, f.respErr
 	}
-	out := []schema.Message{{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:" + msgs[0].Text())}}
+	out := []schema.Message{{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:"+msgs[0].Text())}}
 	return out, nil
 }
 

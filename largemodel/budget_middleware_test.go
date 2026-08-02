@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {

@@ -21,7 +21,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/schema"
@@ -38,7 +37,7 @@ func (m *markerSource) Name() string { return "marker_" + m.marker }
 func (m *markerSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchResult, error) {
 	return vctx.FetchResult{
 		Messages: []schema.Message{
-			{Role: schema.RoleSystem, Content: aimodel.NewTextContent("MARKER:" + m.marker)},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "MARKER:"+m.marker),
 		},
 		Report: schema.ContextSourceReport{
 			Source:  "marker_" + m.marker,

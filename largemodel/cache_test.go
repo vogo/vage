@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestCacheMiddleware_HitAndMiss(t *testing.T) {
@@ -32,7 +33,7 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 	ctx := context.Background()
 	req := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
 
 	// Miss: should call through.
@@ -74,10 +75,10 @@ func TestCacheMiddleware_DifferentRequests(t *testing.T) {
 	ctx := context.Background()
 
 	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
 	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("world")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "world"),
 	}}
 
 	_, _ = wrapped.ChatCompletion(ctx, req1)
@@ -175,7 +176,7 @@ func TestCacheKey_Deterministic(t *testing.T) {
 	req := &aimodel.ChatRequest{
 		Model: "gpt-4",
 		Messages: []schema.Message{
-			{Role: schema.RoleUser, Content: aimodel.NewTextContent("test")},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "test"),
 		},
 	}
 
@@ -200,7 +201,7 @@ func TestCacheKey_Deterministic(t *testing.T) {
 
 func TestCacheKey_DifferentTemperature(t *testing.T) {
 	base := []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
 	temp1 := 0.2
@@ -234,7 +235,7 @@ func TestMapCache_EvictsExpired(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	resp := func(id string) *aimodel.ChatResponse { return &aimodel.ChatResponse{ID: id} }
+	resp := func(id string) *largemodel.Response { return &aimodel.ChatResponse{ID: id} }
 
 	c.Set(ctx, "key-a", resp("a"), ttl)
 	c.Set(ctx, "key-b", resp("b"), ttl)
@@ -327,7 +328,7 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 
 func TestCacheKey_DifferentSeed(t *testing.T) {
 	base := []schema.Message{
-		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
 	seed1 := 42

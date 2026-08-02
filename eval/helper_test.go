@@ -23,6 +23,7 @@ import (
 	"math"
 
 	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -31,7 +32,10 @@ func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
+				Message: schema.Message{
+					Role:    schema.RoleAssistant,
+					Content: aimodel.NewTextContent(text),
+				},
 			},
 		},
 	}
@@ -51,11 +55,13 @@ func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 	return resp
 }
 
-func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				Message: schema.Message{
+					Role:      schema.RoleAssistant,
+					Content:   aimodel.NewTextContent(""),
 					ToolCalls: calls,
 				},
 			},
@@ -73,7 +79,7 @@ type mockCompleter struct {
 	err      error
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -84,12 +90,13 @@ func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest
 				Message: schema.Message{
 					Role:    schema.RoleAssistant,
 					Content: aimodel.NewTextContent(m.response),
+				},
 			},
 		},
 	}, nil
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }
 

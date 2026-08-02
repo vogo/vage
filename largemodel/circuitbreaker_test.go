@@ -99,14 +99,14 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	// Start with a failing backend, then switch to success for the probe.
 	failing := true
 	custom := &completerFunc{
-		chat: func(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+		chat: func(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 			if failing {
 				return nil, errFake
 			}
 
 			return &aimodel.ChatResponse{ID: "recovered"}, nil
 		},
-		stream: func(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		stream: func(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 			return nil, nil
 		},
 	}

@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/workflowagent"
 	"github.com/vogo/vage/orchestrate"
@@ -42,7 +41,7 @@ func newTextStep(id, suffix string) agent.Agent {
 			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -76,21 +75,21 @@ func TestIntegration_SequentialPipeline_EndToEnd(t *testing.T) {
 	step1 := agent.NewCustomAgent(agent.Config{ID: "translate"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		}, nil
 	})
 	step2 := agent.NewCustomAgent(agent.Config{ID: "summarize"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summary] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summary] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 		}, nil
 	})
 	step3 := agent.NewCustomAgent(agent.Config{ID: "format"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[formatted] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[formatted] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
 		}, nil
 	})
@@ -372,7 +371,7 @@ func TestIntegration_OptionsAndMetadataPassedToEachStep(t *testing.T) {
 		return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 			caps = append(caps, captured{options: req.Options, metadata: req.Metadata})
 			return &schema.RunResponse{
-				Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "out-" + id)},
+				Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "out-"+id)},
 			}, nil
 		})
 	}
@@ -730,21 +729,21 @@ func TestIntegration_DAG_DiamondPipeline(t *testing.T) {
 	stepA := agent.NewCustomAgent(agent.Config{ID: "a"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[analyzed] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[analyzed] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		}, nil
 	})
 	stepB := agent.NewCustomAgent(agent.Config{ID: "b"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 		}, nil
 	})
 	stepC := agent.NewCustomAgent(agent.Config{ID: "c"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summarized] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summarized] "+text)},
 			Usage:    &schema.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
 		}, nil
 	})
@@ -986,7 +985,7 @@ func TestIntegration_DAG_InputMapper(t *testing.T) {
 				aText := upstream["a"].Messages[0].Text()
 				bText := upstream["b"].Messages[0].Text()
 				return &schema.RunRequest{
-					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText + " | " + bText)},
+					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText+" | "+bText)},
 				}, nil
 			},
 		},
@@ -1284,7 +1283,7 @@ func TestIntegration_Loop_ConditionTermination(t *testing.T) {
 		callCount.Add(1)
 		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-step")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-step")},
 		}, nil
 	})
 	condition := func(resp *schema.RunResponse) bool {
@@ -1380,7 +1379,7 @@ func TestIntegration_Loop_OutputChaining(t *testing.T) {
 		text := req.Messages[0].Text()
 		received = append(received, text)
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "+")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"+")},
 		}, nil
 	})
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-chain"}, body, nil, 3)

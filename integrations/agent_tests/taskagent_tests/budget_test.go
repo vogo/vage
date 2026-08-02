@@ -29,6 +29,7 @@ import (
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -38,10 +39,10 @@ import (
 type mockChatCompleter struct {
 	mu        sync.Mutex
 	calls     int
-	responses []*aimodel.ChatResponse
+	responses []*largemodel.Response
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *mockChatCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -55,7 +56,7 @@ func (m *mockChatCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatReq
 	return resp, nil
 }
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
 	return nil, errors.New("not implemented in mock")
 }
 
@@ -67,12 +68,10 @@ func (m *mockChatCompleter) getCalls() int {
 }
 
 // makeStopResponse creates a stop response with the given text and total token usage.
-func makeStopResponse(text string, totalTokens int) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: aimodel.FinishReasonStop,
-		}},
+func makeStopResponse(text string, totalTokens int) *largemodel.Response {
+	return &largemodel.Response{
+		Message:      schema.NewAssistantTurn(testProtocol, text, "", nil),
+		FinishReason: largemodel.FinishReasonStop,
 		Usage: schema.Usage{
 			PromptTokens:     totalTokens / 2,
 			CompletionTokens: totalTokens - totalTokens/2,
@@ -82,18 +81,14 @@ func makeStopResponse(text string, totalTokens int) *aimodel.ChatResponse {
 }
 
 // makeToolCallResponse creates a tool call response with the given usage.
-func makeToolCallResponse(toolCallID, funcName, args string, totalTokens int) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
-				ToolCalls: []schema.ToolCall{{
-					ID:       toolCallID,
-					Type:     "function",
-					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
-				}},
-			},
-			FinishReason: aimodel.FinishReasonToolCalls,
-		}},
+func makeToolCallResponse(toolCallID, funcName, args string, totalTokens int) *largemodel.Response {
+	return &largemodel.Response{
+		Message: schema.NewAssistantTurn(testProtocol, "", "", []schema.ToolCall{{
+			ID:        toolCallID,
+			Name:      funcName,
+			Arguments: args,
+		}}),
+		FinishReason: largemodel.FinishReasonToolCalls,
 		Usage: schema.Usage{
 			PromptTokens:     totalTokens / 2,
 			CompletionTokens: totalTokens - totalTokens/2,
@@ -153,18 +148,15 @@ func collectEvents(hm *hook.Manager) *[]schema.Event {
 //   - Messages contains the last assistant response.
 //   - No error is returned.
 func TestBudgetExhaustion_Run_PartialResults(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Iteration 1: tool call using 100 tokens
-			makeToolCallResponse("tc-1", "do_thing", "{}", 100),
-			// Iteration 2: tool call using 100 tokens (budget hits 200, exhausted)
-			makeToolCallResponse("tc-2", "do_thing", "{}", 100),
-			// Iteration 3: should NOT be reached
-			makeStopResponse("should not reach this", 100),
-	}
+	mock := newMock( // Iteration 1: tool call using 100 tokens
+		makeToolCallResponse("tc-1", "do_thing", "{}", 100),
+		// Iteration 2: tool call using 100 tokens (budget hits 200, exhausted)
+		makeToolCallResponse("tc-2", "do_thing", "{}", 100),
+		// Iteration 3: should NOT be reached
+		makeStopResponse("should not reach this", 100))
 
 	a := taskagent.New(agent.Config{ID: "budget-test-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("do_thing")),
 		taskagent.WithRunTokenBudget(200),
 		taskagent.WithMaxIterations(10),
@@ -220,15 +212,11 @@ func TestBudgetExhaustion_EmitsCorrectEvents(t *testing.T) {
 	hm := hook.NewManager()
 	events := collectEvents(hm)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Single tool call that uses 500 tokens, budget is 100
-			makeToolCallResponse("tc-1", "tool1", "{}", 500),
-		},
-	}
+	mock := newMock( // Single tool call that uses 500 tokens, budget is 100
+		makeToolCallResponse("tc-1", "tool1", "{}", 500))
 
 	a := taskagent.New(agent.Config{ID: "event-test-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
 		taskagent.WithHookManager(hm),
@@ -311,16 +299,12 @@ func TestUnlimitedBudget_PreservesBehavior(t *testing.T) {
 	hm := hook.NewManager()
 	events := collectEvents(hm)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Tool call + follow-up response, all should complete normally
-			makeToolCallResponse("tc-1", "tool1", "{}", 1000),
-			makeStopResponse("All done!", 500),
-		},
-	}
+	mock := newMock( // Tool call + follow-up response, all should complete normally
+		makeToolCallResponse("tc-1", "tool1", "{}", 1000),
+		makeStopResponse("All done!", 500))
 
 	a := taskagent.New(agent.Config{ID: "unlimited-budget-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithHookManager(hm),
 		// No WithRunTokenBudget -- defaults to 0 (unlimited)
@@ -366,17 +350,13 @@ func TestUnlimitedBudget_PreservesBehavior(t *testing.T) {
 // RunOptions.RunTokenBudget = 50. Verifies the 50-token budget is enforced,
 // not the 10000 agent default.
 func TestPerRequestBudgetOverride(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// First call uses 100 tokens, which exceeds the per-request budget of 50
-			makeToolCallResponse("tc-1", "tool1", "{}", 100),
-			// This should not be reached
-			makeStopResponse("should not reach", 100),
-		},
-	}
+	mock := newMock( // First call uses 100 tokens, which exceeds the per-request budget of 50
+		makeToolCallResponse("tc-1", "tool1", "{}", 100),
+		// This should not be reached
+		makeStopResponse("should not reach", 100))
 
 	a := taskagent.New(agent.Config{ID: "override-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(10000), // Agent default: generous budget
 	)
@@ -422,19 +402,15 @@ func TestMaxIterationsExhaustion_ReturnsPartialResult(t *testing.T) {
 	hm := hook.NewManager()
 	events := collectEvents(hm)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Iteration 1: tool call
-			makeToolCallResponse("tc-1", "looper", "{}", 50),
-			// Iteration 2: tool call (max iterations reached after this)
-			makeToolCallResponse("tc-2", "looper", "{}", 50),
-			// Iteration 3: should not be reached
-			makeStopResponse("should not reach", 50),
-		},
-	}
+	mock := newMock( // Iteration 1: tool call
+		makeToolCallResponse("tc-1", "looper", "{}", 50),
+		// Iteration 2: tool call (max iterations reached after this)
+		makeToolCallResponse("tc-2", "looper", "{}", 50),
+		// Iteration 3: should not be reached
+		makeStopResponse("should not reach", 50))
 
 	a := taskagent.New(agent.Config{ID: "maxiter-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("looper")),
 		taskagent.WithMaxIterations(2),
 		taskagent.WithHookManager(hm),
@@ -502,18 +478,14 @@ func TestMaxIterationsExhaustion_ReturnsPartialResult(t *testing.T) {
 // exhaustion. Verifies the returned messages have been processed by the output
 // guard.
 func TestBudgetExhaustion_OutputGuardsRun(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Tool call response with high usage to exhaust budget.
-			// Budget is 100, usage is 500 -- exhausted in post-call check.
-			makeToolCallResponse("tc-1", "tool1", "{}", 500),
-		},
-	}
+	mock := newMock( // Tool call response with high usage to exhaust budget.
+		// Budget is 100, usage is 500 -- exhausted in post-call check.
+		makeToolCallResponse("tc-1", "tool1", "{}", 500))
 
 	outputGuard := &rewriteGuard{replacement: "GUARDED OUTPUT"}
 
 	a := taskagent.New(agent.Config{ID: "guard-budget-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
 		taskagent.WithOutputGuards(outputGuard),
@@ -556,15 +528,11 @@ func TestBudgetExhaustion_RunToStream_CleanClose(t *testing.T) {
 	hm := hook.NewManager()
 	hookEvents := collectEvents(hm)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Tool call with 500 tokens, budget is 100 -> exhausted
-			makeToolCallResponse("tc-1", "tool1", "{}", 500),
-		},
-	}
+	mock := newMock( // Tool call with 500 tokens, budget is 100 -> exhausted
+		makeToolCallResponse("tc-1", "tool1", "{}", 500))
 
 	a := taskagent.New(agent.Config{ID: "stream-budget-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
 		taskagent.WithHookManager(hm),
@@ -652,17 +620,13 @@ func TestBudgetExhaustion_RunToStream_CleanClose(t *testing.T) {
 // then be stopped before a third call. Since the second call finishes with a stop
 // reason, the agent should return normally.
 func TestBudgetExact_CompletesNormally(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			// Iteration 1: tool call using 100 tokens
-			makeToolCallResponse("tc-1", "tool1", "{}", 100),
-			// Iteration 2: final text response using 100 tokens (total = 200 = budget)
-			makeStopResponse("Done!", 100),
-		},
-	}
+	mock := newMock( // Iteration 1: tool call using 100 tokens
+		makeToolCallResponse("tc-1", "tool1", "{}", 100),
+		// Iteration 2: final text response using 100 tokens (total = 200 = budget)
+		makeStopResponse("Done!", 100))
 
 	a := taskagent.New(agent.Config{ID: "exact-budget-agent"},
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(200),
 		taskagent.WithMaxIterations(10),
