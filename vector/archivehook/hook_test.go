@@ -114,7 +114,7 @@ func TestHandle_HappyPath_AddsDocument(t *testing.T) {
 	docs, _ := store.List(context.Background())
 	doc := docs[0]
 	if doc.Text != "Implemented the feature with tests passing" {
-		t.Errorf("Text = %q", doc.Text())
+		t.Errorf("Text = %q", doc.Text)
 	}
 	if got, _ := doc.Metadata["session_id"].(string); got != "sess-1" {
 		t.Errorf("session_id = %q", got)

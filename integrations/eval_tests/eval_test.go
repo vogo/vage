@@ -23,7 +23,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/eval"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
@@ -55,7 +54,7 @@ func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 }
 
 // makeResponseWithToolCalls creates a RunResponse with assistant tool call messages.
-func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", calls),
@@ -296,8 +295,8 @@ func TestIntegration_ToolCall_SequenceMatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	searchCall := aimodel.ToolCall{Name: "search"}
-	calcCall := aimodel.ToolCall{Name: "calculate"}
+	searchCall := schema.ToolCall{Name: "search"}
+	calcCall := schema.ToolCall{Name: "calculate"}
 
 	// Full match.
 	c1 := &eval.EvalCase{
@@ -371,13 +370,13 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 
 	ctx := context.Background()
 
-	expectedCall := aimodel.ToolCall{
+	expectedCall := schema.ToolCall{
 		Name:      "search",
 		Arguments: `{"q":"hello"}`}
-	matchingCall := aimodel.ToolCall{
+	matchingCall := schema.ToolCall{
 		Name:      "search",
 		Arguments: `{"q":"hello"}`}
-	differentArgsCall := aimodel.ToolCall{
+	differentArgsCall := schema.ToolCall{
 		Name:      "search",
 		Arguments: `{"q":"world"}`}
 
@@ -1090,14 +1089,12 @@ type mockCompleter struct {
 	response string
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{
-			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, m.response),
-		},
-	}, nil
+func (m *mockCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (m *mockCompleter) Call(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, m.response, schema.Usage{}), nil
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
+func (m *mockCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }

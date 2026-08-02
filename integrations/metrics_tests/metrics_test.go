@@ -26,7 +26,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
@@ -73,7 +72,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
 		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
@@ -149,7 +148,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	stream, err := wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{
+	stream, err := wrapped.CallStream(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
 		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
@@ -239,7 +238,7 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	_, err = wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{
+	_, err = wrapped.Call(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
 		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})

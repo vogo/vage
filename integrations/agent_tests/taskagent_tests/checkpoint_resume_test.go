@@ -65,7 +65,7 @@ func TestCheckpoint_AC_2_1_KIterationsKCheckpoints(t *testing.T) {
 	}
 	responses = append(responses, makeStopResponse("done", 50))
 
-	mock := &mockChatCompleter{responses: responses}
+	mock := newMock(responses...)
 	store := checkpoint.NewMapIterationStore()
 
 	a := taskagent.New(agent.Config{ID: "agent-k"},

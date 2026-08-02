@@ -46,8 +46,9 @@ import (
 // Prerequisites: AI_API_KEY, AI_BASE_URL, OPENAI_MODEL environment variables.
 func TestAgentAsToolIntegration(t *testing.T) {
 	// Create aimodel client from environment variables.
-	client, err := aimodel.NewClient(
-		aimodel.WithDefaultModel(aimodel.GetEnv("OPENAI_MODEL")),
+	client, err := largemodel.NewOpenAIChatCaller(
+		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
+		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Logf("Failed to create aimodel client (missing API keys?): %v", err)

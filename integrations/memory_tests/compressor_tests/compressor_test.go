@@ -412,7 +412,7 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 			summarizedMsgs = msgs
 			var parts []string
 			for _, m := range msgs {
-				parts = append(parts, fmt.Sprintf("[%s]: %s", m.Role, m.Text()))
+				parts = append(parts, fmt.Sprintf("[%s]: %s", m.Role(), m.Text()))
 			}
 			return "Previous conversation: " + strings.Join(parts, "; "), nil
 		}
@@ -615,7 +615,7 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 		hasToolCall := false
 		hasToolResult := false
 		for _, m := range result {
-			if m.Role() == schema.RoleAssistant && len(m.ToolCalls) > 0 {
+			if m.Role() == schema.RoleAssistant && len(m.ToolCalls()) > 0 {
 				hasToolCall = true
 			}
 			if m.Role() == schema.RoleTool {
@@ -632,7 +632,6 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 	// Test: output preserves chronological order.
 	t.Run("output in chronological order", func(t *testing.T) {
-		now := time.Now()
 		msgs := []schema.Message{
 			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "q1"),
@@ -657,7 +656,7 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	t.Run("custom scorer reverses priority", func(t *testing.T) {
 		// Scorer that prioritizes assistant messages over system
 		reverseScorer := func(messages []schema.Message, index int) float64 {
-			switch messages[index].Role {
+			switch messages[index].Role() {
 			case schema.RoleAssistant:
 				return 1000
 			case schema.RoleSystem:

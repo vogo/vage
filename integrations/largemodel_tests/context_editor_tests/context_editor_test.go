@@ -34,8 +34,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/hook"
@@ -62,7 +60,7 @@ func (r *recordingCompleter) snapshot() []*largemodel.Request { return r.Request
 // stopResponse returns a minimal assistant "stop" response.
 func stopResponse(text string) *largemodel.Response {
 	return &largemodel.Response{
-		Message:      schema.NewAssistantTurn(testProtocol, text, "", nil),
+		Message:      schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", nil),
 		FinishReason: largemodel.FinishReasonStop,
 		Usage:        schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}
@@ -71,7 +69,7 @@ func stopResponse(text string) *largemodel.Response {
 // toolCallResponse returns an assistant tool_calls response with a single call.
 func toolCallResponse(toolCallID, name, args string) *largemodel.Response {
 	return &largemodel.Response{
-		Message: schema.NewAssistantTurn(testProtocol, "", "", []schema.ToolCall{{
+		Message: schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{
 			ID:        toolCallID,
 			Name:      name,
 			Arguments: args,
@@ -123,7 +121,7 @@ func assistantToolCallIDs(msgs []schema.Message) []string {
 	var ids []string
 	for _, m := range msgs {
 		if m.Role() == schema.RoleAssistant {
-			for _, tc := range m.ToolCalls {
+			for _, tc := range m.ToolCalls() {
 				ids = append(ids, tc.ID)
 			}
 		}
@@ -137,7 +135,7 @@ func toolResultIDs(msgs []schema.Message) []string {
 	var ids []string
 	for _, m := range msgs {
 		if m.Role() == schema.RoleTool {
-			ids = append(ids, m.ToolCallID)
+			ids = append(ids, m.ToolCallID())
 		}
 	}
 	return ids
@@ -152,15 +150,13 @@ func toolResultIDs(msgs []schema.Message) []string {
 // that the final RunResponse text is unaffected.
 func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 	const k = 2
-	rc := &recordingCompleter{
-		chatResponses: []*largemodel.Response{
-			toolCallResponse("call-1", "echo", `{"i":1}`),
-			toolCallResponse("call-2", "echo", `{"i":2}`),
-			toolCallResponse("call-3", "echo", `{"i":3}`),
-			toolCallResponse("call-4", "echo", `{"i":4}`),
-			stopResponse("FINAL_OUTPUT"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{"i":1}`),
+		toolCallResponse("call-2", "echo", `{"i":2}`),
+		toolCallResponse("call-3", "echo", `{"i":3}`),
+		toolCallResponse("call-4", "echo", `{"i":4}`),
+		stopResponse("FINAL_OUTPUT"),
+	}}}
 
 	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(k))
 	a := taskagent.New(
@@ -263,15 +259,13 @@ func TestIntegration_ContextEditor_EventEmission(t *testing.T) {
 		largemodel.WithContextEditDispatch(mgr.Dispatch),
 	)
 
-	rc := &recordingCompleter{
-		chatResponses: []*largemodel.Response{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			toolCallResponse("call-4", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		toolCallResponse("call-4", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-evt"},
@@ -361,24 +355,24 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 	// Build a request directly so we can compare slice headers — the
 	// TaskAgent path always re-allocates messages, so we exercise the
 	// middleware in isolation here.
-	req := &openai.ChatCompletionRequest{
+	req := &largemodel.Request{
 		Model: "test",
 		Messages: []schema.Message{
 			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi"),
-			{Role: schema.RoleAssistant, ToolCalls: []aimodel.ToolCall{
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
 				{ID: "t-1", Name: "x"},
 				{ID: "t-2", Name: "x"},
-			}},
+			}),
 			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-1", "a", false),
 			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-2", "b", false),
 		},
 	}
 
-	rc := &recordingCompleter{chatResponses: []*largemodel.Response{stopResponse("ok")}}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{stopResponse("ok")}}}
 	wrapped := editor.Wrap(rc)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -416,14 +410,14 @@ func TestIntegration_ContextEditor_MinElidedBytesThreshold(t *testing.T) {
 		largemodel.WithContextEditDispatch(mgr.Dispatch),
 	)
 
-	rc := &recordingCompleter{
-		chatResponses: []*largemodel.Response{
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
 			toolCallResponse("call-1", "echo", `{}`),
 			toolCallResponse("call-2", "echo", `{}`),
 			toolCallResponse("call-3", "echo", `{}`),
 			stopResponse("done"),
 		},
-	}
+	}}
 
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-thresh"},
@@ -532,15 +526,13 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 // regression guard: a TaskAgent constructed without WithContextEditor
 // must run identical scenarios with zero elisions in any request.
 func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
-	rc := &recordingCompleter{
-		chatResponses: []*largemodel.Response{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			toolCallResponse("call-4", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		toolCallResponse("call-4", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	a := taskagent.New(
 		agent.Config{ID: "no-editor"},
@@ -575,14 +567,12 @@ func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
 // LLM's stop text (no corruption) and that NO request claims more
 // tool_results than were actually executed.
 func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.T) {
-	rc := &recordingCompleter{
-		chatResponses: []*largemodel.Response{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(1))
 	a := taskagent.New(
@@ -661,39 +651,46 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 // — duplicated here because they are package-private to taskagent).
 // ---------------------------------------------------------------------
 
-// streamCapturer wraps an inner ChatCompleter and records every
-// outbound ChatCompletionStream request it forwards. It is the stream
-// counterpart of recordingCompleter and lets the test assert on the
-// post-edit messages without needing access to taskagent internals.
+// streamCapturer wraps an inner Caller and records every outbound request it
+// forwards. It is the stream counterpart of recordingCompleter and lets the
+// test assert on the post-edit messages without needing access to taskagent
+// internals.
 type streamCapturer struct {
 	mu       sync.Mutex
-	inner    aimodel.ChatCompleter
+	inner    largemodel.Caller
 	requests []*largemodel.Request
 }
 
-func (s *streamCapturer) ChatCompletion(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+// record snapshots a request so later mutation by the callee cannot alter
+// what the test observes.
+func (s *streamCapturer) record(req *largemodel.Request) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	snap := *req
 	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	s.Requests() = append(s.Requests(), &snap)
-	s.mu.Unlock()
-	return s.inner.ChatCompletion(ctx, req)
+	s.requests = append(s.requests, &snap)
 }
 
-func (s *streamCapturer) ChatCompletionStream(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
-	s.mu.Lock()
-	snap := *req
-	snap.Messages = append([]schema.Message(nil), req.Messages...)
-	s.Requests() = append(s.Requests(), &snap)
-	s.mu.Unlock()
-	return s.inner.ChatCompletionStream(ctx, req)
+func (s *streamCapturer) Protocol() schema.Protocol { return s.inner.Protocol() }
+
+func (s *streamCapturer) Call(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	s.record(req)
+
+	return s.inner.Call(ctx, req)
+}
+
+func (s *streamCapturer) CallStream(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+	s.record(req)
+
+	return s.inner.CallStream(ctx, req)
 }
 
 func (s *streamCapturer) snapshot() []*largemodel.Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*largemodel.Request, len(s.Requests()))
-	copy(out, s.Requests())
+	out := make([]*largemodel.Request, len(s.requests))
+	copy(out, s.requests)
 	return out
 }
 

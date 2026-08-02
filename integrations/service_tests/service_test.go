@@ -36,6 +36,13 @@ import (
 
 // newTestService creates a Service with mock agents and tools registered,
 // and returns an httptest.Server for testing.
+// withAgent stamps the producing agent onto a message.
+func withAgent(msg schema.Message, agentID string) schema.Message {
+	msg.AgentID = agentID
+
+	return msg
+}
+
 func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 	t.Helper()
 
@@ -63,10 +70,7 @@ func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 		}
 
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewAssistantMessage(
-				schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "echo: "+text),
-				"echo",
-			)},
+			Messages:  []schema.Message{withAgent(schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "echo: "+text), "echo")},
 			SessionID: req.SessionID,
 		}, nil
 	})
@@ -86,10 +90,7 @@ func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 		}
 
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewAssistantMessage(
-				schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "done"),
-				"slow",
-			)},
+			Messages: []schema.Message{withAgent(schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "done"), "slow")},
 		}, nil
 	})
 

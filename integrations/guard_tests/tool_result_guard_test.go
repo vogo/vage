@@ -52,6 +52,13 @@ type mockChatCompleter struct {
 	*largemodel.FakeCaller
 }
 
+// testProtocol is the wire form these guard tests script against.
+const testProtocol = schema.ProtocolOpenAIChat
+
+func newMock(responses ...*largemodel.Response) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+}
+
 // toolCallResponseTR builds a ChatResponse that triggers a single tool call.
 func toolCallResponseTR(toolCallID, funcName, args string) *largemodel.Response {
 	return &largemodel.Response{
@@ -317,8 +324,8 @@ func TestIntegration_ToolResultGuard_EndToEnd_Log(t *testing.T) {
 	if got.ToolName != "fetch" {
 		t.Errorf("event.ToolName = %q, want fetch", got.ToolName)
 	}
-	if got.ToolCallID() != "tc-1" {
-		t.Errorf("event.ToolCallID = %q, want tc-1", got.ToolCallID())
+	if got.ToolCallID != "tc-1" {
+		t.Errorf("event.ToolCallID = %q, want tc-1", got.ToolCallID)
 	}
 	if !slices.Contains(got.RuleHits, "ignore_instructions") {
 		t.Errorf("expected ignore_instructions in rule_hits, got %v", got.RuleHits)

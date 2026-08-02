@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/routeragent"
 	"github.com/vogo/vage/largemodel"
@@ -82,12 +81,29 @@ type mockChatCompleter struct {
 	*largemodel.FakeCaller
 }
 
-func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
-	return &aimodel.ChatResponse{
-		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-		FinishReason: largemodel.FinishReasonStop,
-		Usage:        schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+func newMock(resp *largemodel.Response) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{resp},
+	}}
+}
+
+// captured returns the request the router sent, or nil if it sent none.
+func (m *mockChatCompleter) captured() *largemodel.Request {
+	reqs := m.Requests()
+	if len(reqs) == 0 {
+		return nil
 	}
+
+	return reqs[0]
+}
+
+func newMockErr(err error) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Err: err}}
+}
+
+func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, text,
+		schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total})
 }
 
 // --- Integration Tests ---
@@ -779,7 +795,7 @@ func TestIntegration_LLMRouting_EndToEnd(t *testing.T) {
 		{Agent: newTextAgent("email-agent", " [email]"), Description: "Handles email operations"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "llm-router", Name: "LLM Router", Description: "routes via LLM"},
 		routes,
@@ -811,7 +827,7 @@ func TestIntegration_LLMRouting_UsageAggregation(t *testing.T) {
 	}
 
 	// LLM routing costs (8, 2, 10)
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -846,7 +862,7 @@ func TestIntegration_LLMRouting_UsageAggregation_AgentNoUsage(t *testing.T) {
 		{Agent: newTextAgent("sub", ""), Description: "agent without usage"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -927,7 +943,7 @@ func TestIntegration_LLMRouting_InvalidResponse_Fallback(t *testing.T) {
 		{Agent: newTextAgent("other", " [other]"), Description: "other"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("I think you should use agent 0", 5, 3, 8)}
+	mock := newMock(llmResponse("I think you should use agent 0", 5, 3, 8))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -955,7 +971,7 @@ func TestIntegration_LLMRouting_PromptVerification(t *testing.T) {
 		{Agent: newTextAgent("c", ""), Description: "Sends emails"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	fn := routeragent.LLMFunc(mock, "my-model", -1)
 
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(fn))
@@ -967,14 +983,14 @@ func TestIntegration_LLMRouting_PromptVerification(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if mock.captured == nil {
+	if mock.captured() == nil {
 		t.Fatal("expected captured request")
 	}
-	if mock.captured.Model != "my-model" {
-		t.Errorf("Model = %q, want %q", mock.captured.Model, "my-model")
+	if mock.captured().Model != "my-model" {
+		t.Errorf("Model = %q, want %q", mock.captured().Model, "my-model")
 	}
 
-	sysText := mock.captured.Messages[0].Text()
+	sysText := mock.captured().Messages[0].Text()
 	for _, desc := range []string{"Handles weather queries", "Manages calendar events", "Sends emails"} {
 		if !strings.Contains(sysText, desc) {
 			t.Errorf("system prompt missing description %q", desc)
@@ -987,7 +1003,7 @@ func TestIntegration_LLMRouting_PromptVerification(t *testing.T) {
 		}
 	}
 
-	userText := mock.captured.Messages[1].Text()
+	userText := mock.captured().Messages[1].Text()
 	if userText != "What's the forecast?" {
 		t.Errorf("user text = %q, want %q", userText, "What's the forecast?")
 	}
@@ -999,7 +1015,7 @@ func TestIntegration_LLMRouting_RunStream(t *testing.T) {
 		{Agent: newTextAgent("sub", "-llm-streamed"), Description: "agent"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	ra := routeragent.New(
 		agent.Config{ID: "llm-stream-rt"},
 		routes,

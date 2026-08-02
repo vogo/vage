@@ -41,8 +41,9 @@ import (
 
 func TestTaskAgentIntegration(t *testing.T) {
 	// Create aimodel client. Reads AI_API_KEY / AI_BASE_URL / AI_MODEL from env.
-	client, err := aimodel.NewClient(
-		aimodel.WithDefaultModel(aimodel.GetEnv("OPENAI_MODEL")),
+	client, err := largemodel.NewOpenAIChatCaller(
+		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
+		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Logf("Failed to create aimodel client: %v", err)

@@ -39,6 +39,13 @@ type mockChatCompleter struct {
 	*largemodel.FakeCaller
 }
 
+// testProtocol is the wire form these integration tests script against.
+const testProtocol = schema.ProtocolOpenAIChat
+
+func newMock(responses ...*largemodel.Response) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+}
+
 func (m *mockChatCompleter) getCalls() int { return m.Calls() }
 
 // makeStopResponse creates a stop response with the given text and total token usage.

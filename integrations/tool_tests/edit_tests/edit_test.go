@@ -25,7 +25,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 	"github.com/vogo/vage/tool/edit"
 	"github.com/vogo/vage/tool/read"
@@ -706,14 +705,10 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Errorf("expected additionalProperties=false, got %v", params["additionalProperties"])
 	}
 
-	// Verify conversion to aimodel.Tool works.
-	aiTools := tool.ToAIModelTools([]schema.ToolDef{def})
-	if len(aiTools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(aiTools))
-	}
-
-	if aiTools[0].Function.Name != "edit" {
-		t.Errorf("expected function name 'edit', got %q", aiTools[0].Function.Name)
+	// The tool definition travels on the request as-is; the protocol caller
+	// renders it into the vendor's own tool shape.
+	if def.Name != "edit" {
+		t.Errorf("expected tool name 'edit', got %q", def.Name)
 	}
 }
 
