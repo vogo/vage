@@ -68,9 +68,7 @@ func TestAgentAsToolIntegration(t *testing.T) {
 			translation := fmt.Sprintf("Bonjour, le monde! (translated from: %s)", input)
 			return &schema.RunResponse{
 				Messages: []schema.Message{
-					{
-						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, translation),
-					},
+					schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, translation),
 				},
 			}, nil
 		},
@@ -158,9 +156,7 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 			input := req.Messages[0].Text()
 			return &schema.RunResponse{
 				Messages: []schema.Message{
-					{
-						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
-					},
+					schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
 				},
 			}, nil
 		},
@@ -371,13 +367,9 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 			func(_ context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
 				return &schema.RunResponse{
 					Messages: []schema.Message{
-						{
-							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "First line"),
-						},
+						schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "First line"),
 						schema.NewUserMessage(schema.ProtocolOpenAIChat, ""),
-						{
-							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Second line"),
-						},
+						schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Second line"),
 					},
 				}, nil
 			},

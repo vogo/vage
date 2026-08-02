@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -49,8 +48,8 @@ func newToolMessage(text string) schema.Message {
 
 func newAssistantWithToolCalls(text string) schema.Message {
 	return schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", []schema.ToolCall{
-		{ID: "call-1", Name:      "test_tool",
-		Arguments: "{}"}})
+		{ID: "call-1", Name: "test_tool",
+			Arguments: "{}"}})
 }
 
 // =============================================================================

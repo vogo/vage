@@ -39,9 +39,7 @@ func makeEchoAgent(t *testing.T, gotCtx *context.Context) *mockAgent {
 			*gotCtx = ctx
 			input := req.Messages[0].Text()
 			return &schema.RunResponse{
-				Messages: []schema.Message{{
-					Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
-				}},
+				Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input)},
 			}, nil
 		})
 }

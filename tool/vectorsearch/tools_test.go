@@ -104,7 +104,7 @@ func TestVectorAdd_HappyPath(t *testing.T) {
 	}
 	docs, _ := store.List(context.Background())
 	if docs[0].Text != "alpha topic content body" {
-		t.Errorf("text round-trip wrong: %q", docs[0].Text())
+		t.Errorf("text round-trip wrong: %q", docs[0].Text)
 	}
 	if topic, _ := docs[0].Metadata["topic"].(string); topic != "alpha" {
 		t.Errorf("metadata not stored: %+v", docs[0].Metadata)

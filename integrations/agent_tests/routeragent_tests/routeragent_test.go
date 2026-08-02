@@ -86,7 +86,7 @@ func llmResponse(text string, prompt, completion, total int) *largemodel.Respons
 	return &aimodel.ChatResponse{
 		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 		FinishReason: largemodel.FinishReasonStop,
-		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+		Usage:        schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	}
 }
 

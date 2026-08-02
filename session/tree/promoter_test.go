@@ -23,16 +23,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
 
-// stubChatCompleter is a minimal ChatCompleter that records the incoming
-// request and returns a hard-coded response. The tests do not exercise the
-// streaming path; ChatCompletionStream returns ErrNotImplemented to make
-// any accidental use noisy.
+// stubChatCompleter is a minimal Caller that records the incoming request and
+// returns a hard-coded response. The tests do not exercise the streaming
+// path; CallStream returns an error to make any accidental use noisy.
 type stubChatCompleter struct {
 	gotReq      *largemodel.Request
 	respText    string
@@ -40,18 +38,20 @@ type stubChatCompleter struct {
 	streamCalls int
 }
 
-func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+func (s *stubChatCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (s *stubChatCompleter) Call(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	s.gotReq = req
 	if s.respErr != nil {
 		return nil, s.respErr
 	}
-	return &aimodel.ChatResponse{Choices: []aimodel.Choice{{
-		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, s.respText),
-	}}}, nil
+
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, s.respText, schema.Usage{}), nil
 }
 
-func (s *stubChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
+func (s *stubChatCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	s.streamCalls++
+
 	return nil, errors.New("not implemented")
 }
 
@@ -98,8 +98,8 @@ func TestLLMPromoter_HappyPath(t *testing.T) {
 	if !strings.Contains(userBody, "Build OAuth") || !strings.Contains(userBody, "design schema") {
 		t.Errorf("user body missing parent/child: %q", userBody)
 	}
-	if cli.gotReq.MaxCompletionTokens == nil || *cli.gotReq.MaxCompletionTokens != defaultLLMPromoterMaxTokens {
-		t.Errorf("MaxCompletionTokens not set to default: %v", cli.gotReq.MaxCompletionTokens)
+	if cli.gotReq.MaxTokens == nil || *cli.gotReq.MaxTokens != defaultLLMPromoterMaxTokens {
+		t.Errorf("MaxCompletionTokens not set to default: %v", cli.gotReq.MaxTokens)
 	}
 }
 

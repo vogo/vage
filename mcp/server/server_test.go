@@ -67,10 +67,7 @@ func (a *testAgent) Run(_ context.Context, req *schema.RunRequest) (*schema.RunR
 	}
 
 	return &schema.RunResponse{
-		Messages: []schema.Message{schema.NewAssistantMessage(
-			schema.NewUserMessage(schema.ProtocolOpenAIChat, text).Message,
-			a.ID(),
-		)},
+		Messages: []schema.Message{schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", nil)},
 	}, nil
 }
 
