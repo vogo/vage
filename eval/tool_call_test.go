@@ -21,7 +21,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -50,7 +49,7 @@ func TestToolCallEval_NoExpected(t *testing.T) {
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "no-expected",
-		Actual: makeResponseWithToolCalls(schema.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}),
+		Actual: makeResponseWithToolCalls(schema.ToolCall{Name: "search"}),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -64,8 +63,8 @@ func TestToolCallEval_NoExpected(t *testing.T) {
 func TestToolCallEval_FullMatch(t *testing.T) {
 	e, _ := NewToolCallEval(nil)
 
-	search := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calc := schema.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	search := schema.ToolCall{Name: "search"}
+	calc := schema.ToolCall{Name: "calculate"}
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "full",
@@ -84,8 +83,8 @@ func TestToolCallEval_FullMatch(t *testing.T) {
 func TestToolCallEval_PartialMatch(t *testing.T) {
 	e, _ := NewToolCallEval(nil)
 
-	search := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calc := schema.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	search := schema.ToolCall{Name: "search"}
+	calc := schema.ToolCall{Name: "calculate"}
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "partial",
@@ -108,7 +107,7 @@ func TestToolCallEval_PartialMatch(t *testing.T) {
 func TestToolCallEval_StrictArgs_Match(t *testing.T) {
 	e, _ := NewToolCallEval(&ToolCallConfig{StrictArgs: true})
 
-	call := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`}}
+	call := schema.ToolCall{Name: "search", Arguments: `{"q":"hello"}`}
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "strict-match",
@@ -127,8 +126,8 @@ func TestToolCallEval_StrictArgs_Match(t *testing.T) {
 func TestToolCallEval_StrictArgs_Mismatch(t *testing.T) {
 	e, _ := NewToolCallEval(&ToolCallConfig{StrictArgs: true})
 
-	expected := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`}}
-	actual := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"world"}`}}
+	expected := schema.ToolCall{Name: "search", Arguments: `{"q":"hello"}`}
+	actual := schema.ToolCall{Name: "search", Arguments: `{"q":"world"}`}
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "strict-mismatch",

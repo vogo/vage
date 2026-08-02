@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
@@ -38,32 +37,36 @@ func testRoutes() []Route {
 
 // --- mockChatCompleter ---
 
+// mockChatCompleter scripts one routing response. It wraps
+// largemodel.FakeCaller so the dual-track envelope handling lives in one
+// shared place.
 type mockChatCompleter struct {
-	response *largemodel.Response
-	err      error
-	captured *largemodel.Request
+	*largemodel.FakeCaller
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-	m.captured = req
-	if m.err != nil {
-		return nil, m.err
+func newMock(resp *largemodel.Response) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{resp},
+	}}
+}
+
+func newMockErr(err error) *mockChatCompleter {
+	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Err: err}}
+}
+
+// captured returns the request the router sent, or nil if it sent none.
+func (m *mockChatCompleter) captured() *largemodel.Request {
+	reqs := m.Requests()
+	if len(reqs) == 0 {
+		return nil
 	}
-	return m.response, nil
-}
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+	return reqs[0]
 }
 
 func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
-		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
-	}
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, text,
+		schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total})
 }
 
 // --- FirstFunc ---
@@ -265,7 +268,7 @@ func TestRandomFunc_EmptyRoutes(t *testing.T) {
 
 func TestLLMFunc_SelectsCorrectRoute(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("1", 10, 5, 15)}
+	mock := newMock(llmResponse("1", 10, 5, 15))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -289,7 +292,7 @@ func TestLLMFunc_SelectsCorrectRoute(t *testing.T) {
 
 func TestLLMFunc_SelectsFirstRoute(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -306,7 +309,7 @@ func TestLLMFunc_SelectsFirstRoute(t *testing.T) {
 
 func TestLLMFunc_SelectsLastRoute(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("2", 5, 3, 8)}
+	mock := newMock(llmResponse("2", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -323,7 +326,7 @@ func TestLLMFunc_SelectsLastRoute(t *testing.T) {
 
 func TestLLMFunc_PromptContainsDescriptions(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	fn := LLMFunc(mock, "my-model", -1)
 
 	req := &schema.RunRequest{
@@ -331,19 +334,19 @@ func TestLLMFunc_PromptContainsDescriptions(t *testing.T) {
 	}
 	_, _ = fn(context.Background(), req, routes)
 
-	if mock.captured == nil {
+	if mock.captured() == nil {
 		t.Fatal("expected captured request")
 	}
-	if mock.captured.Model != "my-model" {
-		t.Errorf("Model = %q, want %q", mock.captured.Model, "my-model")
+	if mock.captured().Model != "my-model" {
+		t.Errorf("Model = %q, want %q", mock.captured().Model, "my-model")
 	}
-	sysText := mock.captured.Messages[0].Text()
+	sysText := mock.captured().Messages[0].Text()
 	for _, desc := range []string{"weather", "calendar", "email"} {
 		if !strings.Contains(sysText, desc) {
 			t.Errorf("system prompt missing description %q", desc)
 		}
 	}
-	userText := mock.captured.Messages[1].Text()
+	userText := mock.captured().Messages[1].Text()
 	if userText != "test input" {
 		t.Errorf("user text = %q, want %q", userText, "test input")
 	}
@@ -385,7 +388,7 @@ func TestLLMFunc_LLMError_WithFallback(t *testing.T) {
 
 func TestLLMFunc_NonNumericResponse_NoFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("weather agent", 5, 3, 8)}
+	mock := newMock(llmResponse("weather agent", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -402,7 +405,7 @@ func TestLLMFunc_NonNumericResponse_NoFallback(t *testing.T) {
 
 func TestLLMFunc_NonNumericResponse_WithFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("not a number", 5, 3, 8)}
+	mock := newMock(llmResponse("not a number", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", 2) // fallback to email
 
 	req := &schema.RunRequest{
@@ -422,7 +425,7 @@ func TestLLMFunc_NonNumericResponse_WithFallback(t *testing.T) {
 
 func TestLLMFunc_OutOfRangeIndex_NoFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("99", 5, 3, 8)}
+	mock := newMock(llmResponse("99", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -439,7 +442,7 @@ func TestLLMFunc_OutOfRangeIndex_NoFallback(t *testing.T) {
 
 func TestLLMFunc_OutOfRangeIndex_WithFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("99", 5, 3, 8)}
+	mock := newMock(llmResponse("99", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", 1) // fallback to calendar
 
 	req := &schema.RunRequest{
@@ -456,7 +459,7 @@ func TestLLMFunc_OutOfRangeIndex_WithFallback(t *testing.T) {
 
 func TestLLMFunc_NegativeIndex_NoFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("-1", 5, 3, 8)}
+	mock := newMock(llmResponse("-1", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -472,7 +475,7 @@ func TestLLMFunc_NegativeIndex_NoFallback(t *testing.T) {
 }
 
 func TestLLMFunc_EmptyRoutes(t *testing.T) {
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -487,12 +490,9 @@ func TestLLMFunc_EmptyRoutes(t *testing.T) {
 	}
 }
 
-func TestLLMFunc_EmptyChoices_NoFallback(t *testing.T) {
+func TestLLMFunc_EmptyResponse_NoFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{},
-		Usage:   schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
-	}}
+	mock := newMockErr(largemodel.ErrEmptyResponse)
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
@@ -502,17 +502,14 @@ func TestLLMFunc_EmptyChoices_NoFallback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "empty choices") {
-		t.Errorf("error = %q, want containing 'empty choices'", err.Error())
+	if !errors.Is(err, largemodel.ErrEmptyResponse) {
+		t.Errorf("error = %v, want ErrEmptyResponse", err)
 	}
 }
 
-func TestLLMFunc_EmptyChoices_WithFallback(t *testing.T) {
+func TestLLMFunc_EmptyResponse_WithFallback(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{},
-		Usage:   schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
-	}}
+	mock := newMockErr(largemodel.ErrEmptyResponse)
 	fn := LLMFunc(mock, "test-model", 0)
 
 	req := &schema.RunRequest{
@@ -529,7 +526,7 @@ func TestLLMFunc_EmptyChoices_WithFallback(t *testing.T) {
 
 func TestLLMFunc_WhitespaceResponse(t *testing.T) {
 	routes := testRoutes()
-	mock := &mockChatCompleter{response: llmResponse("  1  \n", 5, 3, 8)}
+	mock := newMock(llmResponse("  1  \n", 5, 3, 8))
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{

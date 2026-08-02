@@ -18,11 +18,9 @@
 package eval
 
 import (
-	"context"
 	"errors"
 	"math"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
@@ -31,12 +29,7 @@ import (
 func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: schema.Message{
-					Role:    schema.RoleAssistant,
-					Content: aimodel.NewTextContent(text),
-				},
-			},
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", nil),
 		},
 	}
 }
@@ -55,16 +48,10 @@ func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 	return resp
 }
 
-func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: schema.Message{
-					Role:      schema.RoleAssistant,
-					Content:   aimodel.NewTextContent(""),
-					ToolCalls: calls,
-				},
-			},
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", calls),
 		},
 	}
 }
@@ -73,31 +60,21 @@ func almostEqual(a, b, tolerance float64) bool {
 	return math.Abs(a-b) < tolerance
 }
 
-// mockCompleter implements aimodel.ChatCompleter for testing.
+// mockCompleter scripts one judge reply. It wraps largemodel.FakeCaller so
+// the dual-track envelope handling lives in one shared place.
 type mockCompleter struct {
-	response string
-	err      error
+	*largemodel.FakeCaller
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
-	if m.err != nil {
-		return nil, m.err
+func newMockCompleter(response string, err error) *mockCompleter {
+	fake := &largemodel.FakeCaller{Err: err}
+	if err == nil {
+		fake.Responses = []*largemodel.Response{
+			largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, response, schema.Usage{}),
+		}
 	}
 
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{
-			{
-				Message: schema.Message{
-					Role:    schema.RoleAssistant,
-					Content: aimodel.NewTextContent(m.response),
-				},
-			},
-		},
-	}, nil
-}
-
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+	return &mockCompleter{FakeCaller: fake}
 }
 
 var errAlwaysFail = errors.New("always fail")

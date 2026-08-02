@@ -52,7 +52,7 @@ func TestLastAssistantText(t *testing.T) {
 	// No assistant message.
 	resp := &schema.RunResponse{
 		Messages: []schema.Message{
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user")},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user"),
 		},
 	}
 
@@ -63,9 +63,9 @@ func TestLastAssistantText(t *testing.T) {
 	// Multiple assistant messages - should return last.
 	resp = &schema.RunResponse{
 		Messages: []schema.Message{
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "first")},
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user")},
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "last")},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "first"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "last"),
 		},
 	}
 

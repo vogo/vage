@@ -148,7 +148,7 @@ func (f *fakeCompressor) Compress(_ context.Context, msgs []schema.Message, maxT
 	if f.respErr != nil {
 		return nil, f.respErr
 	}
-	out := []schema.Message{{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:"+msgs[0].Text())}}
+	out := []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:"+msgs[0].Text())}
 	return out, nil
 }
 

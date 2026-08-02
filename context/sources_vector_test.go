@@ -206,7 +206,7 @@ func TestVectorRecallSource_QueryFnFallbackToLastUserMsg(t *testing.T) {
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "first message about cooking"),
 			// Tool message would normally be skipped — simulate via
 			// non-user role.
-			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "intermediate")},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "intermediate"),
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "brown fox"),
 		},
 	}
