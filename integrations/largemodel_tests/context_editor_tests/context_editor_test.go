@@ -367,11 +367,11 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
 			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi"),
 			{Role: schema.RoleAssistant, ToolCalls: []aimodel.ToolCall{
-				{ID: "t-1", Function: aimodel.FunctionCall{Name: "x"}},
-				{ID: "t-2", Function: aimodel.FunctionCall{Name: "x"}},
+				{ID: "t-1", Name: "x"},
+				{ID: "t-2", Name: "x"},
 			}},
-			{Role: schema.RoleTool, ToolCallID: "t-1", Content: aimodel.NewTextContent("a")},
-			{Role: schema.RoleTool, ToolCallID: "t-2", Content: aimodel.NewTextContent("b")},
+			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-1", "a", false),
+			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-2", "b", false),
 		},
 	}
 

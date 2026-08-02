@@ -22,35 +22,45 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/vage/schema"
 )
 
 // mockCompleter records calls and returns a configurable response.
 type mockCompleter struct {
 	chatCalls   int
 	streamCalls int
-	chatResp    *largemodel.Response
+	chatResp    *Response
 	chatErr     error
-	streamResp  *aimodel.Stream
+	streamResp  *Stream
 	streamErr   error
+
+	// proto is the protocol the mock reports; empty means OpenAI chat.
+	proto schema.Protocol
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
+func (m *mockCompleter) Protocol() schema.Protocol {
+	if m.proto == "" {
+		return schema.ProtocolOpenAIChat
+	}
+
+	return m.proto
+}
+
+func (m *mockCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
 	m.chatCalls++
 	return m.chatResp, m.chatErr
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
+func (m *mockCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
 	m.streamCalls++
 	return m.streamResp, m.streamErr
 }
 
 func TestChainEmpty(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "test"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "test"}}
 	wrapped := Chain(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,26 +78,27 @@ func TestChainOrder(t *testing.T) {
 	var order []string
 
 	mkMiddleware := func(name string) Middleware {
-		return MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-			return &completerFunc{
-				chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+		return MiddlewareFunc(func(next Caller) Caller {
+			return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+
+				Chat: func(ctx context.Context, req *Request) (*Response, error) {
 					order = append(order, name+"-before")
-					resp, err := next.ChatCompletion(ctx, req)
+					resp, err := next.Call(ctx, req)
 					order = append(order, name+"-after")
 
 					return resp, err
 				},
-				stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
-					return next.ChatCompletionStream(ctx, req)
+				ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+					return next.CallStream(ctx, req)
 				},
 			}
 		})
 	}
 
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	wrapped := Chain(mock, mkMiddleware("A"), mkMiddleware("B"), mkMiddleware("C"))
 
-	_, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +117,7 @@ func TestChainOrder(t *testing.T) {
 
 func TestMiddlewareFunc(t *testing.T) {
 	called := false
-	mw := MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
+	mw := MiddlewareFunc(func(next Caller) Caller {
 		called = true
 		return next
 	})
@@ -120,7 +131,7 @@ func TestMiddlewareFunc(t *testing.T) {
 }
 
 func TestDefaultChain_AllMiddlewares(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	wrapped := DefaultChain(mock,
 		NewLogMiddleware(),
 		NewCircuitBreakerMiddleware(),
@@ -130,7 +141,7 @@ func TestDefaultChain_AllMiddlewares(t *testing.T) {
 		NewCacheMiddleware(NewMapCache()),
 	)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,10 +152,10 @@ func TestDefaultChain_AllMiddlewares(t *testing.T) {
 }
 
 func TestDefaultChain_NilMiddlewares(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	wrapped := DefaultChain(mock, nil, nil, nil)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -24,8 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -64,7 +62,7 @@ func (w *memArtifactWriter) all() []memArtifactWrite {
 }
 
 func staticSID(sid string) SessionIDFunc {
-	return func(*largemodel.Request) string { return sid }
+	return func(*Request) string { return sid }
 }
 
 // TestElide_DisabledByDefault: without WithMaxBytesPerMessage no
@@ -75,7 +73,7 @@ func TestElide_DisabledByDefault(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(2, 100_000)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -103,13 +101,13 @@ func TestElide_HappyPath(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
+	req := &Request{Model: "test", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "anything"}}}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "anything"}}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -162,12 +160,12 @@ func TestElide_DegradeNoWriter(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -199,12 +197,12 @@ func TestElide_DegradeNoSession(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -232,12 +230,12 @@ func TestElide_DegradeWriterError(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -261,12 +259,12 @@ func TestElide_BelowThreshold(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 100) // 100 < 10000
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -296,18 +294,18 @@ func TestElide_MultipleMessages(t *testing.T) {
 	bodyB := strings.Repeat("b", 5000)
 	bodyADup := strings.Repeat("a", 5000) // identical to bodyA
 
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
-			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c3", Function: aimodel.FunctionCall{Name: "x"}},
-		}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(bodyA)},
-		{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(bodyB)},
-		{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(bodyADup)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
+			{ID: "c1", Name: "x"},
+			{ID: "c2", Name: "x"},
+			{ID: "c3", Name: "x"},
+		}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", bodyA, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c2", bodyB, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c3", bodyADup, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -349,22 +347,22 @@ func TestElide_LosesToKeepLastK_StillReportsArtifact(t *testing.T) {
 	//                            1,2 → keep_last_k.
 	body0 := strings.Repeat("a", 5000)
 	short := strings.Repeat("b", 100)
-	req := &openai.ChatCompletionRequest{Model: "test", Messages: []schema.Message{
-		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
-			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c3", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c4", Function: aimodel.FunctionCall{Name: "x"}},
-			{ID: "c5", Function: aimodel.FunctionCall{Name: "x"}},
-		}},
-		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body0)},
-		{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(short)},
-		{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(short)},
-		{Role: schema.RoleTool, ToolCallID: "c4", Content: aimodel.NewTextContent(short)},
-		{Role: schema.RoleTool, ToolCallID: "c5", Content: aimodel.NewTextContent(short)},
+	req := &Request{Model: "test", Messages: []schema.Message{
+		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
+			{ID: "c1", Name: "x"},
+			{ID: "c2", Name: "x"},
+			{ID: "c3", Name: "x"},
+			{ID: "c4", Name: "x"},
+			{ID: "c5", Name: "x"},
+		}),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body0, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c2", short, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c3", short, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c4", short, false),
+		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c5", short, false),
 	}}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -423,7 +421,7 @@ func TestElide_ThreeStrategiesStack(t *testing.T) {
 		{calls: []schema.ToolCall{w1}, results: []schema.Message{wr1}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 

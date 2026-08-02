@@ -36,21 +36,21 @@ import (
 // =============================================================================
 
 func newSystemMessage(text string) schema.Message {
-	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func newAssistantMessage(text string) schema.Message {
-	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func newToolMessage(text string) schema.Message {
-	return schema.Messageschema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleTool, text)
+	return schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "call-1", text, false)
 }
 
 func newAssistantWithToolCalls(text string) schema.Message {
 	return schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", []schema.ToolCall{
-		{ID: "call-1", Function: aimodel.FunctionCall{Name: "test_tool", Arguments: "{}"}},
-	})
+		{ID: "call-1", Name:      "test_tool",
+		Arguments: "{}"}})
 }
 
 // =============================================================================

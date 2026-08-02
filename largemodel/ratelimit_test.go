@@ -23,14 +23,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
 func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {
 	now := time.Now()
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{}}
+	mock := &mockCompleter{chatResp: &Response{}}
 
 	wrapped := NewRateLimitMiddleware(
 		WithRequestsPerMin(2),
@@ -38,19 +36,19 @@ func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// First two should succeed.
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 1: unexpected error: %v", err)
 	}
 
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 2: unexpected error: %v", err)
 	}
 
 	// Third should be rate limited.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("call 3: expected ErrRateLimited, got %v", err)
 	}
@@ -60,7 +58,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	now := time.Now()
 	currentTime := now
 
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{}}
+	mock := &mockCompleter{chatResp: &Response{}}
 
 	wrapped := NewRateLimitMiddleware(
 		WithRequestsPerMin(1),
@@ -68,14 +66,14 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 1: unexpected error: %v", err)
 	}
 
 	// Should be rate limited.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("call 2: expected ErrRateLimited, got %v", err)
 	}
@@ -83,14 +81,14 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	// Advance past the window.
 	currentTime = now.Add(61 * time.Second)
 
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 3 after window: unexpected error: %v", err)
 	}
 }
 
 func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	now := time.Now()
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
+	mock := &mockCompleter{chatResp: &Response{
 		Usage: schema.Usage{TotalTokens: 600},
 	}}
 
@@ -100,21 +98,21 @@ func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// First call: 600 tokens used.
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 1: unexpected error: %v", err)
 	}
 
 	// Second call: 600+600=1200 > 1000, should be limited after recording.
 	// But rate limit check happens before the call, so this should succeed.
-	if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 2: unexpected error: %v", err)
 	}
 
 	// Third call: now 1200 tokens recorded, exceeds 1000.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("call 3: expected ErrRateLimited, got %v", err)
 	}
@@ -130,27 +128,27 @@ func TestRateLimitMiddleware_StreamRateLimit(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
-	if _, err := wrapped.ChatCompletionStream(ctx, req); err != nil {
+	if _, err := wrapped.CallStream(ctx, req); err != nil {
 		t.Fatalf("stream call 1: unexpected error: %v", err)
 	}
 
-	_, err := wrapped.ChatCompletionStream(ctx, req)
+	_, err := wrapped.CallStream(ctx, req)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("stream call 2: expected ErrRateLimited, got %v", err)
 	}
 }
 
 func TestRateLimitMiddleware_NoLimits(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{}}
+	mock := &mockCompleter{chatResp: &Response{}}
 	wrapped := NewRateLimitMiddleware().Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	for range 100 {
-		if _, err := wrapped.ChatCompletion(ctx, req); err != nil {
+		if _, err := wrapped.Call(ctx, req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}

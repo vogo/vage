@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	"github.com/vogo/aimodel"
 )
 
 func TestIsContextOverflowError(t *testing.T) {
@@ -43,7 +41,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error status 413",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 413,
 				Message:    "payload too large",
 			},
@@ -51,7 +49,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error code context_length_exceeded",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "context_length_exceeded",
 				Message:    "This model's maximum context length is 128000 tokens.",
@@ -60,7 +58,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error code request_too_large",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "request_too_large",
 				Message:    "Request too large.",
@@ -69,7 +67,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error message maximum context length",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "invalid_request_error",
 				Message:    "This model's Maximum context length is 200000 tokens.",
@@ -78,7 +76,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error message token limit",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "invalid_request",
 				Message:    "Token limit exceeded for this request.",
@@ -87,7 +85,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error message request too large",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "invalid_request",
 				Message:    "Request too large for the model.",
@@ -96,7 +94,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "API error unrelated 400",
-			err: &aimodel.APIError{
+			err: &APIError{
 				StatusCode: 400,
 				Code:       "invalid_request",
 				Message:    "Invalid JSON in request body",
@@ -115,7 +113,7 @@ func TestIsContextOverflowError(t *testing.T) {
 		},
 		{
 			name: "wrapped API error",
-			err: fmt.Errorf("stream error: %w", &aimodel.APIError{
+			err: fmt.Errorf("stream error: %w", &APIError{
 				StatusCode: 413,
 				Message:    "too large",
 			}),

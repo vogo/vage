@@ -296,8 +296,8 @@ func TestIntegration_ToolCall_SequenceMatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	searchCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calcCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	searchCall := aimodel.ToolCall{Name: "search"}
+	calcCall := aimodel.ToolCall{Name: "calculate"}
 
 	// Full match.
 	c1 := &eval.EvalCase{
@@ -372,14 +372,14 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 	ctx := context.Background()
 
 	expectedCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
-	}
+		Name:      "search",
+		Arguments: `{"q":"hello"}`}
 	matchingCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
-	}
+		Name:      "search",
+		Arguments: `{"q":"hello"}`}
 	differentArgsCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"world"}`},
-	}
+		Name:      "search",
+		Arguments: `{"q":"world"}`}
 
 	// Same name, different arguments in strict mode.
 	c1 := &eval.EvalCase{

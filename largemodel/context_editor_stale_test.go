@@ -22,8 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -91,20 +89,17 @@ type turn struct {
 	results []schema.Message // RoleTool entries; ToolCallID must match a call.ID
 }
 
-func buildReact(t *testing.T, turns []turn) *largemodel.Request {
+func buildReact(t *testing.T, turns []turn) *Request {
 	t.Helper()
 	msgs := []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 	for _, tn := range turns {
-		msgs = append(msgs, schema.Message{
-			Role:      schema.RoleAssistant,
-			ToolCalls: tn.calls,
-		})
+		msgs = append(msgs, schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", tn.calls))
 		msgs = append(msgs, tn.results...)
 	}
-	return &openai.ChatCompletionRequest{Model: "test", Messages: msgs}
+	return &Request{Model: "test", Messages: msgs}
 }
 
 // dispatchCapture records the most recent EventContextEdited payload
@@ -126,33 +121,21 @@ func (d *dispatchCapture) record(_ context.Context, e schema.Event) {
 
 func mkRead(callID, path string, t *testing.T) (schema.ToolCall, schema.Message) {
 	tc := schema.ToolCall{
-		ID: callID,
-		Function: aimodel.FunctionCall{
-			Name:      "read",
-			Arguments: jsonArgs(t, map[string]any{"file_path": path}),
-		},
+		ID:        callID,
+		Name:      "read",
+		Arguments: jsonArgs(t, map[string]any{"file_path": path}),
 	}
-	r := schema.Message{
-		Role:       schema.RoleTool,
-		ToolCallID: callID,
-		Content:    aimodel.NewTextContent(strings.Repeat("x", 100)),
-	}
+	r := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, callID, strings.Repeat("x", 100), false)
 	return tc, r
 }
 
 func mkWrite(callID, path string, t *testing.T) (schema.ToolCall, schema.Message) {
 	tc := schema.ToolCall{
-		ID: callID,
-		Function: aimodel.FunctionCall{
-			Name:      "write",
-			Arguments: jsonArgs(t, map[string]any{"file_path": path}),
-		},
+		ID:        callID,
+		Name:      "write",
+		Arguments: jsonArgs(t, map[string]any{"file_path": path}),
 	}
-	r := schema.Message{
-		Role:       schema.RoleTool,
-		ToolCallID: callID,
-		Content:    aimodel.NewTextContent("ok"),
-	}
+	r := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, callID, "ok", false)
 	return tc, r
 }
 
@@ -178,7 +161,7 @@ func TestStale_ReadThenWriteSamePath(t *testing.T) {
 		{calls: []schema.ToolCall{w1}, results: []schema.Message{wr1}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -230,7 +213,7 @@ func TestStale_MultipleReadsOneWrite(t *testing.T) {
 		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -262,7 +245,7 @@ func TestStale_FreshReadAfterWriteIsKept(t *testing.T) {
 		{calls: []schema.ToolCall{r2}, results: []schema.Message{rr2}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -304,7 +287,7 @@ func TestStale_DisabledByDefault(t *testing.T) {
 		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -344,7 +327,7 @@ func TestStale_NoWritesNoFold(t *testing.T) {
 		{calls: []schema.ToolCall{r1, r2}, results: []schema.Message{rr1, rr2}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -371,24 +354,18 @@ func TestStale_MalformedArgsTolerated(t *testing.T) {
 	r1, rr1 := mkRead("c1", "/a", t)
 
 	badWrite := schema.ToolCall{
-		ID: "bad",
-		Function: aimodel.FunctionCall{
-			Name:      "write",
-			Arguments: "not-valid-json",
-		},
+		ID:        "bad",
+		Name:      "write",
+		Arguments: "not-valid-json",
 	}
-	badResult := schema.Message{
-		Role:       schema.RoleTool,
-		ToolCallID: "bad",
-		Content:    aimodel.NewTextContent("err"),
-	}
+	badResult := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "bad", "err", false)
 
 	req := buildReact(t, []turn{
 		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
 		{calls: []schema.ToolCall{badWrite}, results: []schema.Message{badResult}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -427,7 +404,7 @@ func TestStale_StaleAndKeepLastKOverlap(t *testing.T) {
 		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -484,7 +461,7 @@ func TestStale_PlaceholderV2OptIn(t *testing.T) {
 		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -506,13 +483,11 @@ func TestStale_UnknownToolName(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	mystery := schema.ToolCall{
-		ID: "x1",
-		Function: aimodel.FunctionCall{
-			Name:      "mystery_tool",
-			Arguments: `{"file_path":"/a"}`,
-		},
+		ID:        "x1",
+		Name:      "mystery_tool",
+		Arguments: `{"file_path":"/a"}`,
 	}
-	mr := schema.Message{Role: schema.RoleTool, ToolCallID: "x1", Content: aimodel.NewTextContent("mystery")}
+	mr := schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "x1", "mystery", false)
 
 	r1, rr1 := mkRead("c1", "/a", t)
 
@@ -521,7 +496,7 @@ func TestStale_UnknownToolName(t *testing.T) {
 		{calls: []schema.ToolCall{mystery}, results: []schema.Message{mr}},
 	})
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 

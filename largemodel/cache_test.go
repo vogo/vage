@@ -22,23 +22,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
 func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "fresh"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "fresh"}}
 
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
+	req := &Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
 
 	// Miss: should call through.
-	resp, err := wrapped.ChatCompletion(ctx, req)
+	resp, err := wrapped.Call(ctx, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,9 +50,9 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 	}
 
 	// Hit: should NOT call through again.
-	mock.chatResp = &aimodel.ChatResponse{ID: "should-not-see"}
+	mock.chatResp = &Response{ID: "should-not-see"}
 
-	resp, err = wrapped.ChatCompletion(ctx, req)
+	resp, err = wrapped.Call(ctx, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,23 +68,23 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 
 func TestCacheMiddleware_DifferentRequests(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "resp-1"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "resp-1"}}
 
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 	ctx := context.Background()
 
-	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
+	req1 := &Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
-	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: []schema.Message{
+	req2 := &Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "world"),
 	}}
 
-	_, _ = wrapped.ChatCompletion(ctx, req1)
+	_, _ = wrapped.Call(ctx, req1)
 
-	mock.chatResp = &aimodel.ChatResponse{ID: "resp-2"}
+	mock.chatResp = &Response{ID: "resp-2"}
 
-	resp, _ := wrapped.ChatCompletion(ctx, req2)
+	resp, _ := wrapped.Call(ctx, req2)
 	if resp.ID != "resp-2" {
 		t.Fatalf("expected 'resp-2' for different request, got %q", resp.ID)
 	}
@@ -103,19 +101,19 @@ func TestCacheMiddleware_Expiry(t *testing.T) {
 	cache := NewMapCache()
 	cache.nowFn = func() time.Time { return currentTime }
 
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "v1"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "v1"}}
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{Model: "gpt-4"}
+	req := &Request{Model: "gpt-4"}
 
-	_, _ = wrapped.ChatCompletion(ctx, req)
+	_, _ = wrapped.Call(ctx, req)
 
 	// Advance past TTL.
 	currentTime = now.Add(2 * time.Minute)
-	mock.chatResp = &aimodel.ChatResponse{ID: "v2"}
+	mock.chatResp = &Response{ID: "v2"}
 
-	resp, _ := wrapped.ChatCompletion(ctx, req)
+	resp, _ := wrapped.Call(ctx, req)
 	if resp.ID != "v2" {
 		t.Fatalf("expected 'v2' after expiry, got %q", resp.ID)
 	}
@@ -130,7 +128,7 @@ func TestCacheMiddleware_StreamPassthrough(t *testing.T) {
 	mock := &mockCompleter{}
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
-	_, _ = wrapped.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
+	_, _ = wrapped.CallStream(context.Background(), &Request{})
 
 	if mock.streamCalls != 1 {
 		t.Fatalf("expected 1 stream call, got %d", mock.streamCalls)
@@ -139,22 +137,22 @@ func TestCacheMiddleware_StreamPassthrough(t *testing.T) {
 
 func TestCacheMiddleware_ErrorNotCached(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatErr: aimodel.ErrEmptyResponse}
+	mock := &mockCompleter{chatErr: ErrEmptyResponse}
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{Model: "gpt-4"}
+	req := &Request{Model: "gpt-4"}
 
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
 	// Try again; should call through (not cached).
 	mock.chatErr = nil
-	mock.chatResp = &aimodel.ChatResponse{ID: "ok"}
+	mock.chatResp = &Response{ID: "ok"}
 
-	resp, err := wrapped.ChatCompletion(ctx, req)
+	resp, err := wrapped.Call(ctx, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,19 +172,19 @@ func TestMapCache_GetMiss(t *testing.T) {
 }
 
 func TestCacheKey_Deterministic(t *testing.T) {
-	req := &openai.ChatCompletionRequest{
+	req := &Request{
 		Model: "gpt-4",
 		Messages: []schema.Message{
 			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "test"),
 		},
 	}
 
-	k1, err := cacheKey(req)
+	k1, err := cacheKey(schema.ProtocolOpenAIChat, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	k2, err := cacheKey(req)
+	k2, err := cacheKey(schema.ProtocolOpenAIChat, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,15 +206,15 @@ func TestCacheKey_DifferentTemperature(t *testing.T) {
 	temp1 := 0.2
 	temp2 := 0.9
 
-	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Temperature: &temp1}
-	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Temperature: &temp2}
+	req1 := &Request{Model: "gpt-4", Messages: base, Temperature: &temp1}
+	req2 := &Request{Model: "gpt-4", Messages: base, Temperature: &temp2}
 
-	k1, err := cacheKey(req1)
+	k1, err := cacheKey(schema.ProtocolOpenAIChat, req1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	k2, err := cacheKey(req2)
+	k2, err := cacheKey(schema.ProtocolOpenAIChat, req2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,7 +234,7 @@ func TestMapCache_EvictsExpired(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	resp := func(id string) *largemodel.Response { return &aimodel.ChatResponse{ID: id} }
+	resp := func(id string) *Response { return &Response{ID: id} }
 
 	c.Set(ctx, "key-a", resp("a"), ttl)
 	c.Set(ctx, "key-b", resp("b"), ttl)
@@ -282,10 +280,10 @@ func TestMapCache_EvictsOldestAtCapacity(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Hour
 
-	c.Set(ctx, "oldest", &aimodel.ChatResponse{ID: "oldest"}, ttl)
-	c.Set(ctx, "middle", &aimodel.ChatResponse{ID: "middle"}, ttl)
+	c.Set(ctx, "oldest", &Response{ID: "oldest"}, ttl)
+	c.Set(ctx, "middle", &Response{ID: "middle"}, ttl)
 	// This third Set must evict the oldest entry to stay within maxEntries=2.
-	c.Set(ctx, "newest", &aimodel.ChatResponse{ID: "newest"}, ttl)
+	c.Set(ctx, "newest", &Response{ID: "newest"}, ttl)
 
 	c.mu.RLock()
 	count := len(c.entries)
@@ -314,7 +312,7 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 
 	// Verify the cache is usable end-to-end without options.
 	ctx := context.Background()
-	resp := &aimodel.ChatResponse{ID: "test"}
+	resp := &Response{ID: "test"}
 	c.Set(ctx, "k", resp, time.Minute)
 
 	got, ok := c.Get(ctx, "k")
@@ -327,28 +325,28 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 	}
 }
 
-func TestCacheKey_DifferentSeed(t *testing.T) {
+// TestCacheKey_DifferentProtocol pins the dual-track cache rule: the same
+// conversation addressed to two protocols is two distinct calls, because the
+// stored messages are vendor-native wire forms.
+func TestCacheKey_DifferentProtocol(t *testing.T) {
 	base := []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
-	seed1 := 42
-	seed2 := 99
+	req1 := &Request{Model: "gpt-4", Messages: base}
+	req2 := &Request{Model: "gpt-4", Messages: base}
 
-	req1 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Seed: &seed1}
-	req2 := &openai.ChatCompletionRequest{Model: "gpt-4", Messages: base, Seed: &seed2}
-
-	k1, err := cacheKey(req1)
+	k1, err := cacheKey(schema.ProtocolOpenAIChat, req1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	k2, err := cacheKey(req2)
+	k2, err := cacheKey(schema.ProtocolAnthropicMessages, req2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if k1 == k2 {
-		t.Fatal("requests with different Seed must produce different cache keys")
+		t.Fatal("requests under different protocols must produce different cache keys")
 	}
 }

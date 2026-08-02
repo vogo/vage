@@ -23,28 +23,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
 // captureCompleter records the request the middleware finally sent
 // downstream, so tests can compare it against the caller's request.
 type captureCompleter struct {
-	gotChat   *largemodel.Request
-	gotStream *largemodel.Request
-	chatResp  *largemodel.Response
+	gotChat   *Request
+	gotStream *Request
+	chatResp  *Response
 }
 
-func (c *captureCompleter) ChatCompletion(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+func (c *captureCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (c *captureCompleter) Call(_ context.Context, req *Request) (*Response, error) {
 	c.gotChat = req
 	if c.chatResp == nil {
-		return &aimodel.ChatResponse{ID: "ok"}, nil
+		return &Response{ID: "ok"}, nil
 	}
 	return c.chatResp, nil
 }
 
-func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
+func (c *captureCompleter) CallStream(_ context.Context, req *Request) (*Stream, error) {
 	c.gotStream = req
 	return nil, nil
 }
@@ -52,7 +52,7 @@ func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *largemod
 // makeReq builds a ReAct-style request: user prompt → assistant tool_calls →
 // n tool_result messages, all with synthetic content of size bytes each.
 // Returns the request plus the original tool_call_ids in order.
-func makeReq(n int, contentBytes int) (*largemodel.Request, []string) {
+func makeReq(n int, contentBytes int) (*Request, []string) {
 	msgs := []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
@@ -65,20 +65,16 @@ func makeReq(n int, contentBytes int) (*largemodel.Request, []string) {
 	for i := range n {
 		id := "call-" + string(rune('a'+i))
 		ids = append(ids, id)
-		calls = append(calls, schema.ToolCall{ID: id, Function: aimodel.FunctionCall{Name: "fake"}})
+		calls = append(calls, schema.ToolCall{ID: id, Name: "fake"})
 	}
 
-	msgs = append(msgs, schema.Message{Role: schema.RoleAssistant, ToolCalls: calls})
+	msgs = append(msgs, schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", calls))
 
 	for _, id := range ids {
-		msgs = append(msgs, schema.Message{
-			Role:       schema.RoleTool,
-			ToolCallID: id,
-			Content:    aimodel.NewTextContent(body),
-		})
+		msgs = append(msgs, schema.NewToolResultMessage(schema.ProtocolOpenAIChat, id, body, false))
 	}
 
-	return &openai.ChatCompletionRequest{Model: "test", Messages: msgs}, ids
+	return &Request{Model: "test", Messages: msgs}, ids
 }
 
 // TC-1: the K most recent tool_result messages stay verbatim, every
@@ -90,7 +86,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, ids := makeReq(7, 100)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -121,7 +117,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 		}
 		if cap.gotChat.Messages[idx].ToolCallID() != ids[i] {
 			t.Errorf("tool[%d] ToolCallID changed: got %q want %q",
-				i, cap.gotChat.Messages[idx].ToolCallID, ids[i])
+				i, cap.gotChat.Messages[idx].ToolCallID(), ids[i])
 		}
 	}
 	for i, idx := range toolIdx[4:] {
@@ -146,7 +142,7 @@ func TestContextEditor_DoesNotMutateCaller(t *testing.T) {
 	original := make([]schema.Message, len(req.Messages))
 	copy(original, req.Messages)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -173,7 +169,7 @@ func TestContextEditor_BelowThresholdNoOp(t *testing.T) {
 
 	wrapped := mw.Wrap(cap)
 	req, _ := makeReq(3, 100)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -201,7 +197,7 @@ func TestContextEditor_MinElidedBytesBlocks(t *testing.T) {
 	// 5 tool messages, 100 bytes each → 3 eligible × 100 = 300 freed,
 	// well below 10_000. Should not edit.
 	req, _ := makeReq(5, 100)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -225,7 +221,7 @@ func TestContextEditor_EventPayload(t *testing.T) {
 
 	// 5 tool messages, 100 bytes each → 3 elided, 2 kept, 300 bytes freed.
 	req, _ := makeReq(5, 100)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -265,7 +261,7 @@ func TestContextEditor_NilDispatchSafe(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(3, 50)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -281,7 +277,7 @@ func TestContextEditor_StreamPath(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(5, 50)
-	if _, err := wrapped.ChatCompletionStream(context.Background(), req); err != nil {
+	if _, err := wrapped.CallStream(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -307,7 +303,7 @@ func TestContextEditor_PreservesNonToolMessages(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, ids := makeReq(3, 30)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -323,10 +319,10 @@ func TestContextEditor_PreservesNonToolMessages(t *testing.T) {
 	if asst.Role() != schema.RoleAssistant {
 		t.Fatalf("expected assistant, got %s", asst.Role())
 	}
-	if len(asst.ToolCalls) != len(ids) {
+	if len(asst.ToolCalls()) != len(ids) {
 		t.Fatalf("ToolCalls count changed: got %d want %d", len(asst.ToolCalls()), len(ids))
 	}
-	for i, tc := range asst.ToolCalls {
+	for i, tc := range asst.ToolCalls() {
 		if tc.ID != ids[i] {
 			t.Errorf("ToolCalls[%d].ID changed: got %q want %q", i, tc.ID, ids[i])
 		}
@@ -343,7 +339,7 @@ func TestContextEditor_CustomPlaceholder(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(2, 20)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -358,35 +354,34 @@ func TestContextEditor_CustomPlaceholder(t *testing.T) {
 	}
 }
 
-// TC-11: CacheBreakpoint flag is carried through to the placeholder
-// copy so prompt-cache boundaries do not shift.
-func TestContextEditor_PreservesCacheBreakpoint(t *testing.T) {
+// TC-11: the placeholder keeps the wire form of the message it replaces, so
+// an edited transcript still speaks one protocol end to end.
+func TestContextEditor_PreservesProtocol(t *testing.T) {
 	cap := &captureCompleter{}
 	mw := NewContextEditorMiddleware(WithKeepLastTools(0))
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(2, 10)
-	// Mark the first tool_result with a cache breakpoint.
-	for i := range req.Messages {
-		if req.Messages[i].Role() == schema.RoleTool {
-			req.Messages[i].CacheBreakpoint = true
-			break
-		}
-	}
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var first schema.Message
+
 	for _, m := range cap.gotChat.Messages {
 		if m.Role() == schema.RoleTool {
 			first = m
 			break
 		}
 	}
-	if !first.CacheBreakpoint {
-		t.Fatal("CacheBreakpoint not propagated to placeholder")
+
+	if first.Protocol != schema.ProtocolOpenAIChat {
+		t.Fatalf("placeholder protocol = %q, want %q", first.Protocol, schema.ProtocolOpenAIChat)
+	}
+
+	if first.ToolCallID() == "" {
+		t.Error("placeholder lost its tool_call correlation")
 	}
 }
 
@@ -396,7 +391,7 @@ func TestContextEditor_NilOrEmptyRequest(t *testing.T) {
 	mw := NewContextEditorMiddleware()
 	wrapped := mw.Wrap(cap)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{}); err != nil {
+	if _, err := wrapped.Call(context.Background(), &Request{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cap.gotChat == nil {
@@ -412,7 +407,7 @@ func TestContextEditor_KeepLastDefaultFallback(t *testing.T) {
 
 	// 5 tools, default keepLast=5 → no edit.
 	req, _ := makeReq(5, 10)
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if &req.Messages[0] != &cap.gotChat.Messages[0] {

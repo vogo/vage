@@ -23,8 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/vage/schema"
 )
 
 // errFake is a sentinel used to simulate backend failures in circuit breaker tests.
@@ -41,12 +40,12 @@ func frozenClock(start time.Time) (nowFn func() time.Time, advance func(time.Dur
 }
 
 func TestCircuitBreaker_ClosedPassesThrough(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	cb := NewCircuitBreakerMiddleware(WithFailureThreshold(3))
 	wrapped := cb.Wrap(mock)
 
 	for i := range 5 {
-		resp, err := wrapped.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+		resp, err := wrapped.Call(context.Background(), &Request{})
 		if err != nil {
 			t.Fatalf("call %d: unexpected error: %v", i, err)
 		}
@@ -69,18 +68,18 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// Drive the circuit to open by hitting the threshold.
 	for i := range threshold {
-		_, err := wrapped.ChatCompletion(ctx, req)
+		_, err := wrapped.Call(ctx, req)
 		if !errors.Is(err, errFake) {
 			t.Fatalf("call %d: expected errFake, got %v", i, err)
 		}
 	}
 
 	// The next call must be rejected by the open circuit.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen after threshold, got %v", err)
 	}
@@ -99,15 +98,16 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 
 	// Start with a failing backend, then switch to success for the probe.
 	failing := true
-	custom := &completerFunc{
-		chat: func(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
+	custom := &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+
+		Chat: func(_ context.Context, _ *Request) (*Response, error) {
 			if failing {
 				return nil, errFake
 			}
 
-			return &aimodel.ChatResponse{ID: "recovered"}, nil
+			return &Response{ID: "recovered"}, nil
 		},
-		stream: func(_ context.Context, _ *largemodel.Request) (*aimodel.Stream, error) {
+		ChatStream: func(_ context.Context, _ *Request) (*Stream, error) {
 			return nil, nil
 		},
 	}
@@ -120,18 +120,18 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	wrapped := cb.Wrap(custom)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// Open the circuit.
 	for i := range threshold {
-		_, err := wrapped.ChatCompletion(ctx, req)
+		_, err := wrapped.Call(ctx, req)
 		if !errors.Is(err, errFake) {
 			t.Fatalf("opening call %d: expected errFake, got %v", i, err)
 		}
 	}
 
 	// Still open — rejected before timeout.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen before timeout, got %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	failing = false
 
 	// Probe request should succeed and close the circuit.
-	resp, err := wrapped.ChatCompletion(ctx, req)
+	resp, err := wrapped.Call(ctx, req)
 	if err != nil {
 		t.Fatalf("probe request failed: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 	}
 
 	// Subsequent requests must continue to succeed (circuit is closed again).
-	_, err = wrapped.ChatCompletion(ctx, req)
+	_, err = wrapped.Call(ctx, req)
 	if err != nil {
 		t.Fatalf("post-recovery request failed: %v", err)
 	}
@@ -172,11 +172,11 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// Open the circuit.
 	for i := range threshold {
-		_, err := wrapped.ChatCompletion(ctx, req)
+		_, err := wrapped.Call(ctx, req)
 		if !errors.Is(err, errFake) {
 			t.Fatalf("opening call %d: expected errFake, got %v", i, err)
 		}
@@ -186,14 +186,14 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 	advance(resetTimeout + time.Millisecond)
 
 	// Probe fails — circuit should reopen immediately.
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, errFake) {
 		t.Fatalf("probe: expected errFake, got %v", err)
 	}
 
 	// Next call must be rejected without reaching the backend.
 	callsBefore := mock.chatCalls
-	_, err = wrapped.ChatCompletion(ctx, req)
+	_, err = wrapped.Call(ctx, req)
 
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen after failed probe, got %v", err)
@@ -219,11 +219,11 @@ func TestCircuitBreaker_HalfOpenSingleProbe(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// Open the circuit.
 	for range threshold {
-		_, _ = wrapped.ChatCompletion(ctx, req)
+		_, _ = wrapped.Call(ctx, req)
 	}
 
 	// Advance past reset timeout → HalfOpen.
@@ -231,7 +231,7 @@ func TestCircuitBreaker_HalfOpenSingleProbe(t *testing.T) {
 
 	// First call in HalfOpen is the probe — allowed through.
 	callsBefore := mock.chatCalls
-	_, _ = wrapped.ChatCompletion(ctx, req)
+	_, _ = wrapped.Call(ctx, req)
 
 	if mock.chatCalls != callsBefore+1 {
 		t.Fatal("probe request should reach the backend")
@@ -241,7 +241,7 @@ func TestCircuitBreaker_HalfOpenSingleProbe(t *testing.T) {
 	// (The probe above failed, so recordResult already re-opened the circuit.
 	// But even if we simulate HalfOpen without the probe completing, the
 	// probeInFlight flag blocks additional requests.)
-	_, err := wrapped.ChatCompletion(ctx, req)
+	_, err := wrapped.Call(ctx, req)
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen for second request in HalfOpen, got %v", err)
 	}
@@ -262,18 +262,18 @@ func TestCircuitBreaker_StreamSupport(t *testing.T) {
 	wrapped := cb.Wrap(mock)
 
 	ctx := context.Background()
-	req := &openai.ChatCompletionRequest{}
+	req := &Request{}
 
 	// Open the circuit via stream calls.
 	for i := range threshold {
-		_, err := wrapped.ChatCompletionStream(ctx, req)
+		_, err := wrapped.CallStream(ctx, req)
 		if !errors.Is(err, errFake) {
 			t.Fatalf("opening stream call %d: expected errFake, got %v", i, err)
 		}
 	}
 
 	// Stream call must be rejected by the open circuit.
-	_, err := wrapped.ChatCompletionStream(ctx, req)
+	_, err := wrapped.CallStream(ctx, req)
 	if !errors.Is(err, ErrCircuitOpen) {
 		t.Fatalf("expected ErrCircuitOpen for stream, got %v", err)
 	}
@@ -288,14 +288,14 @@ func TestCircuitBreaker_StreamSupport(t *testing.T) {
 	mock.streamResp = nil // nil Stream is fine for this test
 
 	// Probe via stream should succeed and close the circuit.
-	_, err = wrapped.ChatCompletionStream(ctx, req)
+	_, err = wrapped.CallStream(ctx, req)
 	if err != nil {
 		t.Fatalf("stream probe failed: %v", err)
 	}
 
 	// Circuit is now closed — another stream call should reach the backend.
 	callsBefore := mock.streamCalls
-	_, err = wrapped.ChatCompletionStream(ctx, req)
+	_, err = wrapped.CallStream(ctx, req)
 	if err != nil {
 		t.Fatalf("post-recovery stream call failed: %v", err)
 	}

@@ -22,22 +22,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
-	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
 
 func TestModel_New_NoMiddleware(t *testing.T) {
-	resp := &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "hello"),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
+	resp := &Response{
+		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "hello"),
+		FinishReason: FinishReasonStop,
 	}
 	mock := &mockCompleter{chatResp: resp}
 	m := New(mock)
 
-	got, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	got, err := m.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,30 +46,29 @@ func TestModel_New_NoMiddleware(t *testing.T) {
 }
 
 func TestModel_New_WithMiddleware(t *testing.T) {
-	resp := &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
+	resp := &Response{
+		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
+		FinishReason: FinishReasonStop,
 	}
 	mock := &mockCompleter{chatResp: resp}
 
 	var mwCalls int
-	mw := MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-		return &completerFunc{
-			chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	mw := MiddlewareFunc(func(next Caller) Caller {
+		return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+
+			Chat: func(ctx context.Context, req *Request) (*Response, error) {
 				mwCalls++
-				return next.ChatCompletion(ctx, req)
+				return next.Call(ctx, req)
 			},
-			stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
-				return next.ChatCompletionStream(ctx, req)
+			ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+				return next.CallStream(ctx, req)
 			},
 		}
 	})
 
 	m := New(mock, WithMiddleware(mw))
 
-	got, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	got, err := m.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +87,7 @@ func TestModel_ChatCompletionStream(t *testing.T) {
 	mock := &mockCompleter{streamErr: errors.New("stream error")}
 	m := New(mock)
 
-	_, err := m.ChatCompletionStream(context.Background(), &openai.ChatCompletionRequest{})
+	_, err := m.CallStream(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -102,31 +97,30 @@ func TestModel_ChatCompletionStream(t *testing.T) {
 }
 
 func TestModel_MultipleMiddlewares_Order(t *testing.T) {
-	resp := &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
+	resp := &Response{
+		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
+		FinishReason: FinishReasonStop,
 	}
 	mock := &mockCompleter{chatResp: resp}
 
 	var order []string
 	makeMW := func(name string) Middleware {
-		return MiddlewareFunc(func(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-			return &completerFunc{
-				chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+		return MiddlewareFunc(func(next Caller) Caller {
+			return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+
+				Chat: func(ctx context.Context, req *Request) (*Response, error) {
 					order = append(order, name)
-					return next.ChatCompletion(ctx, req)
+					return next.Call(ctx, req)
 				},
-				stream: func(ctx context.Context, req *largemodel.Request) (*aimodel.Stream, error) {
-					return next.ChatCompletionStream(ctx, req)
+				ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+					return next.CallStream(ctx, req)
 				},
 			}
 		})
 	}
 
 	m := New(mock, WithMiddleware(makeMW("first"), makeMW("second")))
-	_, err := m.ChatCompletion(context.Background(), &openai.ChatCompletionRequest{})
+	_, err := m.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

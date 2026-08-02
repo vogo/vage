@@ -84,10 +84,8 @@ type mockChatCompleter struct {
 
 func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
 	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
-			FinishReason: largemodel.FinishReasonStop,
-		}},
+		Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
+		FinishReason: largemodel.FinishReasonStop,
 		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	}
 }
