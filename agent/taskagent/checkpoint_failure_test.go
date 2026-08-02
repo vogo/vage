@@ -87,7 +87,7 @@ func TestSaveCheckpointFailure_InvokesCallback(t *testing.T) {
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-cb",
-		Messages:  []schema.Message{schema.NewUserMessage("go")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -129,7 +129,7 @@ func TestSaveCheckpointFailure_NilCallback_NoPanic(t *testing.T) {
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-nilcb",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSaveCheckpointFailure_OnSuccess_NoCallbackInvoke(t *testing.T) {
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-success",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

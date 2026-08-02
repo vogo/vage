@@ -70,10 +70,10 @@ func TestVectorRecallSource_HappyPath(t *testing.T) {
 	if len(res.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(res.Messages))
 	}
-	if res.Messages[0].Role != aimodel.RoleSystem {
+	if res.Messages[0].Role() != schema.RoleSystem {
 		t.Fatalf("role = %q, want system", res.Messages[0].Role)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "brown fox") {
 		t.Fatalf("body missing expected text: %q", body)
 	}
@@ -172,7 +172,7 @@ func TestVectorRecallSource_MetadataEqualsForwarded(t *testing.T) {
 	if res.Report.Status != StatusOK {
 		t.Fatalf("Status = %q, want ok", res.Report.Status)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	// Only doc "b" has kind=note in the fixture, so doc "a" must not appear.
 	if strings.Contains(body, "lazy dog") {
 		t.Fatalf("doc with kind=fact leaked through MetadataEquals: %q", body)
@@ -189,7 +189,7 @@ func TestVectorRecallSource_PredicateForwarded(t *testing.T) {
 		},
 	}
 	res, _ := src.Fetch(context.Background(), FetchInput{Intent: "brown fox"})
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "lazy dog") {
 		t.Fatalf("expected doc a in body: %q", body)
 	}
@@ -204,14 +204,11 @@ func TestVectorRecallSource_QueryFnFallbackToLastUserMsg(t *testing.T) {
 
 	req := &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("first message about cooking"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "first message about cooking"),
 			// Tool message would normally be skipped — simulate via
 			// non-user role.
-			{Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent("intermediate"),
-			}},
-			schema.NewUserMessage("brown fox"),
+			{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "intermediate")},
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "brown fox"),
 		},
 	}
 	res, _ := src.Fetch(context.Background(), FetchInput{Request: req})
@@ -219,8 +216,8 @@ func TestVectorRecallSource_QueryFnFallbackToLastUserMsg(t *testing.T) {
 		t.Fatalf("Status = %q, want ok (note=%q)", res.Report.Status, res.Report.Note)
 	}
 	// Body should be derived from "brown fox" — doc "a" wins.
-	if !strings.Contains(res.Messages[0].Content.Text(), "lazy dog") {
-		t.Fatalf("expected fox doc to win; got %q", res.Messages[0].Content.Text())
+	if !strings.Contains(res.Messages[0].Text(), "lazy dog") {
+		t.Fatalf("expected fox doc to win; got %q", res.Messages[0].Text())
 	}
 }
 
@@ -230,8 +227,8 @@ func TestVectorRecallSource_QueryFnSkipsEmptyUserMsgs(t *testing.T) {
 
 	req := &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("brown fox"),
-			schema.NewUserMessage("   "), // whitespace-only, should be skipped
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "brown fox"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "   "), // whitespace-only, should be skipped
 		},
 	}
 	res, _ := src.Fetch(context.Background(), FetchInput{Request: req})
@@ -286,8 +283,8 @@ func TestVectorRecallSource_RendererSeesFetchInput(t *testing.T) {
 	if got.hits == 0 {
 		t.Errorf("renderer saw 0 hits; expected > 0")
 	}
-	if !strings.Contains(res.Messages[0].Content.Text(), "rendered: brown fox") {
-		t.Errorf("body = %q, want custom render output", res.Messages[0].Content.Text())
+	if !strings.Contains(res.Messages[0].Text(), "rendered: brown fox") {
+		t.Errorf("body = %q, want custom render output", res.Messages[0].Text())
 	}
 }
 
@@ -333,7 +330,7 @@ func TestVectorRecallSource_MaxBytesPerHit(t *testing.T) {
 
 	src := &VectorRecallSource{Store: store, Embedder: emb, MaxBytesPerHit: 64}
 	res, _ := src.Fetch(context.Background(), FetchInput{Intent: "alpha"})
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "[truncated]") {
 		t.Fatalf("expected truncation marker in body, got %q", body)
 	}
@@ -376,7 +373,7 @@ func TestVectorRecallSource_SelfTrim_FinalCharTruncate(t *testing.T) {
 		t.Fatalf("Tokens=%d should be <= budget=%d", res.Report.Tokens, budget)
 	}
 	// A truncated body should still contain the truncation marker.
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "[truncated]") {
 		t.Fatalf("expected truncation marker; got %q", body)
 	}

@@ -89,7 +89,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	now := time.Now()
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
-		Usage: aimodel.Usage{TotalTokens: 600},
+		Usage: schema.Usage{TotalTokens: 600},
 	}}
 
 	wrapped := NewRateLimitMiddleware(

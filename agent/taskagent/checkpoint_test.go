@@ -40,7 +40,7 @@ func TestRun_NoCheckpointStore_NoOp(t *testing.T) {
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-noop",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -72,7 +72,7 @@ func TestRun_WritesCheckpointPerIteration(t *testing.T) {
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-3iter",
-		Messages:  []schema.Message{schema.NewUserMessage("go")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestResume_AlreadyFinal_ReturnsErrAlreadyFinal(t *testing.T) {
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-final",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	)
 	_, err := a1.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-resume",
-		Messages:  []schema.Message{schema.NewUserMessage("plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan")},
 	})
 	if err == nil {
 		t.Fatal("first Run: want error from mock running out, got nil")
@@ -203,7 +203,7 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	if resp.StopReason != schema.StopReasonComplete {
 		t.Errorf("StopReason = %q, want complete", resp.StopReason)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "resumed-done" {
+	if got := resp.Messages[0].Text(); got != "resumed-done" {
 		t.Errorf("response text = %q, want resumed-done", got)
 	}
 
@@ -231,7 +231,7 @@ func TestResume_CrossAgent_Rejected(t *testing.T) {
 	)
 	if _, err := original.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-cross",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

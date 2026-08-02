@@ -51,7 +51,7 @@ func (m *fakeChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 	// Snapshot the request — the slice may be reused/extended by the agent
 	// after this call returns, so we keep a defensive copy of Messages.
 	cloned := *req
-	cloned.Messages = append([]aimodel.Message(nil), req.Messages...)
+	cloned.Messages = append([]schema.Message(nil), req.Messages...)
 	m.requests = append(m.requests, &cloned)
 
 	if m.calls >= len(m.responses) {
@@ -82,10 +82,10 @@ func (m *fakeChatCompleter) firstRequest(t *testing.T) *aimodel.ChatRequest {
 func stopResponse(text string) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+		Usage: schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}
 }
 

@@ -71,8 +71,8 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	stub := &stubCompleter{
 		resp: &aimodel.ChatResponse{
 			Model:   "m",
-			Choices: []aimodel.Choice{{Message: aimodel.Message{Content: aimodel.NewTextContent("hi")}, FinishReason: "stop"}},
-			Usage:   aimodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
+			Choices: []aimodel.Choice{{Message: schema.Message{Content: aimodel.NewTextContent("hi")}, FinishReason: "stop"}},
+			Usage:   schema.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
 		},
 	}
 	c := mw.Wrap(stub)

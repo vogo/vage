@@ -86,19 +86,19 @@ func jsonArgs(t *testing.T, m map[string]any) string {
 // matching tool_results; tests can then assert which results get
 // folded.
 type turn struct {
-	calls   []aimodel.ToolCall
-	results []aimodel.Message // RoleTool entries; ToolCallID must match a call.ID
+	calls   []schema.ToolCall
+	results []schema.Message // RoleTool entries; ToolCallID must match a call.ID
 }
 
 func buildReact(t *testing.T, turns []turn) *aimodel.ChatRequest {
 	t.Helper()
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}
 	for _, tn := range turns {
-		msgs = append(msgs, aimodel.Message{
-			Role:      aimodel.RoleAssistant,
+		msgs = append(msgs, schema.Message{
+			Role:      schema.RoleAssistant,
 			ToolCalls: tn.calls,
 		})
 		msgs = append(msgs, tn.results...)
@@ -123,32 +123,32 @@ func (d *dispatchCapture) record(_ context.Context, e schema.Event) {
 	}
 }
 
-func mkRead(callID, path string, t *testing.T) (aimodel.ToolCall, aimodel.Message) {
-	tc := aimodel.ToolCall{
+func mkRead(callID, path string, t *testing.T) (schema.ToolCall, schema.Message) {
+	tc := schema.ToolCall{
 		ID: callID,
 		Function: aimodel.FunctionCall{
 			Name:      "read",
 			Arguments: jsonArgs(t, map[string]any{"file_path": path}),
 		},
 	}
-	r := aimodel.Message{
-		Role:       aimodel.RoleTool,
+	r := schema.Message{
+		Role:       schema.RoleTool,
 		ToolCallID: callID,
 		Content:    aimodel.NewTextContent(strings.Repeat("x", 100)),
 	}
 	return tc, r
 }
 
-func mkWrite(callID, path string, t *testing.T) (aimodel.ToolCall, aimodel.Message) {
-	tc := aimodel.ToolCall{
+func mkWrite(callID, path string, t *testing.T) (schema.ToolCall, schema.Message) {
+	tc := schema.ToolCall{
 		ID: callID,
 		Function: aimodel.FunctionCall{
 			Name:      "write",
 			Arguments: jsonArgs(t, map[string]any{"file_path": path}),
 		},
 	}
-	r := aimodel.Message{
-		Role:       aimodel.RoleTool,
+	r := schema.Message{
+		Role:       schema.RoleTool,
 		ToolCallID: callID,
 		Content:    aimodel.NewTextContent("ok"),
 	}
@@ -173,8 +173,8 @@ func TestStale_ReadThenWriteSamePath(t *testing.T) {
 	r1, rr1 := mkRead("c1", "/a", t)
 	w1, wr1 := mkWrite("c2", "/a", t)
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1}, results: []aimodel.Message{rr1}},
-		{calls: []aimodel.ToolCall{w1}, results: []aimodel.Message{wr1}},
+		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
+		{calls: []schema.ToolCall{w1}, results: []schema.Message{wr1}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -185,17 +185,17 @@ func TestStale_ReadThenWriteSamePath(t *testing.T) {
 	rr1Idx := findToolCallResult(got, "c1")
 	wr1Idx := findToolCallResult(got, "c2")
 
-	if !strings.Contains(got[rr1Idx].Content.Text(), "stale_resource") {
-		t.Errorf("c1 result not folded as stale: %q", got[rr1Idx].Content.Text())
+	if !strings.Contains(got[rr1Idx].Text(), "stale_resource") {
+		t.Errorf("c1 result not folded as stale: %q", got[rr1Idx].Text())
 	}
-	if !strings.Contains(got[rr1Idx].Content.Text(), "/a") {
-		t.Errorf("c1 placeholder missing path detail: %q", got[rr1Idx].Content.Text())
+	if !strings.Contains(got[rr1Idx].Text(), "/a") {
+		t.Errorf("c1 placeholder missing path detail: %q", got[rr1Idx].Text())
 	}
-	if !strings.Contains(got[rr1Idx].Content.Text(), "c2") {
-		t.Errorf("c1 placeholder missing writer call ID: %q", got[rr1Idx].Content.Text())
+	if !strings.Contains(got[rr1Idx].Text(), "c2") {
+		t.Errorf("c1 placeholder missing writer call ID: %q", got[rr1Idx].Text())
 	}
-	if got[wr1Idx].Content.Text() == "" || strings.Contains(got[wr1Idx].Content.Text(), "context_edited") {
-		t.Errorf("write result was folded but should be kept: %q", got[wr1Idx].Content.Text())
+	if got[wr1Idx].Text() == "" || strings.Contains(got[wr1Idx].Text(), "context_edited") {
+		t.Errorf("write result was folded but should be kept: %q", got[wr1Idx].Text())
 	}
 
 	if disp.count != 1 {
@@ -225,8 +225,8 @@ func TestStale_MultipleReadsOneWrite(t *testing.T) {
 	w, wr := mkWrite("cw", "/a", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1, r2, r3}, results: []aimodel.Message{rr1, rr2, rr3}},
-		{calls: []aimodel.ToolCall{w}, results: []aimodel.Message{wr}},
+		{calls: []schema.ToolCall{r1, r2, r3}, results: []schema.Message{rr1, rr2, rr3}},
+		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -236,8 +236,8 @@ func TestStale_MultipleReadsOneWrite(t *testing.T) {
 	got := cap.gotChat.Messages
 	for _, id := range []string{"c1", "c2", "c3"} {
 		idx := findToolCallResult(got, id)
-		if !strings.Contains(got[idx].Content.Text(), "stale_resource") {
-			t.Errorf("%s result not stale-folded: %q", id, got[idx].Content.Text())
+		if !strings.Contains(got[idx].Text(), "stale_resource") {
+			t.Errorf("%s result not stale-folded: %q", id, got[idx].Text())
 		}
 	}
 }
@@ -256,9 +256,9 @@ func TestStale_FreshReadAfterWriteIsKept(t *testing.T) {
 	w, wr := mkWrite("cw", "/a", t)
 	r2, rr2 := mkRead("c3", "/a", t)
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1}, results: []aimodel.Message{rr1}},
-		{calls: []aimodel.ToolCall{w}, results: []aimodel.Message{wr}},
-		{calls: []aimodel.ToolCall{r2}, results: []aimodel.Message{rr2}},
+		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
+		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
+		{calls: []schema.ToolCall{r2}, results: []schema.Message{rr2}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -269,11 +269,11 @@ func TestStale_FreshReadAfterWriteIsKept(t *testing.T) {
 	idx1 := findToolCallResult(got, "c1")
 	idx2 := findToolCallResult(got, "c3")
 
-	if !strings.Contains(got[idx1].Content.Text(), "stale_resource") {
-		t.Errorf("first read should be stale: %q", got[idx1].Content.Text())
+	if !strings.Contains(got[idx1].Text(), "stale_resource") {
+		t.Errorf("first read should be stale: %q", got[idx1].Text())
 	}
-	if strings.Contains(got[idx2].Content.Text(), "context_edited") {
-		t.Errorf("post-write read should be kept verbatim: %q", got[idx2].Content.Text())
+	if strings.Contains(got[idx2].Text(), "context_edited") {
+		t.Errorf("post-write read should be kept verbatim: %q", got[idx2].Text())
 	}
 }
 
@@ -299,8 +299,8 @@ func TestStale_DisabledByDefault(t *testing.T) {
 	w, wr := mkWrite("cw", "/e", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1, r2, r3, r4}, results: []aimodel.Message{rr1, rr2, rr3, rr4}},
-		{calls: []aimodel.ToolCall{w}, results: []aimodel.Message{wr}},
+		{calls: []schema.ToolCall{r1, r2, r3, r4}, results: []schema.Message{rr1, rr2, rr3, rr4}},
+		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -309,16 +309,16 @@ func TestStale_DisabledByDefault(t *testing.T) {
 
 	got := cap.gotChat.Messages
 	idx1 := findToolCallResult(got, "c1")
-	if !strings.Contains(got[idx1].Content.Text(), "context_edited") {
-		t.Errorf("c1 should be folded by keep_last_k: %q", got[idx1].Content.Text())
+	if !strings.Contains(got[idx1].Text(), "context_edited") {
+		t.Errorf("c1 should be folded by keep_last_k: %q", got[idx1].Text())
 	}
 	// V1 wire-format check — the legacy placeholder must NOT mention
 	// "stale_resource" or use parens around a reason.
-	if strings.Contains(got[idx1].Content.Text(), "stale_resource") {
-		t.Errorf("legacy placeholder leaked stale: %q", got[idx1].Content.Text())
+	if strings.Contains(got[idx1].Text(), "stale_resource") {
+		t.Errorf("legacy placeholder leaked stale: %q", got[idx1].Text())
 	}
-	if strings.Contains(got[idx1].Content.Text(), "(keep_last_k)") {
-		t.Errorf("legacy placeholder leaked V2 format: %q", got[idx1].Content.Text())
+	if strings.Contains(got[idx1].Text(), "(keep_last_k)") {
+		t.Errorf("legacy placeholder leaked V2 format: %q", got[idx1].Text())
 	}
 	if disp.payload.Strategy != contextEditStrategyKeepLastK {
 		t.Errorf("Strategy = %q, want %q", disp.payload.Strategy, contextEditStrategyKeepLastK)
@@ -340,7 +340,7 @@ func TestStale_NoWritesNoFold(t *testing.T) {
 	r2, rr2 := mkRead("c2", "/a", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1, r2}, results: []aimodel.Message{rr1, rr2}},
+		{calls: []schema.ToolCall{r1, r2}, results: []schema.Message{rr1, rr2}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -350,8 +350,8 @@ func TestStale_NoWritesNoFold(t *testing.T) {
 	got := cap.gotChat.Messages
 	for _, id := range []string{"c1", "c2"} {
 		idx := findToolCallResult(got, id)
-		if strings.Contains(got[idx].Content.Text(), "context_edited") {
-			t.Errorf("%s should be untouched without writes: %q", id, got[idx].Content.Text())
+		if strings.Contains(got[idx].Text(), "context_edited") {
+			t.Errorf("%s should be untouched without writes: %q", id, got[idx].Text())
 		}
 	}
 }
@@ -369,22 +369,22 @@ func TestStale_MalformedArgsTolerated(t *testing.T) {
 
 	r1, rr1 := mkRead("c1", "/a", t)
 
-	badWrite := aimodel.ToolCall{
+	badWrite := schema.ToolCall{
 		ID: "bad",
 		Function: aimodel.FunctionCall{
 			Name:      "write",
 			Arguments: "not-valid-json",
 		},
 	}
-	badResult := aimodel.Message{
-		Role:       aimodel.RoleTool,
+	badResult := schema.Message{
+		Role:       schema.RoleTool,
 		ToolCallID: "bad",
 		Content:    aimodel.NewTextContent("err"),
 	}
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1}, results: []aimodel.Message{rr1}},
-		{calls: []aimodel.ToolCall{badWrite}, results: []aimodel.Message{badResult}},
+		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
+		{calls: []schema.ToolCall{badWrite}, results: []schema.Message{badResult}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -393,8 +393,8 @@ func TestStale_MalformedArgsTolerated(t *testing.T) {
 
 	got := cap.gotChat.Messages
 	idx := findToolCallResult(got, "c1")
-	if strings.Contains(got[idx].Content.Text(), "context_edited") {
-		t.Errorf("c1 should not be stale (write had bad args): %q", got[idx].Content.Text())
+	if strings.Contains(got[idx].Text(), "context_edited") {
+		t.Errorf("c1 should not be stale (write had bad args): %q", got[idx].Text())
 	}
 }
 
@@ -422,8 +422,8 @@ func TestStale_StaleAndKeepLastKOverlap(t *testing.T) {
 	w, wr := mkWrite("cw", "/a", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1, r2, r3, r4}, results: []aimodel.Message{rr1, rr2, rr3, rr4}},
-		{calls: []aimodel.ToolCall{w}, results: []aimodel.Message{wr}},
+		{calls: []schema.ToolCall{r1, r2, r3, r4}, results: []schema.Message{rr1, rr2, rr3, rr4}},
+		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -436,12 +436,12 @@ func TestStale_StaleAndKeepLastKOverlap(t *testing.T) {
 	idx3 := findToolCallResult(got, "c3")
 
 	// c1 must surface stale (more informative than keep_last_k).
-	if !strings.Contains(got[idx1].Content.Text(), "stale_resource") {
-		t.Errorf("c1 should be stale-folded, got %q", got[idx1].Content.Text())
+	if !strings.Contains(got[idx1].Text(), "stale_resource") {
+		t.Errorf("c1 should be stale-folded, got %q", got[idx1].Text())
 	}
 	// c2 was folded by keep_last_k (it reads /b, untouched by write).
-	if !strings.Contains(got[idx2].Content.Text(), "keep_last_k") {
-		t.Errorf("c2 should be keep_last_k-folded, got %q", got[idx2].Content.Text())
+	if !strings.Contains(got[idx2].Text(), "keep_last_k") {
+		t.Errorf("c2 should be keep_last_k-folded, got %q", got[idx2].Text())
 	}
 	// c3 is fresh (read /a happened *after* the write would invalidate
 	// older reads — but in our turn ordering c3 is in turn 1 and the
@@ -449,8 +449,8 @@ func TestStale_StaleAndKeepLastKOverlap(t *testing.T) {
 	// stale)... wait: c3 reads /a in turn 1 (assistantIdx=2) and the
 	// write is in turn 2 (assistantIdx=4). So c3 IS shadowed too.
 	// c4 reads /b which has no later write, and survives keep_last_k.
-	if !strings.Contains(got[idx3].Content.Text(), "stale_resource") {
-		t.Errorf("c3 (read /a in turn 1) should be stale: %q", got[idx3].Content.Text())
+	if !strings.Contains(got[idx3].Text(), "stale_resource") {
+		t.Errorf("c3 (read /a in turn 1) should be stale: %q", got[idx3].Text())
 	}
 
 	if disp.payload.Strategy != contextEditStrategyStaleResource {
@@ -479,15 +479,15 @@ func TestStale_PlaceholderV2OptIn(t *testing.T) {
 	r1, rr1 := mkRead("c1", "/a", t)
 	w, wr := mkWrite("cw", "/a", t)
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1}, results: []aimodel.Message{rr1}},
-		{calls: []aimodel.ToolCall{w}, results: []aimodel.Message{wr}},
+		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
+		{calls: []schema.ToolCall{w}, results: []schema.Message{wr}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
-	got := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Content.Text()
+	got := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Text()
 	if !strings.HasPrefix(got, "PV2[c1|stale_resource|file /a modified by cw|") {
 		t.Errorf("V2 placeholder shape unexpected: %q", got)
 	}
@@ -504,20 +504,20 @@ func TestStale_UnknownToolName(t *testing.T) {
 	)
 	wrapped := mw.Wrap(cap)
 
-	mystery := aimodel.ToolCall{
+	mystery := schema.ToolCall{
 		ID: "x1",
 		Function: aimodel.FunctionCall{
 			Name:      "mystery_tool",
 			Arguments: `{"file_path":"/a"}`,
 		},
 	}
-	mr := aimodel.Message{Role: aimodel.RoleTool, ToolCallID: "x1", Content: aimodel.NewTextContent("mystery")}
+	mr := schema.Message{Role: schema.RoleTool, ToolCallID: "x1", Content: aimodel.NewTextContent("mystery")}
 
 	r1, rr1 := mkRead("c1", "/a", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1}, results: []aimodel.Message{rr1}},
-		{calls: []aimodel.ToolCall{mystery}, results: []aimodel.Message{mr}},
+		{calls: []schema.ToolCall{r1}, results: []schema.Message{rr1}},
+		{calls: []schema.ToolCall{mystery}, results: []schema.Message{mr}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -526,16 +526,16 @@ func TestStale_UnknownToolName(t *testing.T) {
 
 	got := cap.gotChat.Messages
 	idx := findToolCallResult(got, "c1")
-	if strings.Contains(got[idx].Content.Text(), "context_edited") {
-		t.Errorf("c1 should be intact when later tool is unknown: %q", got[idx].Content.Text())
+	if strings.Contains(got[idx].Text(), "context_edited") {
+		t.Errorf("c1 should be intact when later tool is unknown: %q", got[idx].Text())
 	}
 }
 
 // findToolCallResult returns the index in msgs of the RoleTool message
 // whose ToolCallID matches id. Fails the test if not found.
-func findToolCallResult(msgs []aimodel.Message, id string) int {
+func findToolCallResult(msgs []schema.Message, id string) int {
 	for i, m := range msgs {
-		if m.Role == aimodel.RoleTool && m.ToolCallID == id {
+		if m.Role() == schema.RoleTool && m.ToolCallID == id {
 			return i
 		}
 	}

@@ -46,7 +46,7 @@ func TestBuilder_SessionMemory_WithSlidingWindowCompressor(t *testing.T) {
 	for i := range seed {
 		key := fmt.Sprintf("msg:%06d", i)
 		text := fmt.Sprintf("turn-%02d", i)
-		if err := sess.Set(ctx, key, schema.NewUserMessage(text), 0); err != nil {
+		if err := sess.Set(ctx, key, schema.NewUserMessage(schema.ProtocolOpenAIChat, text), 0); err != nil {
 			t.Fatalf("seed Set %d: %v", i, err)
 		}
 	}
@@ -66,7 +66,7 @@ func TestBuilder_SessionMemory_WithSlidingWindowCompressor(t *testing.T) {
 		SessionID: "comp-session",
 		Request: &schema.RunRequest{
 			SessionID: "comp-session",
-			Messages:  []schema.Message{schema.NewUserMessage("now")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "now")},
 		},
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func TestBuilder_SessionMemory_WithSlidingWindowCompressor(t *testing.T) {
 	}
 	for i := range window {
 		want := fmt.Sprintf("turn-%02d", seed-window+i)
-		got := res.Messages[1+i].Content.Text()
+		got := res.Messages[1+i].Text()
 		if got != want {
 			t.Errorf("history[%d] = %q, want %q", i, got, want)
 		}

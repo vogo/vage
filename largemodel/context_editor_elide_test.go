@@ -101,10 +101,10 @@ func TestElide_HappyPath(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "anything"}}}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "anything"}}}},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -113,7 +113,7 @@ func TestElide_HappyPath(t *testing.T) {
 
 	got := cap.gotChat.Messages
 	idx := findToolCallResult(got, "c1")
-	text := got[idx].Content.Text()
+	text := got[idx].Text()
 	if !strings.Contains(text, ContextEditStrategyElideArtifact) {
 		t.Errorf("placeholder missing reason: %q", text)
 	}
@@ -160,16 +160,16 @@ func TestElide_DegradeNoWriter(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
-	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Content.Text()
+	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Text()
 	if !strings.Contains(text, "elide_inline") {
 		t.Errorf("expected inline reason, got %q", text)
 	}
@@ -197,9 +197,9 @@ func TestElide_DegradeNoSession(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -209,7 +209,7 @@ func TestElide_DegradeNoSession(t *testing.T) {
 	if got := w.all(); len(got) != 0 {
 		t.Errorf("expected no writes without session id, got %d", len(got))
 	}
-	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Content.Text()
+	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Text()
 	if !strings.Contains(text, "elide_inline") || !strings.Contains(text, "no artifact store") {
 		t.Errorf("placeholder = %q", text)
 	}
@@ -230,16 +230,16 @@ func TestElide_DegradeWriterError(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
-	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Content.Text()
+	text := cap.gotChat.Messages[findToolCallResult(cap.gotChat.Messages, "c1")].Text()
 	if !strings.Contains(text, "elide_inline") || !strings.Contains(text, "artifact write failed") {
 		t.Errorf("placeholder = %q", text)
 	}
@@ -259,9 +259,9 @@ func TestElide_BelowThreshold(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 100) // 100 < 10000
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}}}},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -294,15 +294,15 @@ func TestElide_MultipleMessages(t *testing.T) {
 	bodyB := strings.Repeat("b", 5000)
 	bodyADup := strings.Repeat("a", 5000) // identical to bodyA
 
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
 			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c3", Function: aimodel.FunctionCall{Name: "x"}},
 		}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(bodyA)},
-		{Role: aimodel.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(bodyB)},
-		{Role: aimodel.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(bodyADup)},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(bodyA)},
+		{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(bodyB)},
+		{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(bodyADup)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -347,19 +347,19 @@ func TestElide_LosesToKeepLastK_StillReportsArtifact(t *testing.T) {
 	//                            1,2 → keep_last_k.
 	body0 := strings.Repeat("a", 5000)
 	short := strings.Repeat("b", 100)
-	req := &aimodel.ChatRequest{Model: "test", Messages: []aimodel.Message{
-		{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{
+	req := &aimodel.ChatRequest{Model: "test", Messages: []schema.Message{
+		{Role: schema.RoleAssistant, ToolCalls: []schema.ToolCall{
 			{ID: "c1", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c2", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c3", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c4", Function: aimodel.FunctionCall{Name: "x"}},
 			{ID: "c5", Function: aimodel.FunctionCall{Name: "x"}},
 		}},
-		{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body0)},
-		{Role: aimodel.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(short)},
-		{Role: aimodel.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(short)},
-		{Role: aimodel.RoleTool, ToolCallID: "c4", Content: aimodel.NewTextContent(short)},
-		{Role: aimodel.RoleTool, ToolCallID: "c5", Content: aimodel.NewTextContent(short)},
+		{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent(body0)},
+		{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent(short)},
+		{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(short)},
+		{Role: schema.RoleTool, ToolCallID: "c4", Content: aimodel.NewTextContent(short)},
+		{Role: schema.RoleTool, ToolCallID: "c5", Content: aimodel.NewTextContent(short)},
 	}}
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -370,8 +370,8 @@ func TestElide_LosesToKeepLastK_StillReportsArtifact(t *testing.T) {
 	idx0 := findToolCallResult(got, "c1")
 	idx1 := findToolCallResult(got, "c2")
 
-	t0 := got[idx0].Content.Text()
-	t1 := got[idx1].Content.Text()
+	t0 := got[idx0].Text()
+	t1 := got[idx1].Text()
 
 	if !strings.Contains(t0, ContextEditStrategyElideArtifact) {
 		t.Errorf("c1 expected elide reason, got %q", t0)
@@ -407,18 +407,18 @@ func TestElide_ThreeStrategiesStack(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	r1, _ := mkRead("c1", "/a", t) // read /a — will become stale
-	rr1 := aimodel.Message{Role: aimodel.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent("short read of /a")}
+	rr1 := schema.Message{Role: schema.RoleTool, ToolCallID: "c1", Content: aimodel.NewTextContent("short read of /a")}
 	r2, _ := mkRead("c2", "/b", t) // read /b — keep_last_k victim only
-	rr2 := aimodel.Message{Role: aimodel.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent("short read of /b")}
+	rr2 := schema.Message{Role: schema.RoleTool, ToolCallID: "c2", Content: aimodel.NewTextContent("short read of /b")}
 	r3, _ := mkRead("c3", "/c", t) // read /c — oversized -> elide
-	rr3 := aimodel.Message{Role: aimodel.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(strings.Repeat("c", 5000))}
+	rr3 := schema.Message{Role: schema.RoleTool, ToolCallID: "c3", Content: aimodel.NewTextContent(strings.Repeat("c", 5000))}
 	r4, rr4 := mkRead("c4", "/d", t) // read /d — kept by keep_last_k
 	r5, rr5 := mkRead("c5", "/e", t) // read /e — kept by keep_last_k
 	w1, wr1 := mkWrite("cw", "/a", t)
 
 	req := buildReact(t, []turn{
-		{calls: []aimodel.ToolCall{r1, r2, r3, r4, r5}, results: []aimodel.Message{rr1, rr2, rr3, rr4, rr5}},
-		{calls: []aimodel.ToolCall{w1}, results: []aimodel.Message{wr1}},
+		{calls: []schema.ToolCall{r1, r2, r3, r4, r5}, results: []schema.Message{rr1, rr2, rr3, rr4, rr5}},
+		{calls: []schema.ToolCall{w1}, results: []schema.Message{wr1}},
 	})
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -426,9 +426,9 @@ func TestElide_ThreeStrategiesStack(t *testing.T) {
 	}
 
 	got := cap.gotChat.Messages
-	t1 := got[findToolCallResult(got, "c1")].Content.Text()
-	t2 := got[findToolCallResult(got, "c2")].Content.Text()
-	t3 := got[findToolCallResult(got, "c3")].Content.Text()
+	t1 := got[findToolCallResult(got, "c1")].Text()
+	t2 := got[findToolCallResult(got, "c2")].Text()
+	t3 := got[findToolCallResult(got, "c3")].Text()
 
 	if !strings.Contains(t1, contextEditStrategyStaleResource) {
 		t.Errorf("c1 expected stale, got %q", t1)

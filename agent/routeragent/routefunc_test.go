@@ -58,10 +58,10 @@ func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.C
 func llmResponse(text string, prompt, completion, total int) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+		Usage: schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 	}
 }
 
@@ -133,7 +133,7 @@ func TestKeywordFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		req := &schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage(tt.input)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, tt.input)},
 		}
 		got, err := fn(context.Background(), req, routes)
 		if err != nil {
@@ -150,8 +150,8 @@ func TestKeywordFunc_UsesLastMessage(t *testing.T) {
 	fn := KeywordFunc(-1)
 	req := &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("weather"),
-			schema.NewUserMessage("send email"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "weather"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "send email"),
 		},
 	}
 	got, err := fn(context.Background(), req, routes)
@@ -167,7 +167,7 @@ func TestKeywordFunc_NoMatch(t *testing.T) {
 	routes := testRoutes()
 	fn := KeywordFunc(-1)
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("play music")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "play music")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -181,7 +181,7 @@ func TestKeywordFunc_NoMatch(t *testing.T) {
 func TestKeywordFunc_EmptyRoutes(t *testing.T) {
 	fn := KeywordFunc(-1)
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	}
 	_, err := fn(context.Background(), req, nil)
 	if err == nil {
@@ -193,7 +193,7 @@ func TestKeywordFunc_Fallback(t *testing.T) {
 	routes := testRoutes()
 	fn := KeywordFunc(0) // fallback to first route
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("play music")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "play music")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -208,7 +208,7 @@ func TestKeywordFunc_FallbackOutOfRange(t *testing.T) {
 	routes := testRoutes()
 	fn := KeywordFunc(99) // out of range fallback
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("play music")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "play music")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -268,7 +268,7 @@ func TestLLMFunc_SelectsCorrectRoute(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("check my schedule")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "check my schedule")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestLLMFunc_SelectsFirstRoute(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("what's the weather?")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "what's the weather?")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -309,7 +309,7 @@ func TestLLMFunc_SelectsLastRoute(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("send email")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "send email")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -326,7 +326,7 @@ func TestLLMFunc_PromptContainsDescriptions(t *testing.T) {
 	fn := LLMFunc(mock, "my-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test input")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test input")},
 	}
 	_, _ = fn(context.Background(), req, routes)
 
@@ -336,13 +336,13 @@ func TestLLMFunc_PromptContainsDescriptions(t *testing.T) {
 	if mock.captured.Model != "my-model" {
 		t.Errorf("Model = %q, want %q", mock.captured.Model, "my-model")
 	}
-	sysText := mock.captured.Messages[0].Content.Text()
+	sysText := mock.captured.Messages[0].Text()
 	for _, desc := range []string{"weather", "calendar", "email"} {
 		if !strings.Contains(sysText, desc) {
 			t.Errorf("system prompt missing description %q", desc)
 		}
 	}
-	userText := mock.captured.Messages[1].Content.Text()
+	userText := mock.captured.Messages[1].Text()
 	if userText != "test input" {
 		t.Errorf("user text = %q, want %q", userText, "test input")
 	}
@@ -354,7 +354,7 @@ func TestLLMFunc_LLMError_NoFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -371,7 +371,7 @@ func TestLLMFunc_LLMError_WithFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", 0) // fallback to first
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -388,7 +388,7 @@ func TestLLMFunc_NonNumericResponse_NoFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -405,7 +405,7 @@ func TestLLMFunc_NonNumericResponse_WithFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", 2) // fallback to email
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -425,7 +425,7 @@ func TestLLMFunc_OutOfRangeIndex_NoFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -442,7 +442,7 @@ func TestLLMFunc_OutOfRangeIndex_WithFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", 1) // fallback to calendar
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -459,7 +459,7 @@ func TestLLMFunc_NegativeIndex_NoFallback(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -475,7 +475,7 @@ func TestLLMFunc_EmptyRoutes(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, nil)
 	if err == nil {
@@ -490,12 +490,12 @@ func TestLLMFunc_EmptyChoices_NoFallback(t *testing.T) {
 	routes := testRoutes()
 	mock := &mockChatCompleter{response: &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{},
-		Usage:   aimodel.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+		Usage:   schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 	}}
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	_, err := fn(context.Background(), req, routes)
 	if err == nil {
@@ -510,12 +510,12 @@ func TestLLMFunc_EmptyChoices_WithFallback(t *testing.T) {
 	routes := testRoutes()
 	mock := &mockChatCompleter{response: &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{},
-		Usage:   aimodel.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+		Usage:   schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 	}}
 	fn := LLMFunc(mock, "test-model", 0)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {
@@ -532,7 +532,7 @@ func TestLLMFunc_WhitespaceResponse(t *testing.T) {
 	fn := LLMFunc(mock, "test-model", -1)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	}
 	got, err := fn(context.Background(), req, routes)
 	if err != nil {

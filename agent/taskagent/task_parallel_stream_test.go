@@ -106,7 +106,7 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("three waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "three waits")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)

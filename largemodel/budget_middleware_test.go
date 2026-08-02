@@ -31,7 +31,7 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 
 	mw := NewBudgetMiddleware(
 		func(_ context.Context) error { return sentinel },
-		func(_ context.Context, _ aimodel.Usage) { t.Fatal("postRecord must not run when preCheck fails") },
+		func(_ context.Context, _ schema.Usage) { t.Fatal("postRecord must not run when preCheck fails") },
 	)
 	wrapped := mw.Wrap(mock)
 
@@ -47,13 +47,13 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
 		ID:    "ok",
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
 
-	var recorded aimodel.Usage
+	var recorded schema.Usage
 	mw := NewBudgetMiddleware(
 		nil,
-		func(_ context.Context, u aimodel.Usage) { recorded = u },
+		func(_ context.Context, u schema.Usage) { recorded = u },
 	)
 	wrapped := mw.Wrap(mock)
 
@@ -90,7 +90,7 @@ func TestBudgetMiddlewareStreamPreCheckBlocks(t *testing.T) {
 	var postRecordHit bool
 	mw := NewBudgetMiddleware(
 		func(_ context.Context) error { return sentinel },
-		func(_ context.Context, _ aimodel.Usage) { postRecordHit = true },
+		func(_ context.Context, _ schema.Usage) { postRecordHit = true },
 	)
 	wrapped := mw.Wrap(mock)
 
@@ -115,7 +115,7 @@ func TestBudgetMiddlewareStreamPassesThroughWhenUpstreamNil(t *testing.T) {
 	var hits int
 	mw := NewBudgetMiddleware(
 		nil,
-		func(_ context.Context, _ aimodel.Usage) { hits++ },
+		func(_ context.Context, _ schema.Usage) { hits++ },
 	)
 	wrapped := mw.Wrap(mock)
 

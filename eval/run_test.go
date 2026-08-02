@@ -29,7 +29,7 @@ func TestRunAndEvaluate(t *testing.T) {
 	runFn := func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 
 		return makeResponse(text), nil
@@ -40,12 +40,12 @@ func TestRunAndEvaluate(t *testing.T) {
 	cases := []*EvalCase{
 		{
 			ID:       "run-pass",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("hello"),
 		},
 		{
 			ID:       "run-fail",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("world"),
 		},
 	}
@@ -73,7 +73,7 @@ func TestRunAndEvaluate_SkipsPrefilledActual(t *testing.T) {
 	cases := []*EvalCase{
 		{
 			ID:       "prefilled",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 			Expected: makeResponse("existing"),
 			Actual:   makeResponse("existing"), // Already filled.
 		},
@@ -127,7 +127,7 @@ func TestRunAndEvaluate_AgentError(t *testing.T) {
 	cases := []*EvalCase{
 		{
 			ID:    "error",
-			Input: &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+			Input: &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestRunAndEvaluate_ContextCancelled(t *testing.T) {
 	cases := []*EvalCase{
 		{
 			ID:    "cancel",
-			Input: &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+			Input: &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 		},
 	}
 

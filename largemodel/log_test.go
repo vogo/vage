@@ -34,7 +34,7 @@ func TestLogMiddleware_ChatCompletion_Success(t *testing.T) {
 
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
 		ID:    "resp-1",
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 	}}
 
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)

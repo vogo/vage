@@ -31,10 +31,7 @@ func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(text),
-				},
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			},
 		},
 	}
@@ -49,18 +46,16 @@ func makeResponseWithDuration(text string, durationMs int64) *schema.RunResponse
 
 func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 	resp := makeResponse(text)
-	resp.Usage = &aimodel.Usage{TotalTokens: totalTokens}
+	resp.Usage = &schema.Usage{TotalTokens: totalTokens}
 
 	return resp
 }
 
-func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: aimodel.Message{
-					Role:      aimodel.RoleAssistant,
-					Content:   aimodel.NewTextContent(""),
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
 					ToolCalls: calls,
 				},
 			},
@@ -86,10 +81,9 @@ func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{
 			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
+				Message: schema.Message{
+					Role:    schema.RoleAssistant,
 					Content: aimodel.NewTextContent(m.response),
-				},
 			},
 		},
 	}, nil

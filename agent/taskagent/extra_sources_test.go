@@ -37,8 +37,8 @@ type markerSource struct {
 func (m *markerSource) Name() string { return "marker_" + m.marker }
 func (m *markerSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchResult, error) {
 	return vctx.FetchResult{
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("MARKER:" + m.marker)},
+		Messages: []schema.Message{
+			{Role: schema.RoleSystem, Content: aimodel.NewTextContent("MARKER:" + m.marker)},
 		},
 		Report: schema.ContextSourceReport{
 			Source:  "marker_" + m.marker,
@@ -58,7 +58,7 @@ func TestWithExtraSources_Order(t *testing.T) {
 
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
@@ -75,13 +75,13 @@ func TestWithExtraSources_Order(t *testing.T) {
 	if got := len(br.messages); got != 3 {
 		t.Fatalf("messages = %d, want 3 — got %+v", got, br.messages)
 	}
-	if got := br.messages[0].Content.Text(); got != "MARKER:alpha" {
+	if got := br.messages[0].Text(); got != "MARKER:alpha" {
 		t.Errorf("messages[0] = %q, want MARKER:alpha", got)
 	}
-	if got := br.messages[1].Content.Text(); got != "MARKER:beta" {
+	if got := br.messages[1].Text(); got != "MARKER:beta" {
 		t.Errorf("messages[1] = %q, want MARKER:beta", got)
 	}
-	if got := br.messages[2].Role; got != aimodel.RoleUser {
+	if got := br.messages[2].Role; got != schema.RoleUser {
 		t.Errorf("messages[2].Role = %q, want user", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 	a := New(agent.Config{ID: "t1"})
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
@@ -115,7 +115,7 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 	if len(br.messages) != 1 {
 		t.Fatalf("messages = %d, want 1: %+v", len(br.messages), br.messages)
 	}
-	if br.messages[0].Role != aimodel.RoleUser {
+	if br.messages[0].Role() != schema.RoleUser {
 		t.Errorf("role = %q, want user", br.messages[0].Role)
 	}
 }

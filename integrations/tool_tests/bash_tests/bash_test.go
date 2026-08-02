@@ -670,7 +670,7 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 
 	resp, err := a.Run(ctx, &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("Execute exactly this bash command and report the output verbatim: `echo vage-test-ok`"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Execute exactly this bash command and report the output verbatim: `echo vage-test-ok`"),
 		},
 	})
 	if err != nil {
@@ -679,8 +679,8 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 
 	var responseText strings.Builder
 	for _, msg := range resp.Messages {
-		if msg.Role == aimodel.RoleAssistant {
-			text := msg.Content.Text()
+		if msg.Role() == schema.RoleAssistant {
+			text := msg.Text()
 			if text != "" {
 				responseText.WriteString(text)
 			}

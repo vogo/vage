@@ -34,9 +34,9 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 	t.Run("no summarization needed", func(t *testing.T) {
 		c := NewSummarizeAndTruncCompressor(mockSummarizer, 5)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -50,11 +50,11 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 	t.Run("summarization triggered", func(t *testing.T) {
 		c := NewSummarizeAndTruncCompressor(mockSummarizer, 2)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
-			schema.NewUserMessage("d"),
-			schema.NewUserMessage("e"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "d"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "e"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -64,25 +64,25 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		if len(result) != 3 {
 			t.Fatalf("got %d messages, want 3", len(result))
 		}
-		if result[0].Content.Text() != "summary of older messages" {
-			t.Errorf("summary = %q, want %q", result[0].Content.Text(), "summary of older messages")
+		if result[0].Text() != "summary of older messages" {
+			t.Errorf("summary = %q, want %q", result[0].Text(), "summary of older messages")
 		}
-		if result[1].Content.Text() != "d" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "d")
+		if result[1].Text() != "d" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "d")
 		}
-		if result[2].Content.Text() != "e" {
-			t.Errorf("result[2] = %q, want %q", result[2].Content.Text(), "e")
+		if result[2].Text() != "e" {
+			t.Errorf("result[2] = %q, want %q", result[2].Text(), "e")
 		}
 	})
 
 	t.Run("summary metadata", func(t *testing.T) {
 		c := NewSummarizeAndTruncCompressor(mockSummarizer, 2)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
-			schema.NewUserMessage("d"),
-			schema.NewUserMessage("e"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "d"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "e"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -107,10 +107,10 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		}
 		c := NewSummarizeAndTruncCompressor(emptySummarizer, 2)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
-			schema.NewUserMessage("d"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "d"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -120,8 +120,8 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "c" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "c")
+		if result[0].Text() != "c" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "c")
 		}
 	})
 
@@ -131,8 +131,8 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		}
 		c := NewSummarizeAndTruncCompressor(errSummarizer, 1)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
 		}
 		_, err := c.Compress(context.Background(), msgs, 0)
 		if err == nil {
@@ -148,7 +148,7 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage("hi")}, 0)
+		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}, 0)
 		if err == nil {
 			t.Error("expected error for cancelled context")
 		}
@@ -157,9 +157,9 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 	t.Run("keepLastN equals len", func(t *testing.T) {
 		c := NewSummarizeAndTruncCompressor(mockSummarizer, 3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -171,17 +171,17 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 	})
 
 	t.Run("custom summary role", func(t *testing.T) {
-		c := NewSummarizeAndTruncCompressor(mockSummarizer, 1, WithSummaryRole(aimodel.RoleSystem))
+		c := NewSummarizeAndTruncCompressor(mockSummarizer, 1, WithSummaryRole(schema.RoleSystem))
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("summary role = %q, want %q", result[0].Role, aimodel.RoleSystem)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("summary role = %q, want %q", result[0].Role, schema.RoleSystem)
 		}
 	})
 
@@ -191,9 +191,9 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		}
 		c := NewSummarizeAndTruncCompressor(longSummarizer, 1)
 		msgs := []schema.Message{
-			schema.NewUserMessage("old1"),
-			schema.NewUserMessage("old2"),
-			schema.NewUserMessage("aaaa"), // 1 token recent
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old2"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token recent
 		}
 		// Budget=3: recent uses 1 token, summary budget=2 tokens (~8 chars)
 		result, err := c.Compress(context.Background(), msgs, 3)
@@ -204,7 +204,7 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 			t.Fatalf("got %d messages, want 2 (summary + recent)", len(result))
 		}
 		// Summary should be truncated
-		summaryText := result[0].Content.Text()
+		summaryText := result[0].Text()
 		fullText := "this is a very long summary text that should be truncated"
 		if len(summaryText) >= len(fullText) {
 			t.Errorf("summary should be truncated, got len=%d", len(summaryText))
@@ -217,8 +217,8 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		}
 		c := NewSummarizeAndTruncCompressor(longSummarizer, 1)
 		msgs := []schema.Message{
-			schema.NewUserMessage("old"),
-			schema.NewUserMessage("aaaaaaaabbbbbbbb"), // 4 tokens recent
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaaaaaabbbbbbbb"), // 4 tokens recent
 		}
 		// Budget=2: recent uses 4 tokens, exceeds budget → no room for summary
 		result, err := c.Compress(context.Background(), msgs, 2)
@@ -228,8 +228,8 @@ func TestSummarizeAndTruncCompressor(t *testing.T) {
 		if len(result) != 1 {
 			t.Fatalf("got %d messages, want 1 (recent only)", len(result))
 		}
-		if result[0].Content.Text() != "aaaaaaaabbbbbbbb" {
-			t.Errorf("result[0] = %q, want recent message", result[0].Content.Text())
+		if result[0].Text() != "aaaaaaaabbbbbbbb" {
+			t.Errorf("result[0] = %q, want recent message", result[0].Text())
 		}
 	})
 

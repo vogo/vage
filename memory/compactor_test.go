@@ -41,17 +41,17 @@ func errSummarizer(err error) Summarizer {
 
 func sysMsg(text string) schema.Message {
 	return schema.Message{
-		Message: aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(text)},
+		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text),
 	}
 }
 
 func userMsg(text string) schema.Message {
-	return schema.NewUserMessage(text)
+	return schema.NewUserMessage(schema.ProtocolOpenAIChat, text)
 }
 
 func assistantMsg(text string) schema.Message {
 	return schema.Message{
-		Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 	}
 }
 
@@ -105,21 +105,21 @@ func TestConversationCompactor_CompactsEligibleMessages(t *testing.T) {
 	}
 
 	// First message should be system prompt.
-	if result[0].Role != aimodel.RoleSystem {
+	if result[0].Role() != schema.RoleSystem {
 		t.Errorf("first message role = %q, want system", result[0].Role)
 	}
 
-	if result[0].Content.Text() != "system prompt" {
+	if result[0].Text() != "system prompt" {
 		t.Errorf("first message should be original system prompt")
 	}
 
 	// Second message should be the summary.
-	if result[1].Role != aimodel.RoleSystem {
+	if result[1].Role() != schema.RoleSystem {
 		t.Errorf("summary role = %q, want system", result[1].Role)
 	}
 
-	if result[1].Content.Text() != "conversation summary" {
-		t.Errorf("summary text = %q, want %q", result[1].Content.Text(), "conversation summary")
+	if result[1].Text() != "conversation summary" {
+		t.Errorf("summary text = %q, want %q", result[1].Text(), "conversation summary")
 	}
 
 	// Check metadata.
@@ -140,12 +140,12 @@ func TestConversationCompactor_CompactsEligibleMessages(t *testing.T) {
 	}
 
 	// Last two should be the protected pair.
-	if result[2].Content.Text() != "third question" {
-		t.Errorf("protected user msg = %q", result[2].Content.Text())
+	if result[2].Text() != "third question" {
+		t.Errorf("protected user msg = %q", result[2].Text())
 	}
 
-	if result[3].Content.Text() != "third answer" {
-		t.Errorf("protected assistant msg = %q", result[3].Content.Text())
+	if result[3].Text() != "third answer" {
+		t.Errorf("protected assistant msg = %q", result[3].Text())
 	}
 }
 
@@ -171,7 +171,7 @@ func TestConversationCompactor_NoSystemPrompt(t *testing.T) {
 		t.Errorf("expected 3 messages, got %d", len(result))
 	}
 
-	if result[0].Role != aimodel.RoleSystem {
+	if result[0].Role() != schema.RoleSystem {
 		t.Errorf("summary role = %q, want system", result[0].Role)
 	}
 }
@@ -266,7 +266,7 @@ func TestConversationCompactor_WithMaxInputTokens(t *testing.T) {
 	// Check an omission marker exists.
 	hasMarker := false
 	for _, m := range receivedMsgs {
-		if strings.Contains(m.Content.Text(), "messages omitted") {
+		if strings.Contains(m.Text(), "messages omitted") {
 			hasMarker = true
 			break
 		}
@@ -369,7 +369,7 @@ func TestCompactIfNeeded_NilCompactor(t *testing.T) {
 
 func TestConversationCompactor_WithTokenEstimator(t *testing.T) {
 	customEstimator := func(msg schema.Message) int {
-		return len(msg.Content.Text()) // 1 token per char
+		return len(msg.Text()) // 1 token per char
 	}
 
 	c := NewConversationCompactor(mockSummarizer("summary"), 1).WithTokenEstimator(customEstimator)
@@ -405,7 +405,7 @@ func TestConversationCompactor_ExistingSummaryMessage(t *testing.T) {
 	msgs := []schema.Message{
 		sysMsg("system"),
 		{
-			Message: aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("old summary")},
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "old summary"),
 			Metadata: map[string]any{
 				"compressed": true,
 				"strategy":   "conversation_compact",

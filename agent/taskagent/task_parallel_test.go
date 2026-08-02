@@ -35,9 +35,9 @@ import (
 // batchToolCallResponse returns a single-assistant-message response whose
 // ToolCalls slice contains one entry per (id, name, args) triple.
 func batchToolCallResponse(calls ...[3]string) *aimodel.ChatResponse {
-	tcs := make([]aimodel.ToolCall, 0, len(calls))
+	tcs := make([]schema.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		tcs = append(tcs, aimodel.ToolCall{
+		tcs = append(tcs, schema.ToolCall{
 			ID:       c[0],
 			Type:     "function",
 			Function: aimodel.FunctionCall{Name: c[1], Arguments: c[2]},
@@ -45,14 +45,12 @@ func batchToolCallResponse(calls ...[3]string) *aimodel.ChatResponse {
 	}
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:      aimodel.RoleAssistant,
-				Content:   aimodel.NewTextContent(""),
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
 				ToolCalls: tcs,
 			},
 			FinishReason: aimodel.FinishReasonToolCalls,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 }
 
@@ -85,7 +83,6 @@ func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
 				[3]string{"tc-2", "slow", `{"delay_ms":200}`},
 			),
 			stopResponse("done"),
-		},
 	}
 
 	reg := tool.NewRegistry()
@@ -101,7 +98,7 @@ func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("run two slow tools")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "run two slow tools")},
 	})
 	elapsed := time.Since(start)
 
@@ -163,7 +160,7 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("8 calls, cap 4")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "8 calls, cap 4")},
 	})
 	elapsed := time.Since(start)
 
@@ -224,7 +221,7 @@ func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("four waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "four waits")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -311,7 +308,7 @@ func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
 
 	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg), WithHookManager(mgr))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("two waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "two waits")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -372,7 +369,7 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 
 	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("mixed")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "mixed")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v (tool errors should not abort the loop)", err)
@@ -381,9 +378,9 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 	// Inspect the second LLM request: the three tool-result messages must
 	// follow the assistant message in the same ToolCalls order.
 	secondReq := mock.requests[1]
-	var toolMsgs []aimodel.Message
+	var toolMsgs []schema.Message
 	for _, m := range secondReq.Messages {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			toolMsgs = append(toolMsgs, m)
 		}
 	}
@@ -397,7 +394,7 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 		}
 	}
 	// Middle message carries the error text surfaced by executeToolCall.
-	if got := toolMsgs[1].Content.Text(); got != "boom" {
+	if got := toolMsgs[1].Text(); got != "boom" {
 		t.Errorf("error message body = %q, want %q", got, "boom")
 	}
 }
@@ -434,7 +431,7 @@ func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("serial")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "serial")},
 	})
 	elapsed := time.Since(start)
 
@@ -475,16 +472,16 @@ func TestSingleToolCall_UsesFastPath(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("one")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "one")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	secondReq := mock.requests[1]
 	last := secondReq.Messages[len(secondReq.Messages)-1]
-	if last.Role != aimodel.RoleTool || last.ToolCallID != "tc-1" || last.Content.Text() != `{"v":"hi"}` {
+	if last.Role() != schema.RoleTool || last.ToolCallID != "tc-1" || last.Text() != `{"v":"hi"}` {
 		t.Errorf("single-call transcript mismatch: role=%s id=%s body=%q",
-			last.Role, last.ToolCallID, last.Content.Text())
+			last.Role, last.ToolCallID, last.Text())
 	}
 }
 

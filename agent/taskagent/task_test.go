@@ -66,20 +66,18 @@ func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.C
 func stopResponse(text string) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 }
 
 func toolCallResponse(toolCallID, funcName, args string) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent(""),
-				ToolCalls: []aimodel.ToolCall{{
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				ToolCalls: []schema.ToolCall{{
 					ID:       toolCallID,
 					Type:     "function",
 					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
@@ -87,7 +85,7 @@ func toolCallResponse(toolCallID, funcName, args string) *aimodel.ChatResponse {
 			},
 			FinishReason: aimodel.FinishReasonToolCalls,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 }
 
@@ -150,7 +148,7 @@ func TestNew_WithOptions(t *testing.T) {
 func TestAgent_Run_NoChatCompleter(t *testing.T) {
 	a := New(agent.Config{})
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err == nil {
 		t.Fatal("expected error without ChatCompleter")
@@ -168,7 +166,7 @@ func TestAgent_Run_SimpleResponse(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -176,8 +174,8 @@ func TestAgent_Run_SimpleResponse(t *testing.T) {
 	if len(resp.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(resp.Messages))
 	}
-	if resp.Messages[0].Content.Text() != "Hello!" {
-		t.Errorf("Content = %q, want %q", resp.Messages[0].Content.Text(), "Hello!")
+	if resp.Messages[0].Text() != "Hello!" {
+		t.Errorf("Content = %q, want %q", resp.Messages[0].Text(), "Hello!")
 	}
 	if resp.Messages[0].AgentID != "a1" {
 		t.Errorf("AgentID = %q, want %q", resp.Messages[0].AgentID, "a1")
@@ -198,7 +196,7 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -209,11 +207,11 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 	if len(req.Messages) < 2 {
 		t.Fatalf("len(Messages) = %d, want >= 2", len(req.Messages))
 	}
-	if req.Messages[0].Role != aimodel.RoleSystem {
-		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, aimodel.RoleSystem)
+	if req.Messages[0].Role() != schema.RoleSystem {
+		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, schema.RoleSystem)
 	}
-	if req.Messages[0].Content.Text() != "You are helpful." {
-		t.Errorf("system content = %q, want %q", req.Messages[0].Content.Text(), "You are helpful.")
+	if req.Messages[0].Text() != "You are helpful." {
+		t.Errorf("system content = %q, want %q", req.Messages[0].Text(), "You are helpful.")
 	}
 }
 
@@ -225,19 +223,19 @@ func TestAgent_Run_WithTemplateSystemPrompt(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 
 	req := mock.requests[0]
-	if req.Messages[0].Role != aimodel.RoleSystem {
-		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, aimodel.RoleSystem)
+	if req.Messages[0].Role() != schema.RoleSystem {
+		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, schema.RoleSystem)
 	}
 	want := "Hello, <no value>!"
-	if req.Messages[0].Content.Text() != want {
-		t.Errorf("system content = %q, want %q", req.Messages[0].Content.Text(), want)
+	if req.Messages[0].Text() != want {
+		t.Errorf("system content = %q, want %q", req.Messages[0].Text(), want)
 	}
 }
 
@@ -246,7 +244,6 @@ func TestAgent_Run_ToolCallLoop(t *testing.T) {
 		responses: []*aimodel.ChatResponse{
 			toolCallResponse("tc-1", "get_weather", `{"city":"Paris"}`),
 			stopResponse("The weather in Paris is sunny."),
-		},
 	}
 
 	reg := tool.NewRegistry()
@@ -264,13 +261,13 @@ func TestAgent_Run_ToolCallLoop(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("What's the weather in Paris?")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "What's the weather in Paris?")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "The weather in Paris is sunny." {
-		t.Errorf("final response = %q", resp.Messages[0].Content.Text())
+	if resp.Messages[0].Text() != "The weather in Paris is sunny." {
+		t.Errorf("final response = %q", resp.Messages[0].Text())
 	}
 
 	if mock.calls != 2 {
@@ -283,14 +280,14 @@ func TestAgent_Run_ToolCallLoop(t *testing.T) {
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if lastMsg.Role != aimodel.RoleTool {
-		t.Errorf("last message Role = %q, want %q", lastMsg.Role, aimodel.RoleTool)
+	if lastMsg.Role() != schema.RoleTool {
+		t.Errorf("last message Role = %q, want %q", lastMsg.Role, schema.RoleTool)
 	}
 	if lastMsg.ToolCallID != "tc-1" {
 		t.Errorf("ToolCallID = %q, want %q", lastMsg.ToolCallID, "tc-1")
 	}
-	if lastMsg.Content.Text() != "sunny, 22°C" {
-		t.Errorf("tool result content = %q, want %q", lastMsg.Content.Text(), "sunny, 22°C")
+	if lastMsg.Text() != "sunny, 22°C" {
+		t.Errorf("tool result content = %q, want %q", lastMsg.Text(), "sunny, 22°C")
 	}
 }
 
@@ -316,19 +313,19 @@ func TestAgent_Run_ToolExecutionError(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do something")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do something")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v (tool errors should not abort the loop)", err)
 	}
-	if resp.Messages[0].Content.Text() != "Sorry, the tool failed." {
-		t.Errorf("response = %q", resp.Messages[0].Content.Text())
+	if resp.Messages[0].Text() != "Sorry, the tool failed." {
+		t.Errorf("response = %q", resp.Messages[0].Text())
 	}
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if lastMsg.Content.Text() != "connection refused" {
-		t.Errorf("error feedback = %q, want %q", lastMsg.Content.Text(), "connection refused")
+	if lastMsg.Text() != "connection refused" {
+		t.Errorf("error feedback = %q, want %q", lastMsg.Text(), "connection refused")
 	}
 }
 
@@ -356,7 +353,7 @@ func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("loop forever")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "loop forever")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -374,7 +371,7 @@ func TestAgent_Run_ChatCompletionError(t *testing.T) {
 	a := New(agent.Config{}, WithChatCompleter(mock))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -386,12 +383,12 @@ func TestAgent_Run_ChatCompletionError(t *testing.T) {
 
 func TestAgent_Run_EmptyResponse(t *testing.T) {
 	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{{Choices: nil, Usage: aimodel.Usage{}}},
+		responses: []*aimodel.ChatResponse{{Choices: nil, Usage: schema.Usage{}}},
 	}
 	a := New(agent.Config{}, WithChatCompleter(mock))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err == nil {
 		t.Fatal("expected error for empty choices")
@@ -411,7 +408,7 @@ func TestAgent_Run_OptionsOverride(t *testing.T) {
 
 	temp := 0.9
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		Options: &schema.RunOptions{
 			Model:       "override-model",
 			Temperature: &temp,
@@ -447,7 +444,7 @@ func TestAgent_Run_ToolFilter(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		Options:  &schema.RunOptions{Tools: []string{"allowed"}},
 	})
 	if err != nil {
@@ -468,7 +465,7 @@ func TestAgent_Run_SessionIDPassthrough(t *testing.T) {
 	a := New(agent.Config{}, WithChatCompleter(mock))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "session-123",
 	})
 	if err != nil {
@@ -500,8 +497,8 @@ func TestRunText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunText error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "world" {
-		t.Errorf("response = %q, want %q", resp.Messages[0].Content.Text(), "world")
+	if resp.Messages[0].Text() != "world" {
+		t.Errorf("response = %q, want %q", resp.Messages[0].Text(), "world")
 	}
 
 	// Verify the user message was sent.
@@ -509,8 +506,8 @@ func TestRunText(t *testing.T) {
 	if len(req.Messages) != 1 {
 		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
 	}
-	if req.Messages[0].Content.Text() != "hello" {
-		t.Errorf("input = %q, want %q", req.Messages[0].Content.Text(), "hello")
+	if req.Messages[0].Text() != "hello" {
+		t.Errorf("input = %q, want %q", req.Messages[0].Text(), "hello")
 	}
 }
 
@@ -522,7 +519,7 @@ func TestAgent_Run_ContextCanceled(t *testing.T) {
 	a := New(agent.Config{}, WithChatCompleter(mock))
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err == nil {
 		t.Fatal("expected error for canceled context")
@@ -606,7 +603,7 @@ func TestAgent_RunStream_SimpleText(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -697,7 +694,7 @@ func TestAgent_RunStream_ToolCallLoop(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("Weather?")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "Weather?")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream error: %v", err)
@@ -752,7 +749,7 @@ func TestAgent_RunStream_CloseEarly(t *testing.T) {
 
 	a := New(agent.Config{}, WithChatCompleter(client))
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream error: %v", err)
@@ -803,7 +800,7 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("loop")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "loop")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream error: %v", err)
@@ -841,7 +838,7 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 func TestAgent_RunStream_NoChatCompleter(t *testing.T) {
 	a := New(agent.Config{})
 	_, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err == nil {
 		t.Fatal("expected error without ChatCompleter")
@@ -921,7 +918,7 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream error: %v", err)
@@ -955,14 +952,14 @@ func TestAgent_Run_WithMemory(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "Hello!" {
-		t.Errorf("response = %q, want %q", resp.Messages[0].Content.Text(), "Hello!")
+	if resp.Messages[0].Text() != "Hello!" {
+		t.Errorf("response = %q, want %q", resp.Messages[0].Text(), "Hello!")
 	}
 
 	entries, err := session.List(context.Background(), "msg:")
@@ -986,7 +983,7 @@ func TestAgent_Run_WithMemory_MultiTurn(t *testing.T) {
 	)
 
 	_, err := a1.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("How are you?")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "How are you?")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1001,7 +998,7 @@ func TestAgent_Run_WithMemory_MultiTurn(t *testing.T) {
 	)
 
 	_, err = a2.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("What's my name?")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "What's my name?")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1013,11 +1010,11 @@ func TestAgent_Run_WithMemory_MultiTurn(t *testing.T) {
 		t.Fatalf("second request messages = %d, want >= 3", len(req.Messages))
 	}
 
-	if req.Messages[0].Role != aimodel.RoleUser {
-		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, aimodel.RoleUser)
+	if req.Messages[0].Role() != schema.RoleUser {
+		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, schema.RoleUser)
 	}
-	if req.Messages[0].Content.Text() != "How are you?" {
-		t.Errorf("Messages[0].Content = %q, want %q", req.Messages[0].Content.Text(), "How are you?")
+	if req.Messages[0].Text() != "How are you?" {
+		t.Errorf("Messages[0].Content = %q, want %q", req.Messages[0].Text(), "How are you?")
 	}
 }
 
@@ -1031,9 +1028,9 @@ func TestAgent_Run_WithMemory_Compressor(t *testing.T) {
 
 	ctx := context.Background()
 
-	_ = session.Set(ctx, "msg:0", schema.NewUserMessage("first"), 0)
-	_ = session.Set(ctx, "msg:1", schema.NewUserMessage("second"), 0)
-	_ = session.Set(ctx, "msg:2", schema.NewUserMessage("third"), 0)
+	_ = session.Set(ctx, "msg:0", schema.NewUserMessage(schema.ProtocolOpenAIChat, "first"), 0)
+	_ = session.Set(ctx, "msg:1", schema.NewUserMessage(schema.ProtocolOpenAIChat, "second"), 0)
+	_ = session.Set(ctx, "msg:2", schema.NewUserMessage(schema.ProtocolOpenAIChat, "third"), 0)
 
 	mock := &mockChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
 	a := New(
@@ -1043,7 +1040,7 @@ func TestAgent_Run_WithMemory_Compressor(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("current")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "current")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1054,11 +1051,11 @@ func TestAgent_Run_WithMemory_Compressor(t *testing.T) {
 	if len(req.Messages) != 2 {
 		t.Fatalf("messages = %d, want 2", len(req.Messages))
 	}
-	if req.Messages[0].Content.Text() != "third" {
-		t.Errorf("Messages[0] = %q, want %q", req.Messages[0].Content.Text(), "third")
+	if req.Messages[0].Text() != "third" {
+		t.Errorf("Messages[0] = %q, want %q", req.Messages[0].Text(), "third")
 	}
-	if req.Messages[1].Content.Text() != "current" {
-		t.Errorf("Messages[1] = %q, want %q", req.Messages[1].Content.Text(), "current")
+	if req.Messages[1].Text() != "current" {
+		t.Errorf("Messages[1] = %q, want %q", req.Messages[1].Text(), "current")
 	}
 }
 
@@ -1070,13 +1067,13 @@ func TestAgent_Run_WithoutMemory_Unchanged(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "ok" {
-		t.Errorf("response = %q, want %q", resp.Messages[0].Content.Text(), "ok")
+	if resp.Messages[0].Text() != "ok" {
+		t.Errorf("response = %q, want %q", resp.Messages[0].Text(), "ok")
 	}
 
 	req := mock.requests[0]
@@ -1090,7 +1087,7 @@ func TestRunToStream(t *testing.T) {
 	a := New(agent.Config{ID: "test-agent"}, WithChatCompleter(mock))
 
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "s1",
 	}
 
@@ -1159,7 +1156,7 @@ func TestAgent_Run_WithSkillManager_PromptInjection(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1167,7 +1164,7 @@ func TestAgent_Run_WithSkillManager_PromptInjection(t *testing.T) {
 	}
 
 	req := mock.requests[0]
-	sysContent := req.Messages[0].Content.Text()
+	sysContent := req.Messages[0].Text()
 	if !strings.Contains(sysContent, "You are helpful.") {
 		t.Error("system prompt should contain original text")
 	}
@@ -1190,7 +1187,7 @@ func TestAgent_Run_WithSkillManager_NoActiveSkills(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-no-skills",
 	})
 	if err != nil {
@@ -1198,7 +1195,7 @@ func TestAgent_Run_WithSkillManager_NoActiveSkills(t *testing.T) {
 	}
 
 	req := mock.requests[0]
-	sysContent := req.Messages[0].Content.Text()
+	sysContent := req.Messages[0].Text()
 	if strings.Contains(sysContent, "<skill") {
 		t.Error("system prompt should not contain skill tags when no skills are active")
 	}
@@ -1222,7 +1219,7 @@ func TestAgent_Run_WithSkillManager_ToolFiltering(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1257,7 +1254,7 @@ func TestAgent_Run_WithSkillManager_ToolFilterIntersection(t *testing.T) {
 
 	// Request filter includes "allowed" and "other", skill only allows "allowed".
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 		Options:   &schema.RunOptions{Tools: []string{"allowed", "other"}},
 	})
@@ -1294,7 +1291,7 @@ func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1302,7 +1299,7 @@ func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
 	}
 
 	req := mock.requests[0]
-	sysContent := req.Messages[0].Content.Text()
+	sysContent := req.Messages[0].Text()
 
 	// Both skill instructions should be injected.
 	if !strings.Contains(sysContent, `<skill name="test-skill">`) {
@@ -1338,7 +1335,7 @@ func TestAgent_Run_WithSkillManager_NoSystemPrompt(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "sess-1",
 	})
 	if err != nil {
@@ -1347,10 +1344,10 @@ func TestAgent_Run_WithSkillManager_NoSystemPrompt(t *testing.T) {
 
 	req := mock.requests[0]
 	// Should have a system message injected for the skill.
-	if req.Messages[0].Role != aimodel.RoleSystem {
-		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, aimodel.RoleSystem)
+	if req.Messages[0].Role() != schema.RoleSystem {
+		t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, schema.RoleSystem)
 	}
-	if !strings.Contains(req.Messages[0].Content.Text(), `<skill name="test-skill">`) {
+	if !strings.Contains(req.Messages[0].Text(), `<skill name="test-skill">`) {
 		t.Error("system message should contain skill instructions")
 	}
 }

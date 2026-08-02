@@ -70,10 +70,10 @@ func (m *mockChatCompleter) getCalls() int {
 func makeStopResponse(text string, totalTokens int) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{
+		Usage: schema.Usage{
 			PromptTokens:     totalTokens / 2,
 			CompletionTokens: totalTokens - totalTokens/2,
 			TotalTokens:      totalTokens,
@@ -85,10 +85,8 @@ func makeStopResponse(text string, totalTokens int) *aimodel.ChatResponse {
 func makeToolCallResponse(toolCallID, funcName, args string, totalTokens int) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent(""),
-				ToolCalls: []aimodel.ToolCall{{
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				ToolCalls: []schema.ToolCall{{
 					ID:       toolCallID,
 					Type:     "function",
 					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
@@ -96,7 +94,7 @@ func makeToolCallResponse(toolCallID, funcName, args string, totalTokens int) *a
 			},
 			FinishReason: aimodel.FinishReasonToolCalls,
 		}},
-		Usage: aimodel.Usage{
+		Usage: schema.Usage{
 			PromptTokens:     totalTokens / 2,
 			CompletionTokens: totalTokens - totalTokens/2,
 			TotalTokens:      totalTokens,
@@ -163,7 +161,6 @@ func TestBudgetExhaustion_Run_PartialResults(t *testing.T) {
 			makeToolCallResponse("tc-2", "do_thing", "{}", 100),
 			// Iteration 3: should NOT be reached
 			makeStopResponse("should not reach this", 100),
-		},
 	}
 
 	a := taskagent.New(agent.Config{ID: "budget-test-agent"},
@@ -174,7 +171,7 @@ func TestBudgetExhaustion_Run_PartialResults(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do things")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do things")},
 	})
 	// No error should be returned.
 	if err != nil {
@@ -238,7 +235,7 @@ func TestBudgetExhaustion_EmitsCorrectEvents(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("do something")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do something")},
 		SessionID: "test-session",
 	})
 	if err != nil {
@@ -330,7 +327,7 @@ func TestUnlimitedBudget_PreservesBehavior(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do things")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do things")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -346,8 +343,8 @@ func TestUnlimitedBudget_PreservesBehavior(t *testing.T) {
 		t.Fatalf("len(Messages) = %d, want 1", len(resp.Messages))
 	}
 
-	if resp.Messages[0].Content.Text() != "All done!" {
-		t.Errorf("response text = %q, want %q", resp.Messages[0].Content.Text(), "All done!")
+	if resp.Messages[0].Text() != "All done!" {
+		t.Errorf("response text = %q, want %q", resp.Messages[0].Text(), "All done!")
 	}
 
 	// No budget-related events should have been emitted.
@@ -385,7 +382,7 @@ func TestPerRequestBudgetOverride(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		Options:  &schema.RunOptions{RunTokenBudget: 50}, // Per-request: tight budget
 	})
 	if err != nil {
@@ -444,7 +441,7 @@ func TestMaxIterationsExhaustion_ReturnsPartialResult(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("loop forever")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "loop forever")},
 	})
 	// No error should be returned.
 	if err != nil {
@@ -523,7 +520,7 @@ func TestBudgetExhaustion_OutputGuardsRun(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do something")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do something")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -538,7 +535,7 @@ func TestBudgetExhaustion_OutputGuardsRun(t *testing.T) {
 		t.Fatal("expected at least one message in response")
 	}
 
-	if got := resp.Messages[0].Content.Text(); got != "GUARDED OUTPUT" {
+	if got := resp.Messages[0].Text(); got != "GUARDED OUTPUT" {
 		t.Errorf("message content = %q, want %q (output guard should have rewritten it)", got, "GUARDED OUTPUT")
 	}
 }
@@ -574,7 +571,7 @@ func TestBudgetExhaustion_RunToStream_CleanClose(t *testing.T) {
 	)
 
 	req := &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do something")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do something")},
 	}
 
 	rs := agent.RunToStream(context.Background(), a, req)
@@ -672,7 +669,7 @@ func TestBudgetExact_CompletesNormally(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do stuff")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do stuff")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -684,8 +681,8 @@ func TestBudgetExact_CompletesNormally(t *testing.T) {
 		t.Errorf("StopReason = %q, want %q", resp.StopReason, schema.StopReasonComplete)
 	}
 
-	if resp.Messages[0].Content.Text() != "Done!" {
-		t.Errorf("response text = %q, want %q", resp.Messages[0].Content.Text(), "Done!")
+	if resp.Messages[0].Text() != "Done!" {
+		t.Errorf("response text = %q, want %q", resp.Messages[0].Text(), "Done!")
 	}
 
 	if mock.getCalls() != 2 {

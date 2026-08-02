@@ -78,7 +78,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 
 	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
@@ -157,7 +157,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 
 	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)
@@ -250,7 +250,7 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 
 	_, err = wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion: %v", err)

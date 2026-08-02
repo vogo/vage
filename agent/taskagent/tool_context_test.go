@@ -60,7 +60,7 @@ func TestToolCtxInjection_SyncPath(t *testing.T) {
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-sync",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
 		SessionID: "sess-stream",
-		Messages:  []schema.Message{schema.NewUserMessage("probe")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "probe")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
@@ -168,7 +168,7 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
 		SessionID: "sess-e2e",
-		Messages:  []schema.Message{schema.NewUserMessage("plan something")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan something")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)

@@ -36,10 +36,10 @@ func makeAgent(id, suffix string) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
 		}, nil
 	})
 }
@@ -49,7 +49,7 @@ func makeAgentWithUsage(id string, prompt, completion, total int) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
 			Messages: req.Messages,
-			Usage:    &aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+			Usage:    &schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 		}, nil
 	})
 }
@@ -122,12 +122,12 @@ func TestAgent_Run_Success(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "hello-routed" {
 		t.Errorf("got %q, want %q", got, "hello-routed")
 	}
@@ -142,12 +142,12 @@ func TestAgent_Run_SelectsCorrectRoute(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(selectByIndex(2)))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "hello-two" {
 		t.Errorf("got %q, want %q", got, "hello-two")
 	}
@@ -213,7 +213,7 @@ func TestAgent_Run_SelectedAgentError(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err == nil {
 		t.Fatal("expected error from selected agent")
@@ -229,7 +229,7 @@ func TestAgent_Run_NilResponse(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil response")
@@ -260,7 +260,7 @@ func TestAgent_Run_SessionIDPreserved(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "sess-42",
 	})
 	if err != nil {
@@ -277,7 +277,7 @@ func TestAgent_Run_Duration(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -293,7 +293,7 @@ func TestAgent_Run_UsagePropagation(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -320,13 +320,13 @@ func TestAgent_Run_UsageAggregation(t *testing.T) {
 	routeWithUsage := func(_ context.Context, _ *schema.RunRequest, routes []Route) (*RouteResult, error) {
 		return &RouteResult{
 			Agent: routes[0].Agent,
-			Usage: &aimodel.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+			Usage: &schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 		}, nil
 	}
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(routeWithUsage))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -354,13 +354,13 @@ func TestAgent_Run_UsageAggregation_RouteOnlyUsage(t *testing.T) {
 	routeWithUsage := func(_ context.Context, _ *schema.RunRequest, routes []Route) (*RouteResult, error) {
 		return &RouteResult{
 			Agent: routes[0].Agent,
-			Usage: &aimodel.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+			Usage: &schema.Usage{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 		}, nil
 	}
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(routeWithUsage))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -385,7 +385,7 @@ func TestAgent_Run_RequestPassthrough(t *testing.T) {
 	meta := map[string]any{"key": "value"}
 	opts := &schema.RunOptions{MaxTokens: 100}
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "sess-99",
 		Options:   opts,
 		Metadata:  meta,
@@ -406,7 +406,7 @@ func TestAgent_RunStream_Basic(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -451,7 +451,7 @@ func TestAgent_RunStream_Error(t *testing.T) {
 	a := New(agent.Config{ID: "rt"}, routes, WithFunc(alwaysSelectFirst))
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error creating stream: %v", err)

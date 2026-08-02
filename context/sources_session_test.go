@@ -37,7 +37,7 @@ func newSessionMemoryWithMsgs(t *testing.T, count int) *memory.Manager {
 
 	for i := range count {
 		key := fmt.Sprintf("msg:%06d", i)
-		msg := schema.NewUserMessage(fmt.Sprintf("turn %d", i))
+		msg := schema.NewUserMessage(schema.ProtocolOpenAIChat, fmt.Sprintf("turn %d", i))
 		if err := sess.Set(ctx, key, msg, 0); err != nil {
 			t.Fatalf("seed Set: %v", err)
 		}
@@ -62,8 +62,8 @@ func TestSessionMemorySource_LoadOrdered(t *testing.T) {
 	}
 	for i, m := range res.Messages {
 		want := fmt.Sprintf("turn %d", i)
-		if m.Content.Text() != want {
-			t.Errorf("message[%d] = %q, want %q", i, m.Content.Text(), want)
+		if m.Text() != want {
+			t.Errorf("message[%d] = %q, want %q", i, m.Text(), want)
 		}
 	}
 	if res.Report.OriginalCount != 3 {
@@ -134,8 +134,8 @@ func TestSessionMemorySource_Compressor(t *testing.T) {
 		t.Errorf("DroppedN = %d, want 3", res.Report.DroppedN)
 	}
 	// Compressor kept the last two: "turn 3" and "turn 4".
-	if res.Messages[0].Content.Text() != "turn 3" || res.Messages[1].Content.Text() != "turn 4" {
+	if res.Messages[0].Text() != "turn 3" || res.Messages[1].Text() != "turn 4" {
 		t.Errorf("compressor kept wrong slice: %q / %q",
-			res.Messages[0].Content.Text(), res.Messages[1].Content.Text())
+			res.Messages[0].Text(), res.Messages[1].Text())
 	}
 }

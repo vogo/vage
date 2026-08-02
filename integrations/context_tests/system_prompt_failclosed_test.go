@@ -40,7 +40,7 @@ func TestBuilder_SystemPromptRenderError_FailClosed(t *testing.T) {
 		SessionID: "failclosed-session",
 		Request: &schema.RunRequest{
 			SessionID: "failclosed-session",
-			Messages:  []schema.Message{schema.NewUserMessage("hi")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		},
 	})
 	if err == nil {
@@ -70,7 +70,7 @@ func TestBuilder_OptionalSourceError_FailOpen(t *testing.T) {
 		SessionID: "failopen-session",
 		Request: &schema.RunRequest{
 			SessionID: "failopen-session",
-			Messages:  []schema.Message{schema.NewUserMessage("hi")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		},
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func TestBuilder_OptionalSourceError_FailOpen(t *testing.T) {
 
 	// The request message must still have been emitted by the must-include
 	// RequestMessagesSource.
-	if len(res.Messages) != 1 || res.Messages[0].Content.Text() != "hi" {
+	if len(res.Messages) != 1 || res.Messages[0].Text() != "hi" {
 		t.Errorf("messages = %+v, want [user 'hi']", res.Messages)
 	}
 

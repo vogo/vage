@@ -45,7 +45,7 @@ func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatR
 		return nil, s.respErr
 	}
 	return &aimodel.ChatResponse{Choices: []aimodel.Choice{{
-		Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(s.respText)},
+		Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, s.respText),
 	}}}, nil
 }
 
@@ -93,7 +93,7 @@ func TestLLMPromoter_HappyPath(t *testing.T) {
 	if len(cli.gotReq.Messages) != 2 {
 		t.Fatalf("messages=%d want 2", len(cli.gotReq.Messages))
 	}
-	userBody := cli.gotReq.Messages[1].Content.Text()
+	userBody := cli.gotReq.Messages[1].Text()
 	if !strings.Contains(userBody, "Build OAuth") || !strings.Contains(userBody, "design schema") {
 		t.Errorf("user body missing parent/child: %q", userBody)
 	}
@@ -147,9 +147,7 @@ func (f *fakeCompressor) Compress(_ context.Context, msgs []schema.Message, maxT
 	if f.respErr != nil {
 		return nil, f.respErr
 	}
-	out := []schema.Message{{Message: aimodel.Message{
-		Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("compressed:" + msgs[0].Content.Text()),
-	}}}
+	out := []schema.Message{{Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:" + msgs[0].Text())}}
 	return out, nil
 }
 

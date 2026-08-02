@@ -47,10 +47,10 @@ func appendRunner(suffix string) *mockRunner {
 	return newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
 		}, nil
 	})
 }
@@ -65,7 +65,7 @@ func usageRunner(prompt, completion, total int) *mockRunner {
 	return newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
 			Messages: req.Messages,
-			Usage:    &aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+			Usage:    &schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 		}, nil
 	})
 }
@@ -84,7 +84,7 @@ func nilResponseRunner() *mockRunner {
 
 func makeReq(text string) *schema.RunRequest {
 	return &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage(text)},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text)},
 		SessionID: "test-session",
 	}
 }
@@ -240,7 +240,7 @@ func TestBuildDAG_ExecuteIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteDAG error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B-C" {
 		t.Errorf("got %q, want %q", got, "start-A-B-C")
 	}
@@ -261,7 +261,7 @@ func TestExecuteDAG_Linear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B-C" {
 		t.Errorf("got %q, want %q", got, "start-A-B-C")
 	}
@@ -290,7 +290,7 @@ func TestExecuteDAG_Diamond(t *testing.T) {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
 	// B's output: "start-A-B", C's output: "start-A-C"
-	texts := []string{got[0].Content.Text(), got[1].Content.Text()}
+	texts := []string{got[0].Text(), got[1].Text()}
 	if texts[0] != "start-A-B" || texts[1] != "start-A-C" {
 		t.Errorf("got %v, want [start-A-B, start-A-C]", texts)
 	}
@@ -331,7 +331,7 @@ func TestExecuteDAG_FanIn(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(got))
 	}
-	texts := []string{got[0].Content.Text(), got[1].Content.Text(), got[2].Content.Text()}
+	texts := []string{got[0].Text(), got[1].Text(), got[2].Text()}
 	if texts[0] != "start-A" || texts[1] != "start-B" || texts[2] != "start-C" {
 		t.Errorf("got %v", texts)
 	}
@@ -384,7 +384,7 @@ func TestExecuteDAG_EmptyNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.FinalOutput.Messages[0].Content.Text() != "hello" {
+	if result.FinalOutput.Messages[0].Text() != "hello" {
 		t.Errorf("expected input message echoed back")
 	}
 }
@@ -491,10 +491,10 @@ func TestExecuteDAG_InputMapper(t *testing.T) {
 		{
 			ID: "C", Runner: passthroughRunner(), Deps: []string{"A", "B"},
 			InputMapper: func(upstream map[string]*schema.RunResponse) (*schema.RunRequest, error) {
-				aText := upstream["A"].Messages[0].Content.Text()
-				bText := upstream["B"].Messages[0].Content.Text()
+				aText := upstream["A"].Messages[0].Text()
+				bText := upstream["B"].Messages[0].Text()
 				return &schema.RunRequest{
-					Messages: []schema.Message{schema.NewUserMessage(aText + "+" + bText)},
+					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText + "+" + bText)},
 				}, nil
 			},
 		},
@@ -503,7 +503,7 @@ func TestExecuteDAG_InputMapper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A+start-B" {
 		t.Errorf("got %q, want %q", got, "start-A+start-B")
 	}
@@ -525,11 +525,11 @@ func TestExecuteDAG_DefaultMultiDepMerge(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
-	if got[0].Content.Text() != "start-X" {
-		t.Errorf("first message = %q, want %q", got[0].Content.Text(), "start-X")
+	if got[0].Text() != "start-X" {
+		t.Errorf("first message = %q, want %q", got[0].Text(), "start-X")
 	}
-	if got[1].Content.Text() != "start-A" {
-		t.Errorf("second message = %q, want %q", got[1].Content.Text(), "start-A")
+	if got[1].Text() != "start-A" {
+		t.Errorf("second message = %q, want %q", got[1].Text(), "start-A")
 	}
 }
 
@@ -579,7 +579,7 @@ func TestExecuteDAG_ConditionalNode(t *testing.T) {
 		{
 			ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"},
 			Condition: func(upstream map[string]*schema.RunResponse) bool {
-				return strings.Contains(upstream["A"].Messages[0].Content.Text(), "yes")
+				return strings.Contains(upstream["A"].Messages[0].Text(), "yes")
 			},
 		},
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"A"}},

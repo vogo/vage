@@ -28,7 +28,7 @@ import (
 func TestModel_New_NoMiddleware(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("hello")},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "hello"),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
 	}
@@ -50,7 +50,7 @@ func TestModel_New_NoMiddleware(t *testing.T) {
 func TestModel_New_WithMiddleware(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("ok")},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
 	}
@@ -102,7 +102,7 @@ func TestModel_ChatCompletionStream(t *testing.T) {
 func TestModel_MultipleMiddlewares_Order(t *testing.T) {
 	resp := &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("ok")},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
 	}

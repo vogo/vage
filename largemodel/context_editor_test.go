@@ -52,26 +52,26 @@ func (c *captureCompleter) ChatCompletionStream(_ context.Context, req *aimodel.
 // n tool_result messages, all with synthetic content of size bytes each.
 // Returns the request plus the original tool_call_ids in order.
 func makeReq(n int, contentBytes int) (*aimodel.ChatRequest, []string) {
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}
 
-	calls := make([]aimodel.ToolCall, 0, n)
+	calls := make([]schema.ToolCall, 0, n)
 	ids := make([]string, 0, n)
 	body := strings.Repeat("x", contentBytes)
 
 	for i := range n {
 		id := "call-" + string(rune('a'+i))
 		ids = append(ids, id)
-		calls = append(calls, aimodel.ToolCall{ID: id, Function: aimodel.FunctionCall{Name: "fake"}})
+		calls = append(calls, schema.ToolCall{ID: id, Function: aimodel.FunctionCall{Name: "fake"}})
 	}
 
-	msgs = append(msgs, aimodel.Message{Role: aimodel.RoleAssistant, ToolCalls: calls})
+	msgs = append(msgs, schema.Message{Role: schema.RoleAssistant, ToolCalls: calls})
 
 	for _, id := range ids {
-		msgs = append(msgs, aimodel.Message{
-			Role:       aimodel.RoleTool,
+		msgs = append(msgs, schema.Message{
+			Role:       schema.RoleTool,
 			ToolCallID: id,
 			Content:    aimodel.NewTextContent(body),
 		})
@@ -104,7 +104,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 	// Locate the indices of tool messages in the downstream request.
 	var toolIdx []int
 	for i, m := range cap.gotChat.Messages {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			toolIdx = append(toolIdx, i)
 		}
 	}
@@ -114,7 +114,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 
 	// First 4 should be elided; last 3 should be intact.
 	for i, idx := range toolIdx[:4] {
-		text := cap.gotChat.Messages[idx].Content.Text()
+		text := cap.gotChat.Messages[idx].Text()
 		if !strings.Contains(text, "context_edited") {
 			t.Errorf("expected tool[%d] elided, got %q", i, text)
 		}
@@ -124,7 +124,7 @@ func TestContextEditor_FoldsOlderToolResults(t *testing.T) {
 		}
 	}
 	for i, idx := range toolIdx[4:] {
-		text := cap.gotChat.Messages[idx].Content.Text()
+		text := cap.gotChat.Messages[idx].Text()
 		if strings.Contains(text, "context_edited") {
 			t.Errorf("expected tool[%d] kept, got placeholder", 4+i)
 		}
@@ -142,7 +142,7 @@ func TestContextEditor_DoesNotMutateCaller(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	req, _ := makeReq(5, 50)
-	original := make([]aimodel.Message, len(req.Messages))
+	original := make([]schema.Message, len(req.Messages))
 	copy(original, req.Messages)
 
 	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
@@ -290,7 +290,7 @@ func TestContextEditor_StreamPath(t *testing.T) {
 
 	var elided int
 	for _, m := range cap.gotStream.Messages {
-		if m.Role == aimodel.RoleTool && strings.Contains(m.Content.Text(), "context_edited") {
+		if m.Role() == schema.RoleTool && strings.Contains(m.Text(), "context_edited") {
 			elided++
 		}
 	}
@@ -311,15 +311,15 @@ func TestContextEditor_PreservesNonToolMessages(t *testing.T) {
 	}
 
 	got := cap.gotChat
-	if got.Messages[0].Role != aimodel.RoleSystem || got.Messages[0].Content.Text() != "sys" {
+	if got.Messages[0].Role() != schema.RoleSystem || got.Messages[0].Text() != "sys" {
 		t.Errorf("system message changed: %+v", got.Messages[0])
 	}
-	if got.Messages[1].Role != aimodel.RoleUser || got.Messages[1].Content.Text() != "hello" {
+	if got.Messages[1].Role() != schema.RoleUser || got.Messages[1].Text() != "hello" {
 		t.Errorf("user message changed: %+v", got.Messages[1])
 	}
 
 	asst := got.Messages[2]
-	if asst.Role != aimodel.RoleAssistant {
+	if asst.Role() != schema.RoleAssistant {
 		t.Fatalf("expected assistant, got %s", asst.Role)
 	}
 	if len(asst.ToolCalls) != len(ids) {
@@ -347,10 +347,10 @@ func TestContextEditor_CustomPlaceholder(t *testing.T) {
 	}
 
 	for _, m := range cap.gotChat.Messages {
-		if m.Role != aimodel.RoleTool {
+		if m.Role() != schema.RoleTool {
 			continue
 		}
-		text := m.Content.Text()
+		text := m.Text()
 		if !strings.HasPrefix(text, "<<elided ") {
 			t.Errorf("custom placeholder not applied: %q", text)
 		}
@@ -367,7 +367,7 @@ func TestContextEditor_PreservesCacheBreakpoint(t *testing.T) {
 	req, _ := makeReq(2, 10)
 	// Mark the first tool_result with a cache breakpoint.
 	for i := range req.Messages {
-		if req.Messages[i].Role == aimodel.RoleTool {
+		if req.Messages[i].Role() == schema.RoleTool {
 			req.Messages[i].CacheBreakpoint = true
 			break
 		}
@@ -377,9 +377,9 @@ func TestContextEditor_PreservesCacheBreakpoint(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var first aimodel.Message
+	var first schema.Message
 	for _, m := range cap.gotChat.Messages {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			first = m
 			break
 		}

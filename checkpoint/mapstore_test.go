@@ -46,10 +46,7 @@ func TestMapIterationStore_LoadReturnsCopy(t *testing.T) {
 	}
 
 	// Mutate the loaded copy's messages.
-	loaded.Messages = append(loaded.Messages, aimodel.Message{
-		Role:    aimodel.RoleUser,
-		Content: aimodel.NewTextContent("INJECTED"),
-	})
+	loaded.Messages = append(loaded.Messages, schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "INJECTED"))
 
 	again, err := s.Load(ctx, "sess-cp", "")
 	if err != nil {

@@ -132,7 +132,7 @@ func TestWorkspaceSource_OK_RendersPlanAndIndex(t *testing.T) {
 	if got.Report.OutputN != 1 || len(got.Messages) != 1 {
 		t.Errorf("OutputN=%d msgs=%d", got.Report.OutputN, len(got.Messages))
 	}
-	text := got.Messages[0].Content.Text()
+	text := got.Messages[0].Text()
 	for _, want := range []string{"## Plan Workspace", "### Plan", "step 1", "alpha.md", "beta.md"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q\n--- text ---\n%s", want, text)
@@ -146,7 +146,7 @@ func TestWorkspaceSource_OnlyPlan_RendersWithoutNotesSection(t *testing.T) {
 	if got.Report.Status != StatusOK {
 		t.Errorf("status = %q", got.Report.Status)
 	}
-	text := got.Messages[0].Content.Text()
+	text := got.Messages[0].Text()
 	if strings.Contains(text, "### Notes") {
 		t.Errorf("notes section appeared with no notes\n%s", text)
 	}
@@ -155,7 +155,7 @@ func TestWorkspaceSource_OnlyPlan_RendersWithoutNotesSection(t *testing.T) {
 func TestWorkspaceSource_OnlyNotes_RendersEmptyPlanHint(t *testing.T) {
 	src := &WorkspaceSource{Workspace: &stubWorkspace{notes: []workspace.NoteInfo{{Name: "n"}}}}
 	got, _ := src.Fetch(context.Background(), FetchInput{SessionID: "sess"})
-	text := got.Messages[0].Content.Text()
+	text := got.Messages[0].Text()
 	if !strings.Contains(text, "(empty — call `plan_update`") {
 		t.Errorf("missing empty-plan hint\n%s", text)
 	}
@@ -181,7 +181,7 @@ func TestWorkspaceSource_TruncatesOversizedPlan(t *testing.T) {
 	if got.Report.Status != StatusTruncated {
 		t.Errorf("status = %q, want truncated", got.Report.Status)
 	}
-	text := got.Messages[0].Content.Text()
+	text := got.Messages[0].Text()
 	if strings.Count(text, "H") != 0 {
 		t.Errorf("head bytes leaked into truncated plan\n--- text ---\n%s", text)
 	}

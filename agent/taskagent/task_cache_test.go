@@ -32,9 +32,9 @@ import (
 // the last system message and the last tool both get flagged; nothing
 // else is touched.
 func TestMarkPromptCacheBreakpoints_SystemAndTools(t *testing.T) {
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("s1")},
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("u1")},
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
 	}
 	tools := []aimodel.Tool{
 		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
@@ -60,10 +60,10 @@ func TestMarkPromptCacheBreakpoints_SystemAndTools(t *testing.T) {
 // only the LAST system message — matches Anthropic's "cache up to and
 // including" semantics so one breakpoint at the tail covers all of them.
 func TestMarkPromptCacheBreakpoints_MultipleSystem(t *testing.T) {
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("s1")},
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("s2")},
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("u1")},
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s2")},
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
 	}
 	markPromptCacheBreakpoints(msgs, nil)
 	if msgs[0].CacheBreakpoint {
@@ -77,8 +77,8 @@ func TestMarkPromptCacheBreakpoints_MultipleSystem(t *testing.T) {
 // TestMarkPromptCacheBreakpoints_NoSystem is a regression guard — with no
 // system message at all the helper should still mark the tool cleanly.
 func TestMarkPromptCacheBreakpoints_NoSystem(t *testing.T) {
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("u1")},
+	msgs := []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("u1")},
 	}
 	tools := []aimodel.Tool{
 		{Type: "function", Function: aimodel.FunctionDefinition{Name: "t1"}},
@@ -95,8 +95,8 @@ func TestMarkPromptCacheBreakpoints_NoSystem(t *testing.T) {
 // TestMarkPromptCacheBreakpoints_NoTools verifies the helper handles an
 // empty tool slice without panicking and still marks the system msg.
 func TestMarkPromptCacheBreakpoints_NoTools(t *testing.T) {
-	msgs := []aimodel.Message{
-		{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("s1")},
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: aimodel.NewTextContent("s1")},
 	}
 	markPromptCacheBreakpoints(msgs, nil)
 	if !msgs[0].CacheBreakpoint {
@@ -125,7 +125,7 @@ func TestAgent_Run_PromptCachingDefault(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -138,7 +138,7 @@ func TestAgent_Run_PromptCachingDefault(t *testing.T) {
 
 	foundSystem := false
 	for _, m := range req.Messages {
-		if m.Role == aimodel.RoleSystem && m.CacheBreakpoint {
+		if m.Role() == schema.RoleSystem && m.CacheBreakpoint {
 			foundSystem = true
 		}
 	}
@@ -175,7 +175,7 @@ func TestAgent_Run_PromptCachingDisabled(t *testing.T) {
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

@@ -62,7 +62,7 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 
 	// Iteration 0 -> mock.requests[0]: no tool_results yet, nothing to elide.
 	for _, m := range mock.requests[0].Messages {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			t.Errorf("iter0 should not contain tool_result, found one: %+v", m)
 		}
 	}
@@ -107,7 +107,7 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 	// All elided messages must keep their tool_call_id.
 	for _, req := range mock.requests {
 		for _, m := range req.Messages {
-			if m.Role == aimodel.RoleTool && m.ToolCallID == "" {
+			if m.Role() == schema.RoleTool && m.ToolCallID == "" {
 				t.Errorf("tool_result lost tool_call_id: %+v", m)
 			}
 		}
@@ -141,7 +141,7 @@ func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -165,26 +165,26 @@ func TestAgent_WithContextEditor_NilOption(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 }
 
-func countToolResults(msgs []aimodel.Message) int {
+func countToolResults(msgs []schema.Message) int {
 	n := 0
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			n++
 		}
 	}
 	return n
 }
 
-func countElided(msgs []aimodel.Message) int {
+func countElided(msgs []schema.Message) int {
 	n := 0
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleTool && strings.Contains(m.Content.Text(), "context_edited") {
+		if m.Role() == schema.RoleTool && strings.Contains(m.Text(), "context_edited") {
 			n++
 		}
 	}

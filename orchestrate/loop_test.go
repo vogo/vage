@@ -36,7 +36,7 @@ func TestExecuteLoop_BasicIteration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-iter-iter-iter" {
 		t.Errorf("got %q, want %q", got, "start-iter-iter-iter")
 	}
@@ -46,9 +46,9 @@ func TestExecuteLoop_ConditionTermination(t *testing.T) {
 	callCount := 0
 	runner := newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		callCount++
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + "-iter")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "-iter")},
 		}, nil
 	})
 
@@ -58,7 +58,7 @@ func TestExecuteLoop_ConditionTermination(t *testing.T) {
 			if resp == nil {
 				return true
 			}
-			return !strings.Contains(resp.Messages[0].Content.Text(), "-iter-iter")
+			return !strings.Contains(resp.Messages[0].Text(), "-iter-iter")
 		},
 	}
 	resp, err := ExecuteLoop(context.Background(), loop, makeReq("start"))
@@ -68,7 +68,7 @@ func TestExecuteLoop_ConditionTermination(t *testing.T) {
 	if callCount != 2 {
 		t.Errorf("expected 2 iterations, got %d", callCount)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-iter-iter" {
 		t.Errorf("got %q, want %q", got, "start-iter-iter")
 	}
@@ -80,18 +80,18 @@ func TestExecuteLoop_ConvergenceDetection(t *testing.T) {
 		callCount++
 		if callCount >= 3 {
 			return &schema.RunResponse{
-				Messages: []schema.Message{schema.NewUserMessage("stable")},
+				Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "stable")},
 			}, nil
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(req.Messages[0].Content.Text() + "-change")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, req.Messages[0].Text() + "-change")},
 		}, nil
 	})
 
 	loop := LoopNode{
 		Body: runner,
 		ConvergenceFunc: func(prev, curr *schema.RunResponse) bool {
-			return prev.Messages[0].Content.Text() == curr.Messages[0].Content.Text()
+			return prev.Messages[0].Text() == curr.Messages[0].Text()
 		},
 	}
 	resp, err := ExecuteLoop(context.Background(), loop, makeReq("start"))
@@ -101,7 +101,7 @@ func TestExecuteLoop_ConvergenceDetection(t *testing.T) {
 	if callCount != 4 {
 		t.Errorf("expected 4 iterations (2 changes + 2 stable), got %d", callCount)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "stable" {
 		t.Errorf("got %q, want %q", got, "stable")
 	}
@@ -199,7 +199,7 @@ func TestExecuteLoop_ZeroIterations(t *testing.T) {
 	if callCount != 0 {
 		t.Errorf("expected 0 iterations, got %d", callCount)
 	}
-	if resp.Messages[0].Content.Text() != "hello" {
+	if resp.Messages[0].Text() != "hello" {
 		t.Errorf("expected input message echoed back")
 	}
 }
@@ -207,10 +207,10 @@ func TestExecuteLoop_ZeroIterations(t *testing.T) {
 func TestExecuteLoop_OutputChaining(t *testing.T) {
 	var received []string
 	runner := newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		received = append(received, text)
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + "+")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + "+")},
 		}, nil
 	})
 
@@ -267,7 +267,7 @@ func TestExecuteLoop_SessionIDPreserved(t *testing.T) {
 		MaxIters: 2,
 	}
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "loop-session",
 	}
 	resp, err := ExecuteLoop(context.Background(), loop, req)
@@ -302,7 +302,7 @@ func TestExecuteLoop_MixedUsage(t *testing.T) {
 		callCount++
 		resp := &schema.RunResponse{Messages: req.Messages}
 		if callCount%2 == 1 {
-			resp.Usage = &aimodel.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
+			resp.Usage = &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
 		}
 		return resp, nil
 	})

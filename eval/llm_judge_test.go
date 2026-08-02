@@ -55,7 +55,7 @@ func TestLLMJudgeEval_StandardFormat(t *testing.T) {
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "standard",
-		Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+		Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 		Actual: makeResponse("output"),
 	})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestLLMJudgeEval_WithExpectedAndCriteria(t *testing.T) {
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "with-expected",
-		Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("question")}},
+		Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "question")}},
 		Expected: makeResponse("expected answer"),
 		Actual:   makeResponse("actual answer"),
 		Criteria: []string{"accuracy", "completeness"},

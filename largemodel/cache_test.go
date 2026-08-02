@@ -31,8 +31,8 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 	ctx := context.Background()
-	req := &aimodel.ChatRequest{Model: "gpt-4", Messages: []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	req := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}}
 
 	// Miss: should call through.
@@ -73,11 +73,11 @@ func TestCacheMiddleware_DifferentRequests(t *testing.T) {
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 	ctx := context.Background()
 
-	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	req1 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}}
-	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("world")},
+	req2 := &aimodel.ChatRequest{Model: "gpt-4", Messages: []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("world")},
 	}}
 
 	_, _ = wrapped.ChatCompletion(ctx, req1)
@@ -174,8 +174,8 @@ func TestMapCache_GetMiss(t *testing.T) {
 func TestCacheKey_Deterministic(t *testing.T) {
 	req := &aimodel.ChatRequest{
 		Model: "gpt-4",
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("test")},
+		Messages: []schema.Message{
+			{Role: schema.RoleUser, Content: aimodel.NewTextContent("test")},
 		},
 	}
 
@@ -199,8 +199,8 @@ func TestCacheKey_Deterministic(t *testing.T) {
 }
 
 func TestCacheKey_DifferentTemperature(t *testing.T) {
-	base := []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	base := []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}
 
 	temp1 := 0.2
@@ -326,8 +326,8 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 }
 
 func TestCacheKey_DifferentSeed(t *testing.T) {
-	base := []aimodel.Message{
-		{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hello")},
+	base := []schema.Message{
+		{Role: schema.RoleUser, Content: aimodel.NewTextContent("hello")},
 	}
 
 	seed1 := 42

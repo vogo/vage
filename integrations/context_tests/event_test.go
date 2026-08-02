@@ -47,7 +47,7 @@ func TestTaskAgent_EmitsEventContextBuilt(t *testing.T) {
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "evt-session",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

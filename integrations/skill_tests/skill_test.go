@@ -121,10 +121,10 @@ func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *aimodel.
 
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("ok")},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "ok"),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{TotalTokens: 10},
+		Usage: schema.Usage{TotalTokens: 10},
 	}, nil
 }
 
@@ -337,7 +337,7 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	)
 
 	resp, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("Process this PDF")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "Process this PDF")},
 		SessionID: sessionID,
 	})
 	if err != nil {
@@ -355,8 +355,8 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 
 	sysPrompt := ""
 	for _, msg := range reqs[0].Messages {
-		if msg.Role == aimodel.RoleSystem {
-			sysPrompt = msg.Content.Text()
+		if msg.Role() == schema.RoleSystem {
+			sysPrompt = msg.Text()
 			break
 		}
 	}
@@ -434,7 +434,7 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	)
 
 	_, err = a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: sessionID,
 	})
 	must(t, err)
@@ -447,8 +447,8 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	// Both instructions should appear in system prompt.
 	sysPrompt := ""
 	for _, msg := range reqs[0].Messages {
-		if msg.Role == aimodel.RoleSystem {
-			sysPrompt = msg.Content.Text()
+		if msg.Role() == schema.RoleSystem {
+			sysPrompt = msg.Text()
 			break
 		}
 	}
@@ -501,7 +501,7 @@ func TestSkillNoAllowedToolsPassesAllTools(t *testing.T) {
 	)
 
 	_, err = a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: sessionID,
 	})
 	must(t, err)
@@ -550,7 +550,7 @@ func TestSkillMixedAllowedToolsPassesAll(t *testing.T) {
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: sessionID,
 	})
 	must(t, err)

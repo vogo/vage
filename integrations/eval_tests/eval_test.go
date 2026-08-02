@@ -33,10 +33,7 @@ func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(text),
-				},
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			},
 		},
 	}
@@ -53,19 +50,17 @@ func makeResponseWithDuration(text string, durationMs int64) *schema.RunResponse
 // makeResponseWithUsage creates a RunResponse with a single assistant message and usage.
 func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 	resp := makeResponse(text)
-	resp.Usage = &aimodel.Usage{TotalTokens: totalTokens}
+	resp.Usage = &schema.Usage{TotalTokens: totalTokens}
 
 	return resp
 }
 
 // makeResponseWithToolCalls creates a RunResponse with assistant tool call messages.
-func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
 			{
-				Message: aimodel.Message{
-					Role:      aimodel.RoleAssistant,
-					Content:   aimodel.NewTextContent(""),
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
 					ToolCalls: calls,
 				},
 			},
@@ -94,8 +89,7 @@ func TestIntegration_ExactMatch_PassAndFail(t *testing.T) {
 	c1 := &eval.EvalCase{
 		ID:       "match-1",
 		Expected: makeResponse("Hello world"),
-		Actual:   makeResponse("Hello world"),
-	}
+		Actual:   makeResponse("Hello world")
 
 	result, err := evaluator.Evaluate(ctx, c1)
 	if err != nil {
@@ -306,8 +300,8 @@ func TestIntegration_ToolCall_SequenceMatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	searchCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calcCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	searchCall := schema.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
+	calcCall := schema.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
 
 	// Full match.
 	c1 := &eval.EvalCase{
@@ -381,13 +375,13 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 
 	ctx := context.Background()
 
-	expectedCall := aimodel.ToolCall{
+	expectedCall := schema.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
 	}
-	matchingCall := aimodel.ToolCall{
+	matchingCall := schema.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
 	}
-	differentArgsCall := aimodel.ToolCall{
+	differentArgsCall := schema.ToolCall{
 		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"world"}`},
 	}
 
@@ -962,7 +956,7 @@ func TestIntegration_RunAndEvaluate(t *testing.T) {
 	runFn := func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 
 		return makeResponse(text), nil
@@ -976,12 +970,12 @@ func TestIntegration_RunAndEvaluate(t *testing.T) {
 	cases := []*eval.EvalCase{
 		{
 			ID:       "run-pass",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("hello"),
 		},
 		{
 			ID:       "run-fail",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("world"),
 		},
 	}
@@ -1067,7 +1061,7 @@ func TestIntegration_LLMJudge_RobustParsing(t *testing.T) {
 
 			c := &eval.EvalCase{
 				ID:     "judge-" + tt.name,
-				Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+				Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 				Actual: makeResponse("test output"),
 			}
 
@@ -1104,10 +1098,7 @@ func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{
 			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(m.response),
-				},
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, m.response),
 			},
 		},
 	}, nil

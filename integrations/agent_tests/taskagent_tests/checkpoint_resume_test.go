@@ -76,7 +76,7 @@ func TestCheckpoint_AC_2_1_KIterationsKCheckpoints(t *testing.T) {
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-k",
-		Messages:  []schema.Message{schema.NewUserMessage("plan k")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan k")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -125,7 +125,7 @@ func TestCheckpoint_AC_2_2_PartialCheckpointsAfterCrash(t *testing.T) {
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-crash",
-		Messages:  []schema.Message{schema.NewUserMessage("crash plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "crash plan")},
 	}); err == nil {
 		t.Fatal("Run: expected error on third call, got nil")
 	}
@@ -152,10 +152,10 @@ func TestCheckpoint_AC_2_3_NoStoreEquivalent(t *testing.T) {
 	if resp1.StopReason != resp2.StopReason {
 		t.Errorf("StopReason mismatch: %q vs %q", resp1.StopReason, resp2.StopReason)
 	}
-	if resp1.Messages[0].Content.Text() != resp2.Messages[0].Content.Text() {
+	if resp1.Messages[0].Text() != resp2.Messages[0].Text() {
 		t.Errorf("text mismatch: %q vs %q",
-			resp1.Messages[0].Content.Text(),
-			resp2.Messages[0].Content.Text())
+			resp1.Messages[0].Text(),
+			resp2.Messages[0].Text())
 	}
 	if resp1.Usage.TotalTokens != resp2.Usage.TotalTokens {
 		t.Errorf("Usage mismatch: %d vs %d", resp1.Usage.TotalTokens, resp2.Usage.TotalTokens)
@@ -180,7 +180,7 @@ func runOnce(t *testing.T, sessionID string, withStore bool) *schema.RunResponse
 	a := taskagent.New(agent.Config{ID: "agent-eq"}, opts...)
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: sessionID,
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -208,7 +208,7 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 	)
 	_, err := a1.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-r",
-		Messages:  []schema.Message{schema.NewUserMessage("multi-step plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "multi-step plan")},
 	})
 	if err == nil {
 		t.Fatal("first Run: want error, got nil")
@@ -230,7 +230,7 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 	if resp.StopReason != schema.StopReasonComplete {
 		t.Errorf("StopReason = %q, want complete", resp.StopReason)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "RESUMED-FINAL" {
+	if got := resp.Messages[0].Text(); got != "RESUMED-FINAL" {
 		t.Errorf("text = %q, want RESUMED-FINAL", got)
 	}
 
@@ -269,7 +269,7 @@ func TestCheckpoint_AC_3_1_ListMetadataDoesNotEmbedMessages(t *testing.T) {
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-meta",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-hook",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestCheckpoint_AC_4_1_FileLayout(t *testing.T) {
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-fs",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -406,8 +406,8 @@ func TestCheckpoint_FileStore_ConcurrentDifferentSessions(t *testing.T) {
 				SessionID: "sess-" + string(rune('a'+idx)),
 				AgentID:   "agent-c",
 				Iteration: 0,
-				Messages: []aimodel.Message{
-					{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
+				Messages: []schema.Message{
+					{Role: schema.RoleSystem, Content: aimodel.NewTextContent("sys")},
 				},
 			}
 			if err := store.Save(context.Background(), cp); err != nil {
@@ -450,7 +450,7 @@ func TestCheckpoint_PreCallBudgetExhausted_FirstIter(t *testing.T) {
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-budget",
-		Messages:  []schema.Message{schema.NewUserMessage("go")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

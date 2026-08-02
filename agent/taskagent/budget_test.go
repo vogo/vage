@@ -125,20 +125,18 @@ func TestBudgetTracker_AddReturnValue(t *testing.T) {
 func stopResponseWithUsage(text string, total int) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
+		Usage: schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
 	}
 }
 
 func toolCallResponseWithUsage(toolCallID, funcName, args string, total int) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent(""),
-				ToolCalls: []aimodel.ToolCall{{
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				ToolCalls: []schema.ToolCall{{
 					ID:       toolCallID,
 					Type:     "function",
 					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
@@ -146,7 +144,7 @@ func toolCallResponseWithUsage(toolCallID, funcName, args string, total int) *ai
 			},
 			FinishReason: aimodel.FinishReasonToolCalls,
 		}},
-		Usage: aimodel.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
+		Usage: schema.Usage{PromptTokens: total / 2, CompletionTokens: total / 2, TotalTokens: total},
 	}
 }
 
@@ -157,7 +155,6 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 			toolCallResponseWithUsage("tc-1", "do_thing", "{}", 100),
 			toolCallResponseWithUsage("tc-2", "do_thing", "{}", 100),
 			stopResponseWithUsage("should not reach", 100),
-		},
 	}
 
 	reg := tool.NewRegistry()
@@ -176,7 +173,7 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do stuff")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do stuff")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -221,7 +218,7 @@ func TestAgent_Run_BudgetExhausted_SkipsToolCalls(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("do something expensive")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "do something expensive")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -239,7 +236,7 @@ func TestAgent_Run_BudgetUnlimited_PreservesExistingBehavior(t *testing.T) {
 	a := New(agent.Config{ID: "a1"}, WithChatCompleter(mock))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -247,8 +244,8 @@ func TestAgent_Run_BudgetUnlimited_PreservesExistingBehavior(t *testing.T) {
 	if resp.StopReason != schema.StopReasonComplete {
 		t.Errorf("StopReason = %q, want %q", resp.StopReason, schema.StopReasonComplete)
 	}
-	if resp.Messages[0].Content.Text() != "Hello!" {
-		t.Errorf("Content = %q, want %q", resp.Messages[0].Content.Text(), "Hello!")
+	if resp.Messages[0].Text() != "Hello!" {
+		t.Errorf("Content = %q, want %q", resp.Messages[0].Text(), "Hello!")
 	}
 }
 
@@ -276,7 +273,7 @@ func TestAgent_Run_BudgetPerRequestOverride(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		Options:  &schema.RunOptions{RunTokenBudget: 50},
 	})
 	if err != nil {
@@ -313,7 +310,7 @@ func TestAgent_Run_BudgetExhausted_EmitsEvents(t *testing.T) {
 	)
 
 	resp2, err := a2.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: "s1",
 	})
 	if err != nil {
@@ -387,7 +384,7 @@ func TestAgent_Run_BudgetExhausted_OutputGuardsRun(t *testing.T) {
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -402,7 +399,7 @@ func TestAgent_Run_BudgetExhausted_OutputGuardsRun(t *testing.T) {
 		t.Fatal("expected at least one message")
 	}
 	// The guard rewrites the text content.
-	if got := resp.Messages[0].Content.Text(); got != "guarded text" {
+	if got := resp.Messages[0].Text(); got != "guarded text" {
 		t.Errorf("Content = %q, want %q (output guard should have run)", got, "guarded text")
 	}
 }
@@ -500,7 +497,7 @@ func TestAgent_RunStream_BudgetExhausted_WithTextContent(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hi")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream error: %v", err)

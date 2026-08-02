@@ -38,7 +38,7 @@ func TestMetricsMiddleware_ChatCompletion(t *testing.T) {
 
 	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
 		ID:    "ok",
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
 
 	mw := NewMetricsMiddleware(dispatch)
@@ -46,7 +46,7 @@ func TestMetricsMiddleware_ChatCompletion(t *testing.T) {
 
 	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser}},
+		Messages: []schema.Message{{Role: schema.RoleUser}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -242,7 +242,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 
 	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)
@@ -333,7 +333,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 
 	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{{Role: schema.RoleUser, Content: aimodel.NewTextContent("Hi")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)

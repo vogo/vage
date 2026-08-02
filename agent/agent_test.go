@@ -58,7 +58,7 @@ func TestCustomAgent_Config(t *testing.T) {
 func TestCustomAgent_Run_Delegates(t *testing.T) {
 	fn := func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("echo")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "echo")},
 		}, nil
 	}
 	a := NewCustomAgent(Config{ID: "c-1"}, fn)
@@ -66,8 +66,8 @@ func TestCustomAgent_Run_Delegates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "echo" {
-		t.Errorf("response = %q, want %q", resp.Messages[0].Content.Text(), "echo")
+	if resp.Messages[0].Text() != "echo" {
+		t.Errorf("response = %q, want %q", resp.Messages[0].Text(), "echo")
 	}
 }
 

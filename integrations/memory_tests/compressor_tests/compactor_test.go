@@ -39,7 +39,7 @@ import (
 func buildConversation(turnCount int) []schema.Message {
 	msgs := []schema.Message{
 		{
-			Message:   aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("You are a helpful coding assistant.")},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "You are a helpful coding assistant."),
 			Timestamp: time.Now(),
 		},
 	}
@@ -47,31 +47,28 @@ func buildConversation(turnCount int) []schema.Message {
 	for i := 1; i <= turnCount; i++ {
 		// User message.
 		msgs = append(msgs, schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(fmt.Sprintf("User question %d: %s", i, strings.Repeat("x", 40)))},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, fmt.Sprintf("User question %d: %s", i, strings.Repeat("x", 40))),
 			Timestamp: time.Now(),
 		})
 
 		// Occasionally add a tool call/result pair (every 3rd turn).
 		if i%3 == 0 {
 			msgs = append(msgs, schema.Message{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(fmt.Sprintf("Let me look that up (turn %d)...", i)),
-					ToolCalls: []aimodel.ToolCall{
+				Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, fmt.Sprintf("Let me look that up (turn %d)...", i)),
+					ToolCalls: []schema.ToolCall{
 						{ID: fmt.Sprintf("call-%d", i), Function: aimodel.FunctionCall{Name: "search", Arguments: "{}"}},
 					},
 				},
-				Timestamp: time.Now(),
-			})
+				Timestamp: time.Now())
 			msgs = append(msgs, schema.Message{
-				Message:   aimodel.Message{Role: aimodel.RoleTool, Content: aimodel.NewTextContent(fmt.Sprintf("Tool result for turn %d: found relevant info", i))},
+				Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleTool, fmt.Sprintf("Tool result for turn %d: found relevant info", i)),
 				Timestamp: time.Now(),
 			})
 		}
 
 		// Assistant response.
 		msgs = append(msgs, schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(fmt.Sprintf("Assistant answer %d: %s", i, strings.Repeat("y", 60)))},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, fmt.Sprintf("Assistant answer %d: %s", i, strings.Repeat("y", 60))),
 			Timestamp: time.Now(),
 		})
 	}
@@ -111,11 +108,11 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 	}
 
 	// Verify system prompt is preserved as the first message.
-	if result[0].Role != aimodel.RoleSystem {
+	if result[0].Role() != schema.RoleSystem {
 		t.Errorf("first message role = %q, want system", result[0].Role)
 	}
-	if result[0].Content.Text() != "You are a helpful coding assistant." {
-		t.Errorf("system prompt not preserved: %q", result[0].Content.Text())
+	if result[0].Text() != "You are a helpful coding assistant." {
+		t.Errorf("system prompt not preserved: %q", result[0].Text())
 	}
 
 	// Verify a summary message exists with compressed metadata and RoleSystem.
@@ -125,7 +122,7 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 			if compressed, ok := m.Metadata["compressed"].(bool); ok && compressed {
 				foundSummary = true
 
-				if m.Role != aimodel.RoleSystem {
+				if m.Role() != schema.RoleSystem {
 					t.Errorf("summary message role = %q, want system", m.Role)
 				}
 
@@ -137,8 +134,8 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 					t.Errorf("summary source_count = %v, want > 0", sourceCount)
 				}
 
-				if !strings.Contains(m.Content.Text(), "Summary of") {
-					t.Errorf("summary content does not contain expected text: %q", m.Content.Text())
+				if !strings.Contains(m.Text(), "Summary of") {
+					t.Errorf("summary content does not contain expected text: %q", m.Text())
 				}
 
 				break
@@ -154,11 +151,11 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 	lastUser := ""
 	lastAssistant := ""
 	for i := len(result) - 1; i >= 0; i-- {
-		if result[i].Role == aimodel.RoleAssistant && lastAssistant == "" {
-			lastAssistant = result[i].Content.Text()
+		if result[i].Role() == schema.RoleAssistant && lastAssistant == "" {
+			lastAssistant = result[i].Text()
 		}
-		if result[i].Role == aimodel.RoleUser && lastUser == "" {
-			lastUser = result[i].Content.Text()
+		if result[i].Role() == schema.RoleUser && lastUser == "" {
+			lastUser = result[i].Text()
 		}
 		if lastUser != "" && lastAssistant != "" {
 			break
@@ -222,7 +219,7 @@ func TestIntegration_ConversationCompactor_ProtectedTurnCounts(t *testing.T) {
 						break
 					}
 				}
-				if result[i].Role == aimodel.RoleUser {
+				if result[i].Role() == schema.RoleUser {
 					pairsAfterSummary++
 				}
 			}
@@ -254,19 +251,19 @@ func TestIntegration_ConversationCompactor_ReCompaction(t *testing.T) {
 	// Add more messages after the first compaction.
 	firstResult = append(firstResult,
 		schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("New question after compaction")},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "New question after compaction"),
 			Timestamp: time.Now(),
 		},
 		schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("New answer after compaction")},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "New answer after compaction"),
 			Timestamp: time.Now(),
 		},
 		schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Another question")},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Another question"),
 			Timestamp: time.Now(),
 		},
 		schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("Another answer")},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Another answer"),
 			Timestamp: time.Now(),
 		},
 	)
@@ -283,7 +280,7 @@ func TestIntegration_ConversationCompactor_ReCompaction(t *testing.T) {
 	}
 
 	// Verify system prompt still present.
-	if secondResult[0].Role != aimodel.RoleSystem && secondResult[0].Content.Text() != "You are a helpful coding assistant." {
+	if secondResult[0].Role() != schema.RoleSystem && secondResult[0].Text() != "You are a helpful coding assistant." {
 		t.Error("system prompt should be preserved after re-compaction")
 	}
 
@@ -404,7 +401,7 @@ func TestIntegration_ConversationCompactor_MaxInputTokensTruncation(t *testing.T
 	// Verify an omission marker is present in the summarizer input.
 	hasOmissionMarker := false
 	for _, m := range receivedMessages {
-		if strings.Contains(m.Content.Text(), "messages omitted") {
+		if strings.Contains(m.Text(), "messages omitted") {
 			hasOmissionMarker = true
 			break
 		}
@@ -433,11 +430,11 @@ func TestIntegration_ConversationCompactor_NoSystemPrompt(t *testing.T) {
 	msgs := []schema.Message{}
 	for i := 1; i <= 8; i++ {
 		msgs = append(msgs, schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(fmt.Sprintf("Q%d: %s", i, strings.Repeat("a", 40)))},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, fmt.Sprintf("Q%d: %s", i, strings.Repeat("a", 40))),
 			Timestamp: time.Now(),
 		})
 		msgs = append(msgs, schema.Message{
-			Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(fmt.Sprintf("A%d: %s", i, strings.Repeat("b", 60)))},
+			Message:   schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, fmt.Sprintf("A%d: %s", i, strings.Repeat("b", 60))),
 			Timestamp: time.Now(),
 		})
 	}
@@ -448,7 +445,7 @@ func TestIntegration_ConversationCompactor_NoSystemPrompt(t *testing.T) {
 	}
 
 	// First message should be the summary (no system prompt prefix).
-	if result[0].Role != aimodel.RoleSystem {
+	if result[0].Role() != schema.RoleSystem {
 		t.Errorf("first message role = %q, want system (summary)", result[0].Role)
 	}
 	if result[0].Metadata == nil {
@@ -474,7 +471,7 @@ func TestIntegration_ConversationCompactor_NoSystemPrompt(t *testing.T) {
 func TestIntegration_ConversationCompactor_CustomTokenEstimator(t *testing.T) {
 	// Custom estimator: 1 token per character (inflated vs default).
 	customEstimator := func(msg schema.Message) int {
-		text := msg.Content.Text()
+		text := msg.Text()
 		if len(text) == 0 {
 			return 0
 		}
@@ -560,9 +557,9 @@ func TestIntegration_ConversationCompactor_EmergencyCompaction(t *testing.T) {
 
 	// Verify the last user message is from the last turn.
 	for i := len(result) - 1; i >= 0; i-- {
-		if result[i].Role == aimodel.RoleUser {
-			if !strings.Contains(result[i].Content.Text(), "User question 10") {
-				t.Errorf("last protected user = %q, want to contain 'User question 10'", result[i].Content.Text())
+		if result[i].Role() == schema.RoleUser {
+			if !strings.Contains(result[i].Text(), "User question 10") {
+				t.Errorf("last protected user = %q, want to contain 'User question 10'", result[i].Text())
 			}
 			break
 		}

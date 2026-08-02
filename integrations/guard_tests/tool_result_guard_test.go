@@ -71,10 +71,8 @@ func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.C
 func toolCallResponseTR(toolCallID, funcName, args string) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent(""),
-				ToolCalls: []aimodel.ToolCall{{
+			Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, ""),
+				ToolCalls: []schema.ToolCall{{
 					ID:       toolCallID,
 					Type:     "function",
 					Function: aimodel.FunctionCall{Name: funcName, Arguments: args},
@@ -82,7 +80,7 @@ func toolCallResponseTR(toolCallID, funcName, args string) *aimodel.ChatResponse
 			},
 			FinishReason: aimodel.FinishReasonToolCalls,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 }
 
@@ -90,10 +88,10 @@ func toolCallResponseTR(toolCallID, funcName, args string) *aimodel.ChatResponse
 func stopResponseTR(text string) *aimodel.ChatResponse {
 	return &aimodel.ChatResponse{
 		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
+			Message:      schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 			FinishReason: aimodel.FinishReasonStop,
 		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 }
 
@@ -203,7 +201,6 @@ func TestIntegration_ToolResultGuard_EndToEnd_Block(t *testing.T) {
 		responses: []*aimodel.ChatResponse{
 			toolCallResponseTR("tc-1", "fetch", `{"url":"http://example.com"}`),
 			stopResponseTR("all done."),
-		},
 	}
 
 	reg := newToolRegistry(t, "fetch", func(_ context.Context, _, _ string) (schema.ToolResult, error) {
@@ -220,7 +217,7 @@ func TestIntegration_ToolResultGuard_EndToEnd_Block(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
@@ -231,11 +228,11 @@ func TestIntegration_ToolResultGuard_EndToEnd_Block(t *testing.T) {
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if lastMsg.Role != aimodel.RoleTool {
+	if lastMsg.Role() != schema.RoleTool {
 		t.Fatalf("last message role = %q, want tool", lastMsg.Role)
 	}
 
-	content := lastMsg.Content.Text()
+	content := lastMsg.Text()
 	if strings.Contains(content, "ignore previous instructions") {
 		t.Errorf("original poisoned content leaked to model: %q", content)
 	}
@@ -274,14 +271,14 @@ func TestIntegration_ToolResultGuard_EndToEnd_Rewrite(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	content := lastMsg.Content.Text()
+	content := lastMsg.Text()
 
 	if !strings.Contains(content, `<vage:untrusted source="tool:fetch">`) {
 		t.Errorf("expected quarantine wrapper with tool name, got %q", content)
@@ -327,15 +324,15 @@ func TestIntegration_ToolResultGuard_EndToEnd_Log(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if lastMsg.Content.Text() != poison {
-		t.Errorf("log action must not mutate content, got %q", lastMsg.Content.Text())
+	if lastMsg.Text() != poison {
+		t.Errorf("log action must not mutate content, got %q", lastMsg.Text())
 	}
 
 	mu.Lock()
@@ -402,14 +399,14 @@ func TestIntegration_ToolResultGuard_HighSeverity_EscalatesToBlock(t *testing.T)
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	content := lastMsg.Content.Text()
+	content := lastMsg.Text()
 	if strings.Contains(content, "im_start") {
 		t.Errorf("high-severity content leaked into model prompt: %q", content)
 	}
@@ -470,7 +467,7 @@ func TestIntegration_ToolResultGuard_Stream_EventOrder(t *testing.T) {
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 		SessionID: "sess-stream",
 	})
 	if err != nil {
@@ -577,15 +574,15 @@ func TestIntegration_ToolResultGuard_NoGuard_ZeroImpact(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
 
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if lastMsg.Content.Text() != raw {
-		t.Errorf("no-guard path must not mutate tool content; got %q want %q", lastMsg.Content.Text(), raw)
+	if lastMsg.Text() != raw {
+		t.Errorf("no-guard path must not mutate tool content; got %q want %q", lastMsg.Text(), raw)
 	}
 }
 
@@ -629,7 +626,7 @@ func TestIntegration_ToolResultGuard_NonTextContent_PassThrough(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
@@ -668,7 +665,7 @@ func TestIntegration_ToolResultGuard_EmptyText_PassThrough(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
@@ -712,7 +709,7 @@ func TestIntegration_ToolResultGuard_CleanContent_NoEvent(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("fetch it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
@@ -727,8 +724,8 @@ func TestIntegration_ToolResultGuard_CleanContent_NoEvent(t *testing.T) {
 	// Also verify content reaches model unchanged.
 	secondReq := mock.requests[1]
 	lastMsg := secondReq.Messages[len(secondReq.Messages)-1]
-	if !strings.Contains(lastMsg.Content.Text(), "Weather is sunny") {
-		t.Errorf("clean content must pass through, got %q", lastMsg.Content.Text())
+	if !strings.Contains(lastMsg.Text(), "Weather is sunny") {
+		t.Errorf("clean content must pass through, got %q", lastMsg.Text())
 	}
 }
 
@@ -774,7 +771,7 @@ func TestIntegration_ToolResultGuard_CustomPatterns(t *testing.T) {
 		)
 
 		if _, err := a.Run(context.Background(), &schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage("fetch")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch")},
 		}); err != nil {
 			t.Fatalf("Run err: %v", err)
 		}
@@ -811,7 +808,7 @@ func TestIntegration_ToolResultGuard_CustomPatterns(t *testing.T) {
 		)
 
 		if _, err := a.Run(context.Background(), &schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage("fetch")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "fetch")},
 		}); err != nil {
 			t.Fatalf("Run err: %v", err)
 		}
@@ -869,7 +866,7 @@ func TestIntegration_ToolResultGuard_MaxScanBytes_Truncation(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("scan it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "scan it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
@@ -924,7 +921,7 @@ func TestIntegration_ToolResultGuard_Truncation_NoHit(t *testing.T) {
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("scan it")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "scan it")},
 	}); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}

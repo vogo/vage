@@ -51,10 +51,10 @@ func appendRunner(suffix string) *mockRunner {
 	return newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text + suffix)},
 		}, nil
 	})
 }
@@ -73,7 +73,7 @@ func errorRunner(err error) *mockRunner {
 
 func makeReq(text string) *schema.RunRequest {
 	return &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage(text)},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text)},
 		SessionID: "test-session",
 	}
 }
@@ -157,7 +157,7 @@ func TestRunDAG_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B" {
 		t.Errorf("got %q, want %q", got, "start-A-B")
 	}
@@ -210,7 +210,7 @@ func TestRunDAG_WithAggregator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-B" {
 		t.Errorf("got %q, want %q", got, "start-B")
 	}
@@ -887,10 +887,10 @@ func TestIntegration_CheckpointResume_WithEventHandler(t *testing.T) {
 	}
 
 	_ = store.Save(context.Background(), "test-session", "A", &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage("start-A")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A")},
 	})
 	_ = store.Save(context.Background(), "test-session", "B", &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage("start-A-B")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A-B")},
 	})
 
 	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
@@ -1070,7 +1070,7 @@ func TestBuildDAG_LinearChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDAG error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B-C" {
 		t.Errorf("got %q, want %q", got, "start-A-B-C")
 	}

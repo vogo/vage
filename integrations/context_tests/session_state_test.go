@@ -65,7 +65,7 @@ func TestSessionStateSource_EndToEnd(t *testing.T) {
 		SessionID: sid,
 		Request: &schema.RunRequest{
 			SessionID: sid,
-			Messages:  []schema.Message{schema.NewUserMessage("hi")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		},
 	})
 	if err != nil {
@@ -78,10 +78,10 @@ func TestSessionStateSource_EndToEnd(t *testing.T) {
 	}
 
 	stateMsg := res.Messages[1]
-	if stateMsg.Role != aimodel.RoleSystem {
-		t.Errorf("state message Role = %q, want %q", stateMsg.Role, aimodel.RoleSystem)
+	if stateMsg.Role() != schema.RoleSystem {
+		t.Errorf("state message Role = %q, want %q", stateMsg.Role, schema.RoleSystem)
 	}
-	body := stateMsg.Content.Text()
+	body := stateMsg.Text()
 	if !strings.Contains(body, "user_name: alice") {
 		t.Errorf("state message missing 'user_name: alice'; got %q", body)
 	}

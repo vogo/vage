@@ -63,16 +63,13 @@ func TestAgentAsToolIntegration(t *testing.T) {
 			Description: "Translates the given English text to French. Use this tool when the user asks for a French translation.",
 		},
 		func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-			input := req.Messages[0].Content.Text()
+			input := req.Messages[0].Text()
 			// Return a fixed translation to make assertions deterministic.
 			translation := fmt.Sprintf("Bonjour, le monde! (translated from: %s)", input)
 			return &schema.RunResponse{
 				Messages: []schema.Message{
 					{
-						Message: aimodel.Message{
-							Role:    aimodel.RoleAssistant,
-							Content: aimodel.NewTextContent(translation),
-						},
+						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, translation),
 					},
 				},
 			}, nil
@@ -121,8 +118,8 @@ func TestAgentAsToolIntegration(t *testing.T) {
 	// Collect all assistant message text.
 	var responseText strings.Builder
 	for _, msg := range resp.Messages {
-		if msg.Role == aimodel.RoleAssistant {
-			text := msg.Content.Text()
+		if msg.Role() == schema.RoleAssistant {
+			text := msg.Text()
 			if text != "" {
 				responseText.WriteString(text)
 				responseText.WriteString(" ")
@@ -158,14 +155,11 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 			Description: "Echoes back the input",
 		},
 		func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-			input := req.Messages[0].Content.Text()
+			input := req.Messages[0].Text()
 			return &schema.RunResponse{
 				Messages: []schema.Message{
 					{
-						Message: aimodel.Message{
-							Role:    aimodel.RoleAssistant,
-							Content: aimodel.NewTextContent("Echo: " + input),
-						},
+						Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: " + input),
 					},
 				},
 			}, nil
@@ -378,22 +372,16 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 				return &schema.RunResponse{
 					Messages: []schema.Message{
 						{
-							Message: aimodel.Message{
-								Role:    aimodel.RoleAssistant,
-								Content: aimodel.NewTextContent("First line"),
-							},
+							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "First line"),
 						},
 						{
-							Message: aimodel.Message{
-								Role:    aimodel.RoleUser, // should be filtered out
+							Message: schema.Message{
+								Role:    schema.RoleUser, // should be filtered out
 								Content: aimodel.NewTextContent("User line"),
 							},
 						},
 						{
-							Message: aimodel.Message{
-								Role:    aimodel.RoleAssistant,
-								Content: aimodel.NewTextContent("Second line"),
-							},
+							Message: schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Second line"),
 						},
 					},
 				}, nil
