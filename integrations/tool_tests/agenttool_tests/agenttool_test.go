@@ -82,17 +82,19 @@ func TestAgentAsToolIntegration(t *testing.T) {
 	}
 
 	// Build the largemodel with minimal middleware.
-	model := largemodel.New(client,
+	model := largemodel.New(
+		client,
 		largemodel.WithMiddleware(
 			largemodel.NewLogMiddleware(),
 		),
 	)
 
 	// Build the coordinator TaskAgent with the sub-agent tool.
-	coordinator := taskagent.New(agent.Config{
-		ID:   "coordinator-agent",
-		Name: "Coordinator",
-	},
+	coordinator := taskagent.New(
+		agent.Config{
+			ID:   "coordinator-agent",
+			Name: "Coordinator",
+		},
 		taskagent.WithCaller(model),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
@@ -196,7 +198,8 @@ func TestAgentAsToolRegistrationAndListing(t *testing.T) {
 	t.Run("CustomNameAndDescription", func(t *testing.T) {
 		// Register with overridden name and description.
 		reg := tool.NewRegistry()
-		err := agenttool.Register(reg, echoAgent,
+		err := agenttool.Register(
+			reg, echoAgent,
 			agenttool.WithName("custom_echo"),
 			agenttool.WithDescription("A custom echo tool"),
 		)

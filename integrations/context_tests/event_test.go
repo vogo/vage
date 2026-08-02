@@ -38,7 +38,8 @@ func TestTaskAgent_EmitsEventContextBuilt(t *testing.T) {
 
 	fake := newFake(stopResponse("ok"))
 
-	a := taskagent.New(agent.Config{ID: "evt-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "evt-agent"},
 		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithHookManager(hm),

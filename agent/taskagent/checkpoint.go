@@ -163,10 +163,11 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 
 	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, rc.sessionID, schema.AgentStartData{}))
 
+	// Prompt caching needs no preparation here: it travels as request-level
+	// intent that runResumeLoop sets on every outbound request, and the
+	// protocol caller renders the vendor breakpoints.
 	messages := cp.Messages
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
-	if a.promptCaching {
-	}
 
 	startIter := cp.Iteration + 1
 	return a.runResumeLoop(ctx, rc, p, messages, aiTools, startIter)

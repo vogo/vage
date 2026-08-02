@@ -98,7 +98,8 @@ func TestCircuitBreaker_HalfOpenAfterTimeout(t *testing.T) {
 
 	// Start with a failing backend, then switch to success for the probe.
 	failing := true
-	custom := &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+	custom := &CallerFunc{
+		Proto: schema.ProtocolOpenAIChat,
 
 		Chat: func(_ context.Context, _ *Request) (*Response, error) {
 			if failing {

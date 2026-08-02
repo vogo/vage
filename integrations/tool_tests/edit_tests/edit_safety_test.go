@@ -49,7 +49,8 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 
 	// Step 1: Attempt edit without reading first -- should fail.
 	result, err := editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path))
+		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +76,8 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 
 	// Step 2: Read the file via read tool -- should record the read.
 	readResult, err := readHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q}`, path))
+		`{"file_path":%q}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +88,8 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 
 	// Step 3: Edit the file after reading -- should now succeed.
 	result, err = editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path))
+		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +126,8 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 
 	// Read file A only.
 	readResult, err := readHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q}`, pathA))
+		`{"file_path":%q}`, pathA,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +138,8 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 
 	// Edit file A should succeed.
 	result, err := editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content A","new_string":"modified A"}`, pathA))
+		`{"file_path":%q,"old_string":"content A","new_string":"modified A"}`, pathA,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +150,8 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 
 	// Edit file B should fail (not read yet).
 	result, err = editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content B","new_string":"modified B"}`, pathB))
+		`{"file_path":%q,"old_string":"content B","new_string":"modified B"}`, pathB,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +176,8 @@ func TestEndToEndNoTrackerBackwardCompat(t *testing.T) {
 	editHandler := editTool.Handler()
 
 	result, err := editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"original","new_string":"modified"}`, path))
+		`{"file_path":%q,"old_string":"original","new_string":"modified"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,7 +208,8 @@ func TestDenyRuleBlocksEnvFile(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path))
+		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -240,7 +248,8 @@ func TestDenyRuleBlocksLockFile(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"dependency","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"dependency","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +274,8 @@ func TestDenyRuleBlocksCredentials(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"secret","new_string":"public"}`, path))
+		`{"file_path":%q,"old_string":"secret","new_string":"public"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +300,8 @@ func TestDenyRuleAllowsNonMatchingFile(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"old content","new_string":"new content"}`, path))
+		`{"file_path":%q,"old_string":"old content","new_string":"new content"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -319,7 +330,8 @@ func TestDenyRuleMultiplePatterns(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"KEY","new_string":"CHANGED"}`, path))
+		`{"file_path":%q,"old_string":"KEY","new_string":"CHANGED"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -357,7 +369,8 @@ func TestDenyRuleCombinedWithReadTracker(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path))
+		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -430,7 +443,8 @@ func TestFileSizeLimitEnforced(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"X","new_string":"Y","replace_all":true}`, path))
+		`{"file_path":%q,"old_string":"X","new_string":"Y","replace_all":true}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -468,7 +482,8 @@ func TestFileSizeLimitAllowsSmallFile(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"X","new_string":"Y","replace_all":true}`, path))
+		`{"file_path":%q,"old_string":"X","new_string":"Y","replace_all":true}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -498,7 +513,8 @@ func TestReadOnlyFileRejected(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -543,7 +559,8 @@ func TestReplaceAllWithDenyRulesAndTracker(t *testing.T) {
 
 	// Read first.
 	readResult, err := readHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q}`, path))
+		`{"file_path":%q}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -560,7 +577,8 @@ func TestReplaceAllWithDenyRulesAndTracker(t *testing.T) {
 	editHandler := editTool.Handler()
 
 	result, err := editHandler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"foo","new_string":"qux","replace_all":true}`, path))
+		`{"file_path":%q,"old_string":"foo","new_string":"qux","replace_all":true}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -596,7 +614,8 @@ func TestNotFoundErrorGuidance(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"missing text","new_string":"replacement"}`, path))
+		`{"file_path":%q,"old_string":"missing text","new_string":"replacement"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -629,7 +648,8 @@ func TestNonUniqueMatchWithoutReplaceAll(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"abc","new_string":"xyz"}`, path))
+		`{"file_path":%q,"old_string":"abc","new_string":"xyz"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -716,7 +736,8 @@ func TestSafetyPipelineOrder(t *testing.T) {
 	envPath := toolkit.WriteTestFile(t, dir, "test.env", "SECRET=value")
 
 	result, err = handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, envPath))
+		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, envPath,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -734,7 +755,8 @@ func TestSafetyPipelineOrder(t *testing.T) {
 	goPath := toolkit.WriteTestFile(t, dir, "main.go", "content")
 
 	result, err = handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, goPath))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, goPath,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

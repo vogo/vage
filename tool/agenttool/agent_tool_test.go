@@ -81,7 +81,8 @@ func TestRegister(t *testing.T) {
 		})
 
 		r := tool.NewRegistry()
-		regErr := Register(r, ag,
+		regErr := Register(
+			r, ag,
 			WithName("custom-name"),
 			WithDescription("custom description"),
 		)
@@ -291,7 +292,8 @@ func TestRegister(t *testing.T) {
 		}
 
 		r := tool.NewRegistry()
-		regErr := Register(r, ag,
+		regErr := Register(
+			r, ag,
 			WithArgExtractor(extractor),
 		)
 		if regErr != nil {

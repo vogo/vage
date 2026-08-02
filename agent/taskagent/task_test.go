@@ -169,7 +169,8 @@ func TestAgent_Run_SimpleResponse(t *testing.T) {
 
 func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 	)
@@ -196,7 +197,8 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 
 func TestAgent_Run_WithTemplateSystemPrompt(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("Hello, {{.User}}!")),
 	)
@@ -279,7 +281,8 @@ func TestAgent_Run_ToolExecutionError(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
@@ -314,7 +317,8 @@ func TestAgent_Run_MaxIterationsExceeded(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxIterations(2),
@@ -379,7 +383,8 @@ func TestAgent_Run_EmptyResponse(t *testing.T) {
 
 func TestAgent_Run_OptionsOverride(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithModel("default-model"),
 		WithTemperature(0.5),
@@ -417,7 +422,8 @@ func TestAgent_Run_ToolFilter(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "allowed"}, echoToolHandler)
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 	)
@@ -772,7 +778,8 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(client),
 		WithToolRegistry(reg),
 		WithMaxIterations(1),
@@ -891,7 +898,8 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 		}
 	}
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(client),
 		WithStreamMiddleware(countMiddleware),
 	)
@@ -1128,7 +1136,8 @@ func TestAgent_Run_WithSkillManager_PromptInjection(t *testing.T) {
 
 	_, _ = mgr.Activate(ctx, "test-skill", "sess-1")
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 		WithSkillManager(mgr),
@@ -1159,7 +1168,8 @@ func TestAgent_Run_WithSkillManager_NoActiveSkills(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
 	mgr := setupSkillManager(t)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 		WithSkillManager(mgr),
@@ -1191,7 +1201,8 @@ func TestAgent_Run_WithSkillManager_ToolFiltering(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "allowed"}, echoToolHandler)
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSkillManager(mgr),
@@ -1225,7 +1236,8 @@ func TestAgent_Run_WithSkillManager_ToolFilterIntersection(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "allowed"}, echoToolHandler)
 	_ = reg.Register(schema.ToolDef{Name: "other"}, echoToolHandler)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithSkillManager(mgr),
@@ -1262,7 +1274,8 @@ func TestAgent_Run_WithSkillManager_MultipleActiveSkills(t *testing.T) {
 	_ = reg.Register(schema.ToolDef{Name: "allowed"}, echoToolHandler)
 	_ = reg.Register(schema.ToolDef{Name: "blocked"}, echoToolHandler)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSystemPrompt(prompt.StringPrompt("Base prompt.")),
 		WithToolRegistry(reg),
@@ -1308,7 +1321,8 @@ func TestAgent_Run_WithSkillManager_NoSystemPrompt(t *testing.T) {
 
 	_, _ = mgr.Activate(ctx, "test-skill", "sess-1")
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithSkillManager(mgr),
 	)

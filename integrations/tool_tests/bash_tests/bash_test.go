@@ -651,10 +651,11 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 		t.Fatalf("failed to register bash tool: %v", err)
 	}
 
-	a := taskagent.New(agent.Config{
-		ID:   "bash-test-agent",
-		Name: "Bash Test Agent",
-	},
+	a := taskagent.New(
+		agent.Config{
+			ID:   "bash-test-agent",
+			Name: "Bash Test Agent",
+		},
 		taskagent.WithCaller(client),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(

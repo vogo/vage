@@ -38,7 +38,8 @@ func TestEditTool_SingleReplace(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path))
+		`{"file_path":%q,"old_string":"hello","new_string":"goodbye"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +76,8 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"foo","new_string":"qux","replace_all":true}`, path))
+		`{"file_path":%q,"old_string":"foo","new_string":"qux","replace_all":true}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +109,8 @@ func TestEditTool_ReplaceWithEmpty(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"hello ","new_string":""}`, path))
+		`{"file_path":%q,"old_string":"hello ","new_string":""}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +137,8 @@ func TestEditTool_MultilineStrings(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"line1\nline2","new_string":"replaced1\nreplaced2"}`, path))
+		`{"file_path":%q,"old_string":"line1\nline2","new_string":"replaced1\nreplaced2"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +165,8 @@ func TestEditTool_NotFound(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"missing","new_string":"replacement"}`, path))
+		`{"file_path":%q,"old_string":"missing","new_string":"replacement"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -188,7 +193,8 @@ func TestEditTool_AmbiguousMatch(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"foo","new_string":"qux"}`, path))
+		`{"file_path":%q,"old_string":"foo","new_string":"qux"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +221,8 @@ func TestEditTool_SameStrings(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"hello","new_string":"hello"}`, path))
+		`{"file_path":%q,"old_string":"hello","new_string":"hello"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -238,7 +245,8 @@ func TestEditTool_EmptyOldString(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"","new_string":"world"}`, path))
+		`{"file_path":%q,"old_string":"","new_string":"world"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +286,8 @@ func TestEditTool_DirectoryPath(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"a","new_string":"b"}`, dir))
+		`{"file_path":%q,"old_string":"a","new_string":"b"}`, dir,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -359,7 +368,8 @@ func TestEditTool_ExceedsMaxFileBytes(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"A","new_string":"B","replace_all":true}`, path))
+		`{"file_path":%q,"old_string":"A","new_string":"B","replace_all":true}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -462,7 +472,8 @@ func TestEditTool_AllowedDirs(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"replaced"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"replaced"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -503,7 +514,8 @@ func TestEditTool_Concurrent(t *testing.T) {
 
 			args := fmt.Sprintf(
 				`{"file_path":%q,"old_string":"old%d","new_string":"new%d"}`,
-				paths[idx], idx, idx)
+				paths[idx], idx, idx,
+			)
 			results[idx], errs[idx] = handler(context.Background(), "", args)
 		}(i)
 	}
@@ -584,7 +596,8 @@ func TestEditTool_ConcurrentSameFile(t *testing.T) {
 
 			args := fmt.Sprintf(
 				`{"file_path":%q,"old_string":"marker_%d_value","new_string":"marker_%d_done"}`,
-				path, idx, idx)
+				path, idx, idx,
+			)
 			results[idx], errs[idx] = handler(context.Background(), "", args)
 		}(i)
 	}
@@ -623,7 +636,8 @@ func TestEditTool_DenyRule_ExactMatch(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path))
+		`{"file_path":%q,"old_string":"SECRET","new_string":"PUBLIC"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -650,7 +664,8 @@ func TestEditTool_DenyRule_GlobMatch(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"dependency","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"dependency","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -673,7 +688,8 @@ func TestEditTool_DenyRule_NoMatch(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"old content","new_string":"new content"}`, path))
+		`{"file_path":%q,"old_string":"old content","new_string":"new content"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -692,7 +708,8 @@ func TestEditTool_ReadPrerequisite_Blocked(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -724,7 +741,8 @@ func TestEditTool_ReadPrerequisite_Allowed(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -743,7 +761,8 @@ func TestEditTool_ReadPrerequisite_NoTracker(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -771,7 +790,8 @@ func TestEditTool_ReadOnlyFile(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path))
+		`{"file_path":%q,"old_string":"content","new_string":"changed"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -842,7 +862,8 @@ func TestEditTool_SnippetInResult(t *testing.T) {
 	handler := et.Handler()
 
 	result, err := handler(context.Background(), "", fmt.Sprintf(
-		`{"file_path":%q,"old_string":"line5","new_string":"REPLACED"}`, path))
+		`{"file_path":%q,"old_string":"line5","new_string":"REPLACED"}`, path,
+	))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

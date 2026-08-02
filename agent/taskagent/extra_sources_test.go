@@ -51,7 +51,8 @@ func (m *markerSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchRe
 // [system, session_memory(empty), ...extras, request] is preserved when
 // extra sources are plugged in via WithExtraSources.
 func TestWithExtraSources_Order(t *testing.T) {
-	a := New(agent.Config{ID: "t1"},
+	a := New(
+		agent.Config{ID: "t1"},
 		WithExtraSources(&markerSource{marker: "alpha"}, &markerSource{marker: "beta"}),
 	)
 
@@ -88,7 +89,8 @@ func TestWithExtraSources_Order(t *testing.T) {
 // TestWithExtraSources_NilSkipped ensures that calling WithExtraSources(nil)
 // or passing a nil entry doesn't panic and is a no-op.
 func TestWithExtraSources_NilSkipped(t *testing.T) {
-	a := New(agent.Config{ID: "t1"},
+	a := New(
+		agent.Config{ID: "t1"},
 		WithExtraSources(nil, &markerSource{marker: "only"}, nil),
 	)
 	if got := len(a.extraSources); got != 1 {

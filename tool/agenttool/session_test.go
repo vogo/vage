@@ -97,7 +97,8 @@ func TestRegister_WithSessionContext_CreatesChild(t *testing.T) {
 
 	reg := tool.NewRegistry()
 	var minted atomic.Int32
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string {
 			minted.Add(1)
@@ -170,7 +171,8 @@ func TestRegister_WithSessionContext_ParentIDMissing(t *testing.T) {
 	store := session.NewMapSessionStore()
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "standalone-child" }),
 	); err != nil {
@@ -208,7 +210,8 @@ func TestRegister_WithViewBuilder(t *testing.T) {
 	}
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "c" }),
 		WithViewBuilder(func(parentSID, childSID, subgoal string) *sessionview.SessionView {
@@ -258,7 +261,8 @@ func TestRegister_WithSessionContext_DuplicateChildIDFails(t *testing.T) {
 	store := session.NewMapSessionStore()
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "stuck" }),
 	); err != nil {

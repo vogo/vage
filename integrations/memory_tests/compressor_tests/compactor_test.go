@@ -241,7 +241,8 @@ func TestIntegration_ConversationCompactor_ReCompaction(t *testing.T) {
 	}
 
 	// Add more messages after the first compaction.
-	firstResult = append(firstResult,
+	firstResult = append(
+		firstResult,
 		schema.NewUserMessage(schema.ProtocolOpenAIChat, "New question after compaction"),
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "New answer after compaction"),
 		schema.NewUserMessage(schema.ProtocolOpenAIChat, "Another question"),

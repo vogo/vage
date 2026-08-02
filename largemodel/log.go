@@ -52,7 +52,8 @@ func (m *LogMiddleware) Wrap(next Caller) Caller {
 		Proto: next.Protocol(),
 		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			start := time.Now()
-			m.logger.InfoContext(ctx, "chat_completion_start",
+			m.logger.InfoContext(
+				ctx, "chat_completion_start",
 				"model", req.Model,
 				"messages", len(req.Messages),
 				"tools", len(req.Tools),
@@ -62,7 +63,8 @@ func (m *LogMiddleware) Wrap(next Caller) Caller {
 			duration := time.Since(start)
 
 			if err != nil {
-				m.logger.ErrorContext(ctx, "chat_completion_error",
+				m.logger.ErrorContext(
+					ctx, "chat_completion_error",
 					"model", req.Model,
 					"duration_ms", duration.Milliseconds(),
 					"error", err,
@@ -71,7 +73,8 @@ func (m *LogMiddleware) Wrap(next Caller) Caller {
 				return nil, err
 			}
 
-			m.logger.InfoContext(ctx, "chat_completion_done",
+			m.logger.InfoContext(
+				ctx, "chat_completion_done",
 				"model", req.Model,
 				"duration_ms", duration.Milliseconds(),
 				"prompt_tokens", resp.Usage.PromptTokens,
@@ -82,14 +85,16 @@ func (m *LogMiddleware) Wrap(next Caller) Caller {
 			return resp, nil
 		},
 		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
-			m.logger.InfoContext(ctx, "chat_completion_stream_start",
+			m.logger.InfoContext(
+				ctx, "chat_completion_stream_start",
 				"model", req.Model,
 				"messages", len(req.Messages),
 			)
 
 			s, err := next.CallStream(ctx, req)
 			if err != nil {
-				m.logger.ErrorContext(ctx, "chat_completion_stream_error",
+				m.logger.ErrorContext(
+					ctx, "chat_completion_stream_error",
 					"model", req.Model,
 					"error", err,
 				)

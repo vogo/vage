@@ -154,7 +154,8 @@ func (a *Agent) executeToolBatch(
 		}
 
 		toolMsgs = append(toolMsgs, schema.NewToolResultMessage(
-			a.Protocol(), res.ToolCallID, toolResultText(res), res.IsError))
+			a.Protocol(), res.ToolCallID, toolResultText(res), res.IsError,
+		))
 	}
 
 	return toolMsgs, nil

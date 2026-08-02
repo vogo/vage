@@ -108,7 +108,8 @@ func TestTaskAgentIntegration(t *testing.T) {
 
 	// Build the largemodel with middleware.
 	// MetricsMiddleware dispatches LLM call events to the hook system.
-	model := largemodel.New(client,
+	model := largemodel.New(
+		client,
 		largemodel.WithMiddleware(
 			largemodel.NewMetricsMiddleware(hm.Dispatch),
 			largemodel.NewLogMiddleware(),
@@ -138,10 +139,11 @@ func TestTaskAgentIntegration(t *testing.T) {
 	})
 
 	// Build the LLM agent with guard integration.
-	a := taskagent.New(agent.Config{
-		ID:   "weather-agent",
-		Name: "Weather Assistant",
-	},
+	a := taskagent.New(
+		agent.Config{
+			ID:   "weather-agent",
+			Name: "Weather Assistant",
+		},
 		taskagent.WithCaller(model),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(

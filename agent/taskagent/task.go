@@ -395,7 +395,8 @@ func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest
 	for _, s := range a.extraSources {
 		builderOpts = append(builderOpts, vctx.WithSource(s))
 	}
-	builderOpts = append(builderOpts,
+	builderOpts = append(
+		builderOpts,
 		vctx.WithSource(&vctx.RequestMessagesSource{}),
 		vctx.WithHookManager(a.hookManager),
 	)

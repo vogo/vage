@@ -371,7 +371,7 @@ func (b *DefaultBuilder) trimByTokens(ms []schema.Message, rep schema.ContextSou
 	out := ms[drop:]
 	rep.OutputN = len(out)
 	rep.Tokens = total
-	rep.DroppedN = (rep.DroppedN) + drop
+	rep.DroppedN = rep.DroppedN + drop
 	rep.Status = StatusTruncated
 	return out, rep
 }

@@ -266,7 +266,8 @@ func (s *Store) warn(msg string, err error, sessionID, nodeID string) {
 	if s.cfg.logger == nil {
 		return
 	}
-	s.cfg.logger.Warn(msg,
+	s.cfg.logger.Warn(
+		msg,
 		slog.String("session_id", sessionID),
 		slog.String("node_id", nodeID),
 		slog.String("err", fmt.Sprintf("%v", err)),

@@ -156,7 +156,8 @@ func TestAgent_Run_BudgetExhausted_AfterTwoIterations(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{ID: "budget-agent"},
+	a := New(
+		agent.Config{ID: "budget-agent"},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(200),
@@ -198,7 +199,8 @@ func TestAgent_Run_BudgetExhausted_SkipsToolCalls(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{ID: "budget-agent"},
+	a := New(
+		agent.Config{ID: "budget-agent"},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(100),
@@ -249,7 +251,8 @@ func TestAgent_Run_BudgetPerRequestOverride(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(10000),
@@ -281,7 +284,8 @@ func TestAgent_Run_BudgetExhausted_EmitsEvents(t *testing.T) {
 		return schema.TextResult("", "ok"), nil
 	})
 
-	a2 := New(agent.Config{ID: "evt-agent"},
+	a2 := New(
+		agent.Config{ID: "evt-agent"},
 		WithCaller(mock2),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(50),
@@ -351,7 +355,8 @@ func TestAgent_Run_BudgetExhausted_OutputGuardsRun(t *testing.T) {
 		rewriteTo: "guarded text",
 	}
 
-	a := New(agent.Config{ID: "guard-agent"},
+	a := New(
+		agent.Config{ID: "guard-agent"},
 		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(100),
@@ -465,7 +470,8 @@ func TestAgent_RunStream_BudgetExhausted_WithTextContent(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{ID: "stream-budget"},
+	a := New(
+		agent.Config{ID: "stream-budget"},
 		WithCaller(client),
 		WithToolRegistry(reg),
 		WithRunTokenBudget(5),

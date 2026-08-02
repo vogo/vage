@@ -372,13 +372,16 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 
 	expectedCall := schema.ToolCall{
 		Name:      "search",
-		Arguments: `{"q":"hello"}`}
+		Arguments: `{"q":"hello"}`,
+	}
 	matchingCall := schema.ToolCall{
 		Name:      "search",
-		Arguments: `{"q":"hello"}`}
+		Arguments: `{"q":"hello"}`,
+	}
 	differentArgsCall := schema.ToolCall{
 		Name:      "search",
-		Arguments: `{"q":"world"}`}
+		Arguments: `{"q":"world"}`,
+	}
 
 	// Same name, different arguments in strict mode.
 	c1 := &eval.EvalCase{
@@ -596,7 +599,8 @@ func TestIntegration_Composite_WeightedAverage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	composite, err := eval.NewCompositeEvaluator(nil,
+	composite, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: containsEval, Weight: 1.0},
 	)
@@ -632,7 +636,8 @@ func TestIntegration_Composite_WeightedAverage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	composite2, err := eval.NewCompositeEvaluator(nil,
+	composite2, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: containsEval2, Weight: 1.0},
 	)
@@ -672,7 +677,8 @@ func TestIntegration_Composite_NonFailFast(t *testing.T) {
 	}
 
 	// Non-fail-fast: should continue past errors.
-	composite, err := eval.NewCompositeEvaluator(nil,
+	composite, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)
@@ -700,7 +706,8 @@ func TestIntegration_Composite_NonFailFast(t *testing.T) {
 	}
 
 	// Fail-fast: should return error immediately.
-	compositeFf, err := eval.NewCompositeEvaluator(&eval.CompositeConfig{FailFast: true},
+	compositeFf, err := eval.NewCompositeEvaluator(
+		&eval.CompositeConfig{FailFast: true},
 		eval.WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)

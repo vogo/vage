@@ -134,9 +134,11 @@ func TestBudgetExhaustion_Run_PartialResults(t *testing.T) {
 		// Iteration 2: tool call using 100 tokens (budget hits 200, exhausted)
 		makeToolCallResponse("tc-2", "do_thing", "{}", 100),
 		// Iteration 3: should NOT be reached
-		makeStopResponse("should not reach this", 100))
+		makeStopResponse("should not reach this", 100),
+	)
 
-	a := taskagent.New(agent.Config{ID: "budget-test-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "budget-test-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("do_thing")),
 		taskagent.WithRunTokenBudget(200),
@@ -194,9 +196,11 @@ func TestBudgetExhaustion_EmitsCorrectEvents(t *testing.T) {
 	events := collectEvents(hm)
 
 	mock := newMock( // Single tool call that uses 500 tokens, budget is 100
-		makeToolCallResponse("tc-1", "tool1", "{}", 500))
+		makeToolCallResponse("tc-1", "tool1", "{}", 500),
+	)
 
-	a := taskagent.New(agent.Config{ID: "event-test-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "event-test-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
@@ -282,9 +286,11 @@ func TestUnlimitedBudget_PreservesBehavior(t *testing.T) {
 
 	mock := newMock( // Tool call + follow-up response, all should complete normally
 		makeToolCallResponse("tc-1", "tool1", "{}", 1000),
-		makeStopResponse("All done!", 500))
+		makeStopResponse("All done!", 500),
+	)
 
-	a := taskagent.New(agent.Config{ID: "unlimited-budget-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "unlimited-budget-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithHookManager(hm),
@@ -334,9 +340,11 @@ func TestPerRequestBudgetOverride(t *testing.T) {
 	mock := newMock( // First call uses 100 tokens, which exceeds the per-request budget of 50
 		makeToolCallResponse("tc-1", "tool1", "{}", 100),
 		// This should not be reached
-		makeStopResponse("should not reach", 100))
+		makeStopResponse("should not reach", 100),
+	)
 
-	a := taskagent.New(agent.Config{ID: "override-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "override-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(10000), // Agent default: generous budget
@@ -388,9 +396,11 @@ func TestMaxIterationsExhaustion_ReturnsPartialResult(t *testing.T) {
 		// Iteration 2: tool call (max iterations reached after this)
 		makeToolCallResponse("tc-2", "looper", "{}", 50),
 		// Iteration 3: should not be reached
-		makeStopResponse("should not reach", 50))
+		makeStopResponse("should not reach", 50),
+	)
 
-	a := taskagent.New(agent.Config{ID: "maxiter-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "maxiter-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("looper")),
 		taskagent.WithMaxIterations(2),
@@ -461,11 +471,13 @@ func TestMaxIterationsExhaustion_ReturnsPartialResult(t *testing.T) {
 func TestBudgetExhaustion_OutputGuardsRun(t *testing.T) {
 	mock := newMock( // Tool call response with high usage to exhaust budget.
 		// Budget is 100, usage is 500 -- exhausted in post-call check.
-		makeToolCallResponse("tc-1", "tool1", "{}", 500))
+		makeToolCallResponse("tc-1", "tool1", "{}", 500),
+	)
 
 	outputGuard := &rewriteGuard{replacement: "GUARDED OUTPUT"}
 
-	a := taskagent.New(agent.Config{ID: "guard-budget-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "guard-budget-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
@@ -510,9 +522,11 @@ func TestBudgetExhaustion_RunToStream_CleanClose(t *testing.T) {
 	hookEvents := collectEvents(hm)
 
 	mock := newMock( // Tool call with 500 tokens, budget is 100 -> exhausted
-		makeToolCallResponse("tc-1", "tool1", "{}", 500))
+		makeToolCallResponse("tc-1", "tool1", "{}", 500),
+	)
 
-	a := taskagent.New(agent.Config{ID: "stream-budget-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "stream-budget-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(100),
@@ -604,9 +618,11 @@ func TestBudgetExact_CompletesNormally(t *testing.T) {
 	mock := newMock( // Iteration 1: tool call using 100 tokens
 		makeToolCallResponse("tc-1", "tool1", "{}", 100),
 		// Iteration 2: final text response using 100 tokens (total = 200 = budget)
-		makeStopResponse("Done!", 100))
+		makeStopResponse("Done!", 100),
+	)
 
-	a := taskagent.New(agent.Config{ID: "exact-budget-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "exact-budget-agent"},
 		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(noopTool("tool1")),
 		taskagent.WithRunTokenBudget(200),

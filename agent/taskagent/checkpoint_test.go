@@ -57,7 +57,8 @@ func TestRun_WritesCheckpointPerIteration(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
 	registry := newEchoRegistry()
 
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(mock),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
@@ -104,7 +105,8 @@ func TestResume_MissingStore_ReturnsInvalidArgument(t *testing.T) {
 // TestResume_NoCheckpoint_ReturnsNotFound verifies the empty-session path.
 func TestResume_NoCheckpoint_ReturnsNotFound(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(newMock()),
 		WithIterationStore(store),
 	)
@@ -119,7 +121,8 @@ func TestResume_NoCheckpoint_ReturnsNotFound(t *testing.T) {
 func TestResume_AlreadyFinal_ReturnsErrAlreadyFinal(t *testing.T) {
 	mock := newMock(stopResponse("done"))
 	store := checkpoint.NewMapIterationStore()
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(mock),
 		WithIterationStore(store),
 	)
@@ -149,7 +152,8 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	// "no more responses" — simulating a crash.
 	mock1 := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`))
 
-	a1 := New(agent.Config{ID: "agent-resume"},
+	a1 := New(
+		agent.Config{ID: "agent-resume"},
 		WithCaller(mock1),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
@@ -177,7 +181,8 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	// Second agent (fresh instance, same store): Resume should pick up
 	// the partial run and finish it via a stop response.
 	mock2 := newMock(stopResponse("resumed-done"))
-	a2 := New(agent.Config{ID: "agent-resume"},
+	a2 := New(
+		agent.Config{ID: "agent-resume"},
 		WithCaller(mock2),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
@@ -209,7 +214,8 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 func TestResume_CrossAgent_Rejected(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
 	mock := newMock(stopResponse("hi"))
-	original := New(agent.Config{ID: "agent-X"},
+	original := New(
+		agent.Config{ID: "agent-X"},
 		WithCaller(mock),
 		WithIterationStore(store),
 	)
@@ -221,7 +227,8 @@ func TestResume_CrossAgent_Rejected(t *testing.T) {
 	}
 
 	// A different agent ID tries to resume.
-	other := New(agent.Config{ID: "agent-Y"},
+	other := New(
+		agent.Config{ID: "agent-Y"},
 		WithCaller(newMock()),
 		WithIterationStore(store),
 	)

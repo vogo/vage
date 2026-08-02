@@ -314,7 +314,8 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 
 	cc := newCapturing()
 
-	a := taskagent.New(agent.Config{ID: "skill-test-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "skill-test-agent"},
 		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
@@ -412,7 +413,8 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-w", Description: "W"}, noopHandler))
 
 	cc := newCapturing()
-	a := taskagent.New(agent.Config{ID: "multi-skill-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "multi-skill-agent"},
 		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
@@ -479,7 +481,8 @@ func TestSkillNoAllowedToolsPassesAllTools(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "any-tool", Description: "Any"}, noopHandler))
 
 	cc := newCapturing()
-	a := taskagent.New(agent.Config{ID: "no-tools-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "no-tools-agent"},
 		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
@@ -528,7 +531,8 @@ func TestSkillMixedAllowedToolsPassesAll(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-b", Description: "B"}, noopHandler))
 
 	cc := newCapturing()
-	a := taskagent.New(agent.Config{ID: "mixed-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "mixed-agent"},
 		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),

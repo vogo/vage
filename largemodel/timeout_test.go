@@ -41,7 +41,8 @@ func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
 }
 
 func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
-	slow := &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+	slow := &CallerFunc{
+		Proto: schema.ProtocolOpenAIChat,
 
 		Chat: func(ctx context.Context, _ *Request) (*Response, error) {
 			select {

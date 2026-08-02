@@ -54,7 +54,8 @@ func TestModel_New_WithMiddleware(t *testing.T) {
 
 	var mwCalls int
 	mw := MiddlewareFunc(func(next Caller) Caller {
-		return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+		return &CallerFunc{
+			Proto: schema.ProtocolOpenAIChat,
 
 			Chat: func(ctx context.Context, req *Request) (*Response, error) {
 				mwCalls++
@@ -106,7 +107,8 @@ func TestModel_MultipleMiddlewares_Order(t *testing.T) {
 	var order []string
 	makeMW := func(name string) Middleware {
 		return MiddlewareFunc(func(next Caller) Caller {
-			return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+			return &CallerFunc{
+				Proto: schema.ProtocolOpenAIChat,
 
 				Chat: func(ctx context.Context, req *Request) (*Response, error) {
 					order = append(order, name)

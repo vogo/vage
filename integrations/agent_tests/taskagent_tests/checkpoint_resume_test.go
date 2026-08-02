@@ -68,7 +68,8 @@ func TestCheckpoint_AC_2_1_KIterationsKCheckpoints(t *testing.T) {
 	mock := newMock(responses...)
 	store := checkpoint.NewMapIterationStore()
 
-	a := taskagent.New(agent.Config{ID: "agent-k"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-k"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
@@ -115,7 +116,8 @@ func TestCheckpoint_AC_2_2_PartialCheckpointsAfterCrash(t *testing.T) {
 	)
 	store := checkpoint.NewMapIterationStore()
 
-	a := taskagent.New(agent.Config{ID: "agent-crash"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-crash"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
@@ -191,7 +193,8 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 
 	// First Run: crashes after 1 successful iter (tool call response).
 	mock1 := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50))
-	a1 := taskagent.New(agent.Config{ID: "agent-r"},
+	a1 := taskagent.New(
+		agent.Config{ID: "agent-r"},
 		taskagent.WithCaller(mock1),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
@@ -206,7 +209,8 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 
 	// Resume with a fresh agent + completer that returns a stop response.
 	mock2 := newMock(makeStopResponse("RESUMED-FINAL", 50))
-	a2 := taskagent.New(agent.Config{ID: "agent-r"},
+	a2 := taskagent.New(
+		agent.Config{ID: "agent-r"},
 		taskagent.WithCaller(mock2),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
@@ -233,7 +237,8 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 // returns ErrCheckpointNotFound for an unknown session id.
 func TestCheckpoint_AC_1_3_ResumeUnknownSession(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	a := taskagent.New(agent.Config{ID: "agent-x"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-x"},
 		taskagent.WithCaller(newMock()),
 		taskagent.WithIterationStore(store),
 	)
@@ -249,7 +254,8 @@ func TestCheckpoint_AC_1_3_ResumeUnknownSession(t *testing.T) {
 func TestCheckpoint_AC_3_1_ListMetadataDoesNotEmbedMessages(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
 	mock := newMock(makeStopResponse("hi", 50))
-	a := taskagent.New(agent.Config{ID: "agent-meta"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-meta"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 	)
@@ -303,7 +309,8 @@ func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 		return nil
 	}, schema.EventCheckpointWritten))
 
-	a := taskagent.New(agent.Config{ID: "agent-hook"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-hook"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithHookManager(hookMgr),
@@ -347,7 +354,8 @@ func TestCheckpoint_AC_4_1_FileLayout(t *testing.T) {
 		t.Fatalf("NewFileIterationStore: %v", err)
 	}
 	mock := newMock(makeStopResponse("done", 50))
-	a := taskagent.New(agent.Config{ID: "agent-fs"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-fs"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 	)
@@ -419,7 +427,8 @@ func TestCheckpoint_FileStore_ConcurrentDifferentSessions(t *testing.T) {
 func TestCheckpoint_PreCallBudgetExhausted_FirstIter(t *testing.T) {
 	mock := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50))
 	store := checkpoint.NewMapIterationStore()
-	a := taskagent.New(agent.Config{ID: "agent-budget"},
+	a := taskagent.New(
+		agent.Config{ID: "agent-budget"},
 		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),

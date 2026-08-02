@@ -46,12 +46,14 @@ func multiToolCallChunks(calls []struct {
 		chunks = append(chunks,
 			fmt.Sprintf(
 				`{"id":"1","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":%d,"id":%s,"type":"function","function":{"name":%s,"arguments":""}}]},"finish_reason":null}]}`,
-				i, mustMarshal(c.ID), mustMarshal(c.Name)))
+				i, mustMarshal(c.ID), mustMarshal(c.Name),
+			))
 		// Arguments chunk.
 		chunks = append(chunks,
 			fmt.Sprintf(
 				`{"id":"1","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"tool_calls":[{"index":%d,"function":{"arguments":%s}}]},"finish_reason":null}]}`,
-				i, mustMarshal(c.Args)))
+				i, mustMarshal(c.Args),
+			))
 	}
 	// Final chunk — finish_reason terminates the assistant message.
 	chunks = append(chunks,

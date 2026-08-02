@@ -55,7 +55,8 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 
 	fake := newFake(stopResponse("done"))
 
-	a := taskagent.New(agent.Config{ID: "compat-agent", Name: "Compat"},
+	a := taskagent.New(
+		agent.Config{ID: "compat-agent", Name: "Compat"},
 		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Be helpful.")),
 		taskagent.WithMemory(mm),
@@ -113,7 +114,8 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 func TestTaskAgent_PromptCachingReachesRequest(t *testing.T) {
 	fake := newFake(stopResponse("ok"))
 
-	a := taskagent.New(agent.Config{ID: "cache-agent"},
+	a := taskagent.New(
+		agent.Config{ID: "cache-agent"},
 		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithPromptCaching(true),

@@ -67,7 +67,8 @@ func TestSaveCheckpointFailure_InvokesCallback(t *testing.T) {
 		seenErrPtr atomic.Pointer[error]
 	)
 
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(mock),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
@@ -114,7 +115,8 @@ func TestSaveCheckpointFailure_NilCallback_NoPanic(t *testing.T) {
 	mock := newMock(stopResponse("done"))
 	store := newFailingIterationStore(errors.New("disk full"))
 
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(mock),
 		WithIterationStore(store),
 		// no WithCheckpointFailureCallback
@@ -140,7 +142,8 @@ func TestSaveCheckpointFailure_OnSuccess_NoCallbackInvoke(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
 
 	var cbHits atomic.Int32
-	a := New(agent.Config{ID: "a1"},
+	a := New(
+		agent.Config{ID: "a1"},
 		WithCaller(mock),
 		WithIterationStore(store),
 		WithCheckpointFailureCallback(func(context.Context, string, error) {

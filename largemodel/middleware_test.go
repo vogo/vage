@@ -79,7 +79,8 @@ func TestChainOrder(t *testing.T) {
 
 	mkMiddleware := func(name string) Middleware {
 		return MiddlewareFunc(func(next Caller) Caller {
-			return &CallerFunc{Proto: schema.ProtocolOpenAIChat,
+			return &CallerFunc{
+				Proto: schema.ProtocolOpenAIChat,
 
 				Chat: func(ctx context.Context, req *Request) (*Response, error) {
 					order = append(order, name+"-before")
@@ -132,7 +133,8 @@ func TestMiddlewareFunc(t *testing.T) {
 
 func TestDefaultChain_AllMiddlewares(t *testing.T) {
 	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
-	wrapped := DefaultChain(mock,
+	wrapped := DefaultChain(
+		mock,
 		NewLogMiddleware(),
 		NewCircuitBreakerMiddleware(),
 		NewRateLimitMiddleware(),
