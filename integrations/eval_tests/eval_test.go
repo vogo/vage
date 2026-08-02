@@ -1091,7 +1091,7 @@ func TestIntegration_LLMJudge_RobustParsing(t *testing.T) {
 	}
 }
 
-// mockCompleter implements aimodel.ChatCompleter for testing.
+// mockCompleter is a scripted largemodel.Caller for testing.
 type mockCompleter struct {
 	response string
 }

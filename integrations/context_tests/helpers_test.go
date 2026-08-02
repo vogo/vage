@@ -33,7 +33,7 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// fakeChatCompleter is a minimal aimodel.ChatCompleter used to capture the
+// fakeChatCompleter is a minimal largemodel.Caller used to capture the
 // message list TaskAgent forwards to the LLM. Each invocation pops one
 // pre-configured response and stores the request that produced it so tests
 // can assert on the exact prompt assembly.

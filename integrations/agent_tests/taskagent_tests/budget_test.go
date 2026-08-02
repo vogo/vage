@@ -33,7 +33,7 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// mockChatCompleter implements aimodel.ChatCompleter for integration tests.
+// mockChatCompleter is a scripted largemodel.Caller for integration tests.
 // It returns pre-configured responses with known usage data.
 type mockChatCompleter struct {
 	*largemodel.FakeCaller

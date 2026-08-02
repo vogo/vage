@@ -47,7 +47,7 @@ import (
 // package).
 // =============================================================================
 
-// mockChatCompleter implements aimodel.ChatCompleter for non-streaming tests.
+// mockChatCompleter is a scripted largemodel.Caller for non-streaming tests.
 type mockChatCompleter struct {
 	*largemodel.FakeCaller
 }

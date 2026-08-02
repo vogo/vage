@@ -43,7 +43,7 @@ import (
 )
 
 // recordingCompleter records every ChatRequest the upstream middleware
-// chain passes down. It implements aimodel.ChatCompleter so it can sit
+// chain passes down. It implements largemodel.Caller so it can sit
 // directly under the ContextEditorMiddleware in the wrap chain — every
 // request the editor forwards is captured here for inspection.
 //
