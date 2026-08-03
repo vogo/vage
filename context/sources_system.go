@@ -21,13 +21,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 )
 
 // SystemPromptSource renders a prompt.PromptTemplate into a single
-// system-role aimodel.Message. It is a MustInclude source: the system
+// system-role schema.Message. It is a MustInclude source: the system
 // prompt is infrastructural and is never trimmed by budget.
 //
 // Render failures are fail-closed by design — they signal an agent
@@ -73,15 +72,12 @@ func (s *SystemPromptSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 		return FetchResult{Report: rep}, nil
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
+	msg := schema.NewSystemMessage(in.Protocol, text)
 
 	rep.Status = StatusOK
 	rep.OutputN = 1
 	// Tokens left at zero so the Builder fills it with its estimator —
 	// keeps token accounting consistent with the rest of the run.
 
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }

@@ -22,8 +22,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/prompt"
+	"github.com/vogo/vage/schema"
 )
 
 // errPrompt is a PromptTemplate whose Render always returns the configured
@@ -48,11 +48,11 @@ func TestSystemPromptSource_Render(t *testing.T) {
 	if len(res.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(res.Messages))
 	}
-	if res.Messages[0].Role != aimodel.RoleSystem {
-		t.Errorf("Role = %q, want system", res.Messages[0].Role)
+	if res.Messages[0].Role() != schema.RoleSystem {
+		t.Errorf("Role = %q, want system", res.Messages[0].Role())
 	}
-	if res.Messages[0].Content.Text() != "you are a helper" {
-		t.Errorf("text mismatch: %q", res.Messages[0].Content.Text())
+	if res.Messages[0].Text() != "you are a helper" {
+		t.Errorf("text mismatch: %q", res.Messages[0].Text())
 	}
 	if res.Report.Status != StatusOK {
 		t.Errorf("Status = %q, want %q", res.Report.Status, StatusOK)

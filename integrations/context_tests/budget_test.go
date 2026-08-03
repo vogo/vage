@@ -49,7 +49,7 @@ func TestBuilder_Budget_OldestDropped(t *testing.T) {
 	for i := range 6 {
 		key := fmt.Sprintf("msg:%06d", i)
 		text := fmt.Sprintf("%02d:%s", i, body)
-		if err := sess.Set(ctx, key, schema.NewUserMessage(text), 0); err != nil {
+		if err := sess.Set(ctx, key, schema.NewUserMessage(schema.ProtocolOpenAIChat, text), 0); err != nil {
 			t.Fatalf("seed Set %d: %v", i, err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestBuilder_Budget_OldestDropped(t *testing.T) {
 		Budget:    budget,
 		Request: &schema.RunRequest{
 			SessionID: "budget-session",
-			Messages:  []schema.Message{schema.NewUserMessage("q")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "q")},
 		},
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestBuilder_Budget_OldestDropped(t *testing.T) {
 
 	// First surviving history message must NOT be the oldest seeded one —
 	// the oldest ("00:...") is the one budget trim drops first.
-	firstHist := res.Messages[1].Content.Text()
+	firstHist := res.Messages[1].Text()
 	if strings.HasPrefix(firstHist, "00:") {
 		t.Errorf("oldest message survived trim; first history msg = %q", firstHist)
 	}
@@ -139,7 +139,7 @@ func TestBuilder_BudgetZero_Unlimited(t *testing.T) {
 	for i := range 6 {
 		key := fmt.Sprintf("msg:%06d", i)
 		text := fmt.Sprintf("%02d:%s", i, body)
-		if err := sess.Set(ctx, key, schema.NewUserMessage(text), 0); err != nil {
+		if err := sess.Set(ctx, key, schema.NewUserMessage(schema.ProtocolOpenAIChat, text), 0); err != nil {
 			t.Fatalf("seed Set %d: %v", i, err)
 		}
 	}
@@ -156,7 +156,7 @@ func TestBuilder_BudgetZero_Unlimited(t *testing.T) {
 		Budget:    0,
 		Request: &schema.RunRequest{
 			SessionID: "nolimit-session",
-			Messages:  []schema.Message{schema.NewUserMessage("q")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "q")},
 		},
 	})
 	if err != nil {

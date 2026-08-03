@@ -177,29 +177,6 @@ func TestRegistry_Merge(t *testing.T) {
 	}
 }
 
-func TestToAIModelTools(t *testing.T) {
-	defs := []schema.ToolDef{
-		{Name: "get_weather", Description: "Get weather", Parameters: map[string]any{"type": "object"}},
-		{Name: "search", Description: "Search the web"},
-	}
-	tools := ToAIModelTools(defs)
-	if len(tools) != 2 {
-		t.Fatalf("len = %d, want 2", len(tools))
-	}
-	if tools[0].Type != "function" {
-		t.Errorf("[0].Type = %q, want %q", tools[0].Type, "function")
-	}
-	if tools[0].Function.Name != "get_weather" {
-		t.Errorf("[0].Function.Name = %q, want %q", tools[0].Function.Name, "get_weather")
-	}
-	if tools[0].Function.Description != "Get weather" {
-		t.Errorf("[0].Function.Description = %q, want %q", tools[0].Function.Description, "Get weather")
-	}
-	if tools[1].Function.Name != "search" {
-		t.Errorf("[1].Function.Name = %q, want %q", tools[1].Function.Name, "search")
-	}
-}
-
 func TestFilterTools(t *testing.T) {
 	defs := []schema.ToolDef{
 		{Name: "a"}, {Name: "b"}, {Name: "c"},

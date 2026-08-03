@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -46,12 +46,14 @@ func multiToolCallChunks(calls []struct {
 		chunks = append(chunks,
 			fmt.Sprintf(
 				`{"id":"1","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":%d,"id":%s,"type":"function","function":{"name":%s,"arguments":""}}]},"finish_reason":null}]}`,
-				i, mustMarshal(c.ID), mustMarshal(c.Name)))
+				i, mustMarshal(c.ID), mustMarshal(c.Name),
+			))
 		// Arguments chunk.
 		chunks = append(chunks,
 			fmt.Sprintf(
 				`{"id":"1","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"tool_calls":[{"index":%d,"function":{"arguments":%s}}]},"finish_reason":null}]}`,
-				i, mustMarshal(c.Args)))
+				i, mustMarshal(c.Args),
+			))
 	}
 	// Final chunk — finish_reason terminates the assistant message.
 	chunks = append(chunks,
@@ -82,9 +84,9 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	reg := tool.NewRegistry()
@@ -100,13 +102,13 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 
 	a := New(
 		agent.Config{ID: "stream-parallel"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("three waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "three waits")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)

@@ -23,8 +23,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 	"github.com/vogo/vage/tool/todo"
@@ -49,18 +49,14 @@ func TestToolCtxInjection_SyncPath(t *testing.T) {
 		},
 	)
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse([3]string{"tc-1", "probe", "{}"}),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse([3]string{"tc-1", "probe", "{}"}),
+		stopResponse("done"))
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-sync",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -101,20 +97,20 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	a := New(
 		agent.Config{ID: "stream-ctx"},
-		WithChatCompleter(client),
+		WithCaller(client),
 		WithToolRegistry(reg),
 	)
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
 		SessionID: "sess-stream",
-		Messages:  []schema.Message{schema.NewUserMessage("probe")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "probe")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
@@ -159,16 +155,16 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
-	a := New(agent.Config{ID: "todo-e2e"}, WithChatCompleter(client), WithToolRegistry(reg))
+	a := New(agent.Config{ID: "todo-e2e"}, WithCaller(client), WithToolRegistry(reg))
 
 	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
 		SessionID: "sess-e2e",
-		Messages:  []schema.Message{schema.NewUserMessage("plan something")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan something")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)

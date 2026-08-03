@@ -22,8 +22,6 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 // ErrRateLimited is returned when a request exceeds the configured rate limit.
@@ -73,14 +71,15 @@ func NewRateLimitMiddleware(opts ...RateLimitOption) *RateLimitMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *RateLimitMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *RateLimitMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -89,12 +88,12 @@ func (m *RateLimitMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompl
 
 			return resp, nil
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}
 
-			return next.ChatCompletionStream(ctx, req)
+			return next.CallStream(ctx, req)
 		},
 	}
 }

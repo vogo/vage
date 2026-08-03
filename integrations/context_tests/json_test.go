@@ -40,7 +40,7 @@ func TestBuildReport_JSONRoundTrip(t *testing.T) {
 	for i := range 3 {
 		key := fmt.Sprintf("msg:%06d", i)
 		text := fmt.Sprintf("turn-%d", i)
-		if err := sess.Set(ctx, key, schema.NewUserMessage(text), 0); err != nil {
+		if err := sess.Set(ctx, key, schema.NewUserMessage(schema.ProtocolOpenAIChat, text), 0); err != nil {
 			t.Fatalf("seed Set %d: %v", i, err)
 		}
 	}
@@ -56,7 +56,7 @@ func TestBuildReport_JSONRoundTrip(t *testing.T) {
 		SessionID: "json-session",
 		Request: &schema.RunRequest{
 			SessionID: "json-session",
-			Messages:  []schema.Message{schema.NewUserMessage("now")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "now")},
 		},
 	})
 	if err != nil {

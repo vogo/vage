@@ -726,14 +726,10 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Errorf("expected additionalProperties=false, got %v", params["additionalProperties"])
 	}
 
-	// Verify conversion to aimodel.Tool works.
-	aiTools := tool.ToAIModelTools([]schema.ToolDef{def})
-	if len(aiTools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(aiTools))
-	}
-
-	if aiTools[0].Function.Name != "glob" {
-		t.Errorf("expected function name 'glob', got %q", aiTools[0].Function.Name)
+	// The tool definition travels on the request as-is; the protocol caller
+	// renders it into the vendor's own tool shape.
+	if def.Name != "glob" {
+		t.Errorf("expected tool name 'glob', got %q", def.Name)
 	}
 }
 

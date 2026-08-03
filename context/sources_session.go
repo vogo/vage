@@ -99,7 +99,7 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 		}
 	}
 
-	out := schema.ToAIModelMessages(loaded)
+	out := loaded
 
 	if len(out) < originalCount {
 		rep.DroppedN = originalCount - len(out)

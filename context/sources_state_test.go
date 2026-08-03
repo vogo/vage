@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/session"
 )
 
@@ -64,10 +64,10 @@ func TestSessionStateSource_RenderKeys(t *testing.T) {
 	if len(res.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(res.Messages))
 	}
-	if res.Messages[0].Role != aimodel.RoleSystem {
-		t.Errorf("Role = %q, want system", res.Messages[0].Role)
+	if res.Messages[0].Role() != schema.RoleSystem {
+		t.Errorf("Role = %q, want system", res.Messages[0].Role())
 	}
-	text := res.Messages[0].Content.Text()
+	text := res.Messages[0].Text()
 	if !strings.Contains(text, "plan: do X") {
 		t.Errorf("missing plan: %q", text)
 	}
@@ -163,8 +163,8 @@ func TestSessionStateSource_CustomRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
-	if res.Messages[0].Content.Text() != "<custom-render-output>" {
-		t.Errorf("render not respected: %q", res.Messages[0].Content.Text())
+	if res.Messages[0].Text() != "<custom-render-output>" {
+		t.Errorf("render not respected: %q", res.Messages[0].Text())
 	}
 }
 

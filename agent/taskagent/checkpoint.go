@@ -24,7 +24,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/schema"
 )
@@ -48,7 +47,7 @@ var ErrEmptyLLMResponse = errors.New("vage: empty response from LLM")
 func (a *Agent) saveIterationCheckpoint(
 	ctx context.Context,
 	rc *runContext,
-	messages []aimodel.Message,
+	messages []schema.Message,
 	final bool,
 	stopReason schema.StopReason,
 ) {
@@ -94,13 +93,13 @@ func (a *Agent) saveIterationCheckpoint(
 		}))
 }
 
-// cloneMessagesForCheckpoint copies the top-level slice; aimodel.Message
+// cloneMessagesForCheckpoint copies the top-level slice; schema.Message
 // internals are immutable post-creation by TaskAgent convention.
-func cloneMessagesForCheckpoint(in []aimodel.Message) []aimodel.Message {
+func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]aimodel.Message, len(in))
+	out := make([]schema.Message, len(in))
 	copy(out, in)
 	return out
 }
@@ -120,8 +119,8 @@ func cloneMessagesForCheckpoint(in []aimodel.Message) []aimodel.Message {
 // input). Output guards run on the resumed final response. Tool result
 // guards continue to run on every fresh tool execution.
 func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunResponse, error) {
-	if a.chatCompleter == nil {
-		return nil, errors.New("vage: ChatCompleter is required")
+	if a.caller == nil {
+		return nil, errors.New("vage: model caller is required")
 	}
 	if a.iterationStore == nil {
 		return nil, fmt.Errorf("%w: no IterationStore configured", checkpoint.ErrInvalidArgument)
@@ -164,11 +163,11 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 
 	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, agentID, rc.sessionID, schema.AgentStartData{}))
 
+	// Prompt caching needs no preparation here: it travels as request-level
+	// intent that runResumeLoop sets on every outbound request, and the
+	// protocol caller renders the vendor breakpoints.
 	messages := cp.Messages
 	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
-	if a.promptCaching {
-		markPromptCacheBreakpoints(messages, aiTools)
-	}
 
 	startIter := cp.Iteration + 1
 	return a.runResumeLoop(ctx, rc, p, messages, aiTools, startIter)
@@ -184,8 +183,8 @@ func (a *Agent) runResumeLoop(
 	ctx context.Context,
 	rc *runContext,
 	p runParams,
-	messages []aimodel.Message,
-	aiTools []aimodel.Tool,
+	messages []schema.Message,
+	aiTools []schema.ToolDef,
 	startIter int,
 ) (*schema.RunResponse, error) {
 	mode := &syncMode{a: a, ctx: ctx}

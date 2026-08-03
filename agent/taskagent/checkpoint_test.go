@@ -22,7 +22,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/schema"
@@ -33,14 +32,12 @@ import (
 // the agent behaves exactly as before — Run completes normally and there
 // are no calls into the (absent) store.
 func TestRun_NoCheckpointStore_NoOp(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("done")},
-	}
-	a := New(agent.Config{ID: "a1"}, WithChatCompleter(mock))
+	mock := newMock(stopResponse("done"))
+	a := New(agent.Config{ID: "a1"}, WithCaller(mock))
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-noop",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -54,25 +51,22 @@ func TestRun_NoCheckpointStore_NoOp(t *testing.T) {
 // (tool, tool, stop) leaves exactly 3 checkpoints in the store, with
 // only the last one Final.
 func TestRun_WritesCheckpointPerIteration(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-			toolCallResponse("tc-2", "echo", `{"v":"b"}`),
-			stopResponse("final"),
-		},
-	}
+	mock := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`),
+		toolCallResponse("tc-2", "echo", `{"v":"b"}`),
+		stopResponse("final"))
 	store := checkpoint.NewMapIterationStore()
 	registry := newEchoRegistry()
 
-	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+	a := New(
+		agent.Config{ID: "a1"},
+		WithCaller(mock),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-3iter",
-		Messages:  []schema.Message{schema.NewUserMessage("go")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -100,8 +94,8 @@ func TestRun_WritesCheckpointPerIteration(t *testing.T) {
 
 // TestResume_MissingStore_ReturnsInvalidArgument verifies the precondition.
 func TestResume_MissingStore_ReturnsInvalidArgument(t *testing.T) {
-	mock := &mockChatCompleter{}
-	a := New(agent.Config{ID: "a1"}, WithChatCompleter(mock))
+	mock := newMock()
+	a := New(agent.Config{ID: "a1"}, WithCaller(mock))
 	_, err := a.Resume(context.Background(), "sess-x")
 	if !errors.Is(err, checkpoint.ErrInvalidArgument) {
 		t.Errorf("err = %v, want ErrInvalidArgument", err)
@@ -111,8 +105,9 @@ func TestResume_MissingStore_ReturnsInvalidArgument(t *testing.T) {
 // TestResume_NoCheckpoint_ReturnsNotFound verifies the empty-session path.
 func TestResume_NoCheckpoint_ReturnsNotFound(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(&mockChatCompleter{}),
+	a := New(
+		agent.Config{ID: "a1"},
+		WithCaller(newMock()),
 		WithIterationStore(store),
 	)
 	_, err := a.Resume(context.Background(), "sess-empty")
@@ -124,17 +119,16 @@ func TestResume_NoCheckpoint_ReturnsNotFound(t *testing.T) {
 // TestResume_AlreadyFinal_ReturnsErrAlreadyFinal verifies the Final
 // short-circuit in Resume.
 func TestResume_AlreadyFinal_ReturnsErrAlreadyFinal(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("done")},
-	}
+	mock := newMock(stopResponse("done"))
 	store := checkpoint.NewMapIterationStore()
-	a := New(agent.Config{ID: "a1"},
-		WithChatCompleter(mock),
+	a := New(
+		agent.Config{ID: "a1"},
+		WithCaller(mock),
 		WithIterationStore(store),
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-final",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -154,21 +148,19 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	registry := newEchoRegistry()
 
 	// First Run: returns one tool call, then errors out on second call.
-	mock1 := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			toolCallResponse("tc-1", "echo", `{"v":"a"}`),
-		},
-		// After consuming the single response, the second ChatCompletion
-		// returns "no more responses" — simulating a crash.
-	}
-	a1 := New(agent.Config{ID: "agent-resume"},
-		WithChatCompleter(mock1),
+	// After consuming the single response, the second call returns
+	// "no more responses" — simulating a crash.
+	mock1 := newMock(toolCallResponse("tc-1", "echo", `{"v":"a"}`))
+
+	a1 := New(
+		agent.Config{ID: "agent-resume"},
+		WithCaller(mock1),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
 	)
 	_, err := a1.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-resume",
-		Messages:  []schema.Message{schema.NewUserMessage("plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan")},
 	})
 	if err == nil {
 		t.Fatal("first Run: want error from mock running out, got nil")
@@ -188,11 +180,10 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 
 	// Second agent (fresh instance, same store): Resume should pick up
 	// the partial run and finish it via a stop response.
-	mock2 := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("resumed-done")},
-	}
-	a2 := New(agent.Config{ID: "agent-resume"},
-		WithChatCompleter(mock2),
+	mock2 := newMock(stopResponse("resumed-done"))
+	a2 := New(
+		agent.Config{ID: "agent-resume"},
+		WithCaller(mock2),
 		WithIterationStore(store),
 		WithToolRegistry(registry),
 	)
@@ -203,7 +194,7 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 	if resp.StopReason != schema.StopReasonComplete {
 		t.Errorf("StopReason = %q, want complete", resp.StopReason)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "resumed-done" {
+	if got := resp.Messages[0].Text(); got != "resumed-done" {
 		t.Errorf("response text = %q, want resumed-done", got)
 	}
 
@@ -222,23 +213,23 @@ func TestResume_AfterFailedRun_ContinuesFromCheckpoint(t *testing.T) {
 // loading a session checkpointed by agent X into agent Y.
 func TestResume_CrossAgent_Rejected(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{stopResponse("hi")},
-	}
-	original := New(agent.Config{ID: "agent-X"},
-		WithChatCompleter(mock),
+	mock := newMock(stopResponse("hi"))
+	original := New(
+		agent.Config{ID: "agent-X"},
+		WithCaller(mock),
 		WithIterationStore(store),
 	)
 	if _, err := original.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-cross",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
 	// A different agent ID tries to resume.
-	other := New(agent.Config{ID: "agent-Y"},
-		WithChatCompleter(&mockChatCompleter{}),
+	other := New(
+		agent.Config{ID: "agent-Y"},
+		WithCaller(newMock()),
 		WithIterationStore(store),
 	)
 	_, err := other.Resume(context.Background(), "sess-cross")

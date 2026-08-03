@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -67,9 +67,9 @@ func (NoopPromoter) Summarize(_ context.Context, parent *TreeNode, _ []*TreeNode
 // summary. The default system prompt asks for a concise paragraph; callers
 // may override SystemPrompt for fine-tuning.
 type LLMPromoter struct {
-	// Client is the chat completer used to generate the new summary.
+	// Client is the model caller used to generate the new summary.
 	// Required; nil triggers ErrInvalidArgument from Summarize.
-	Client aimodel.ChatCompleter
+	Client largemodel.Caller
 
 	// Model overrides the model name on the request. Empty string passes
 	// the request through with whatever default the client picks.
@@ -113,16 +113,18 @@ func (p *LLMPromoter) Summarize(ctx context.Context, parent *TreeNode, children 
 		maxTok = defaultLLMPromoterMaxTokens
 	}
 
-	req := &aimodel.ChatRequest{
-		Model:               p.Model,
-		MaxCompletionTokens: &maxTok,
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(system)},
-			{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(buildLLMPromoterUserText(parent, children))},
+	proto := p.Client.Protocol()
+
+	req := &largemodel.Request{
+		Model:     p.Model,
+		MaxTokens: &maxTok,
+		Messages: []schema.Message{
+			schema.NewSystemMessage(proto, system),
+			schema.NewUserMessage(proto, buildLLMPromoterUserText(parent, children)),
 		},
 	}
 
-	resp, err := p.Client.ChatCompletion(ctx, req)
+	resp, err := p.Client.Call(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("tree: LLMPromoter chat: %w", err)
 	}
@@ -157,11 +159,11 @@ func buildLLMPromoterUserText(parent *TreeNode, children []*TreeNode) string {
 // resp. It returns "" when the response is malformed; the store falls back
 // to parent.Summary in that case (the contract of "no error == valid new
 // summary" still holds because empty is itself a valid empty summary).
-func extractFirstChoiceText(resp *aimodel.ChatResponse) string {
-	if resp == nil || len(resp.Choices) == 0 {
+func extractFirstChoiceText(resp *largemodel.Response) string {
+	if resp == nil {
 		return ""
 	}
-	return strings.TrimSpace(resp.Choices[0].Message.Content.Text())
+	return strings.TrimSpace(resp.Message.Text())
 }
 
 // CompressorPromoter delegates summarisation to a memory.ContextCompressor.
@@ -179,6 +181,20 @@ type CompressorPromoter struct {
 
 	// MaxBytes caps the desired output size. 0 → SummaryMaxBytes.
 	MaxBytes int
+
+	// Protocol is the wire form the synthetic conversation is built in.
+	// It only has to match whatever the Compressor expects; the zero value
+	// means ProtocolOpenAIChat.
+	Protocol schema.Protocol
+}
+
+// protocol returns the configured protocol, defaulting to OpenAI chat.
+func (p *CompressorPromoter) protocol() schema.Protocol {
+	if p.Protocol == "" {
+		return schema.ProtocolOpenAIChat
+	}
+
+	return p.Protocol
 }
 
 // approxBytesPerToken is the (conservative, English-leaning) ratio used to
@@ -206,7 +222,7 @@ func (p *CompressorPromoter) Summarize(ctx context.Context, parent *TreeNode, ch
 	}
 	tokenBudget := max(maxBytes/approxBytesPerToken, 1)
 
-	msgs := compressorPromoterMessages(parent, children)
+	msgs := compressorPromoterMessages(p.protocol(), parent, children)
 	out, err := p.Compressor.Compress(ctx, msgs, tokenBudget)
 	if err != nil {
 		return "", fmt.Errorf("tree: CompressorPromoter compress: %w", err)
@@ -217,7 +233,7 @@ func (p *CompressorPromoter) Summarize(ctx context.Context, parent *TreeNode, ch
 // compressorPromoterMessages renders parent + children into a synthetic
 // conversation that the compressor can chew on. The first system message
 // preserves the parent context; each child becomes one assistant turn.
-func compressorPromoterMessages(parent *TreeNode, children []*TreeNode) []schema.Message {
+func compressorPromoterMessages(proto schema.Protocol, parent *TreeNode, children []*TreeNode) []schema.Message {
 	out := make([]schema.Message, 0, len(children)+1)
 	headBuilder := strings.Builder{}
 	headBuilder.WriteString("Parent: ")
@@ -226,15 +242,9 @@ func compressorPromoterMessages(parent *TreeNode, children []*TreeNode) []schema
 		headBuilder.WriteString(" — ")
 		headBuilder.WriteString(parent.Summary)
 	}
-	out = append(out, schema.Message{Message: aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(headBuilder.String()),
-	}})
+	out = append(out, schema.NewSystemMessage(proto, headBuilder.String()))
 	for _, c := range children {
-		out = append(out, schema.Message{Message: aimodel.Message{
-			Role:    aimodel.RoleAssistant,
-			Content: aimodel.NewTextContent(childToCompressorBody(c)),
-		}})
+		out = append(out, schema.NewTextMessage(proto, schema.RoleAssistant, childToCompressorBody(c)))
 	}
 	return out
 }
@@ -257,7 +267,7 @@ func childToCompressorBody(c *TreeNode) string {
 func joinSchemaMessages(msgs []schema.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
-		text := m.Content.Text()
+		text := m.Text()
 		if text == "" {
 			continue
 		}

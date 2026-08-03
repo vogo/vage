@@ -26,7 +26,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -36,17 +35,17 @@ func TestMetricsMiddleware_ChatCompletion(t *testing.T) {
 		events = append(events, e)
 	}
 
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
+	mock := &mockCompleter{chatResp: &Response{
 		ID:    "ok",
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
 
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
+	resp, err := wrapped.Call(context.Background(), &Request{
 		Model:    "gpt-4",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser}},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -101,7 +100,7 @@ func TestMetricsMiddleware_ChatCompletion_Error(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, err := wrapped.Call(context.Background(), &Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -134,7 +133,7 @@ func TestMetricsMiddleware_Stream_Error(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, err := wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -180,7 +179,7 @@ func TestMetricsMiddleware_Stream_Success(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{Model: "gpt-4"})
+	_, err := wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +226,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := aimodel.NewClient(aimodel.WithAPIKey("sk-test"), aimodel.WithBaseURL(srv.URL))
+	c, err := NewOpenAIChatCaller("sk-test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -240,9 +239,9 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(c)
 
-	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
+	stream, err := wrapped.CallStream(context.Background(), &Request{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)
@@ -318,7 +317,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := aimodel.NewClient(aimodel.WithAPIKey("sk-test"), aimodel.WithBaseURL(srv.URL))
+	c, err := NewOpenAIChatCaller("sk-test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -331,9 +330,9 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(c)
 
-	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
+	stream, err := wrapped.CallStream(context.Background(), &Request{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)

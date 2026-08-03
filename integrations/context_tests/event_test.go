@@ -21,7 +21,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	vctx "github.com/vogo/vage/context"
@@ -37,17 +36,18 @@ func TestTaskAgent_EmitsEventContextBuilt(t *testing.T) {
 	rec := newRecordingHook()
 	hm := installHook(rec)
 
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	fake := newFake(stopResponse("ok"))
 
-	a := taskagent.New(agent.Config{ID: "evt-agent"},
-		taskagent.WithChatCompleter(fake),
+	a := taskagent.New(
+		agent.Config{ID: "evt-agent"},
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithHookManager(hm),
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "evt-session",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

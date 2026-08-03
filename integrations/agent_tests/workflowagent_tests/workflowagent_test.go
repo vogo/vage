@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/workflowagent"
 	"github.com/vogo/vage/orchestrate"
@@ -39,10 +38,10 @@ func newTextStep(id, suffix string) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -51,7 +50,7 @@ func newUsageStep(id string, prompt, completion, total int) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
 			Messages: req.Messages,
-			Usage:    &aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+			Usage:    &schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 		}, nil
 	})
 }
@@ -74,31 +73,31 @@ func newNilRespStep(id string) agent.Agent {
 // three steps chaining output, usage aggregation, duration, and session ID preservation.
 func TestIntegration_SequentialPipeline_EndToEnd(t *testing.T) {
 	step1 := agent.NewCustomAgent(agent.Config{ID: "translate"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[translated] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		}, nil
 	})
 	step2 := agent.NewCustomAgent(agent.Config{ID: "summarize"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[summary] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summary] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 		}, nil
 	})
 	step3 := agent.NewCustomAgent(agent.Config{ID: "format"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[formatted] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[formatted] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
 		}, nil
 	})
 
 	wf := workflowagent.New(agent.Config{ID: "pipeline", Name: "Pipeline", Description: "e2e test"}, step1, step2, step3)
 
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello world")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello world")},
 		SessionID: "session-e2e",
 	}
 	resp, err := wf.Run(context.Background(), req)
@@ -107,7 +106,7 @@ func TestIntegration_SequentialPipeline_EndToEnd(t *testing.T) {
 	}
 
 	// Verify chained output
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	want := "[formatted] [summary] [translated] hello world"
 	if got != want {
 		t.Errorf("chained output = %q, want %q", got, want)
@@ -143,7 +142,7 @@ func TestIntegration_SequentialPipeline_EndToEnd(t *testing.T) {
 func TestIntegration_EmptyPipeline(t *testing.T) {
 	wf := workflowagent.New(agent.Config{ID: "empty-wf"})
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("pass-through")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "pass-through")},
 		SessionID: "sess-empty",
 	}
 	resp, err := wf.Run(context.Background(), req)
@@ -153,8 +152,8 @@ func TestIntegration_EmptyPipeline(t *testing.T) {
 	if len(resp.Messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(resp.Messages))
 	}
-	if resp.Messages[0].Content.Text() != "pass-through" {
-		t.Errorf("expected original message echoed back, got %q", resp.Messages[0].Content.Text())
+	if resp.Messages[0].Text() != "pass-through" {
+		t.Errorf("expected original message echoed back, got %q", resp.Messages[0].Text())
 	}
 	if resp.SessionID != "sess-empty" {
 		t.Errorf("SessionID = %q, want %q", resp.SessionID, "sess-empty")
@@ -172,12 +171,12 @@ func TestIntegration_SingleStep(t *testing.T) {
 	step := newTextStep("only", "-processed")
 	wf := workflowagent.New(agent.Config{ID: "single-wf"}, step)
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("data")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "data")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "data-processed" {
+	if got := resp.Messages[0].Text(); got != "data-processed" {
 		t.Errorf("got %q, want %q", got, "data-processed")
 	}
 }
@@ -195,7 +194,7 @@ func TestIntegration_ErrorStopsExecution(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "err-wf"}, step1, step2, step3)
 	_, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("input")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "input")},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -220,7 +219,7 @@ func TestIntegration_NilResponseError(t *testing.T) {
 	step := newNilRespStep("nil-step")
 	wf := workflowagent.New(agent.Config{ID: "nil-wf"}, step)
 	_, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil response")
@@ -247,7 +246,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "cancel-wf"}, step1, step2)
 	_, err := wf.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
@@ -270,7 +269,7 @@ func TestIntegration_ContextDeadlineExceeded(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "timeout-wf"}, step1, step2)
 	_, err := wf.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	// After step1 completes (past deadline), the ctx.Err() check before step2 should catch it
 	if err == nil {
@@ -290,7 +289,7 @@ func TestIntegration_UsageAggregation_MixedNilAndNonNil(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "usage-wf"}, step1, step2, step3)
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -317,7 +316,7 @@ func TestIntegration_UsageAllNil(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "no-usage-wf"}, step1, step2)
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -341,7 +340,7 @@ func TestIntegration_SessionIDPassedToEachStep(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "session-wf"}, capture("s1"), capture("s2"), capture("s3"))
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("test")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 		SessionID: "my-session",
 	})
 	if err != nil {
@@ -372,7 +371,7 @@ func TestIntegration_OptionsAndMetadataPassedToEachStep(t *testing.T) {
 		return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 			caps = append(caps, captured{options: req.Options, metadata: req.Metadata})
 			return &schema.RunResponse{
-				Messages: []schema.Message{schema.NewUserMessage("out-" + id)},
+				Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "out-"+id)},
 			}, nil
 		})
 	}
@@ -383,7 +382,7 @@ func TestIntegration_OptionsAndMetadataPassedToEachStep(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "opts-wf"}, capStep("s1"), capStep("s2"))
 	_, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 		Options:  opts,
 		Metadata: meta,
 	})
@@ -433,7 +432,7 @@ func TestIntegration_RunStream_FullLifecycle(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "stream-wf"}, step1, step2)
 	stream, err := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("start")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 		SessionID: "stream-sess",
 	})
 	if err != nil {
@@ -487,7 +486,7 @@ func TestIntegration_RunStream_FullLifecycle(t *testing.T) {
 func TestIntegration_RunStream_EmptySteps(t *testing.T) {
 	wf := workflowagent.New(agent.Config{ID: "empty-stream"})
 	stream, err := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -522,7 +521,7 @@ func TestIntegration_RunStream_ErrorSurfaced(t *testing.T) {
 	step := newFailStep("fail-step", errors.New("integration stream failure"))
 	wf := workflowagent.New(agent.Config{ID: "err-stream"}, step)
 	stream, err := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -559,7 +558,7 @@ func TestIntegration_RunStream_Close(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "close-wf"}, step)
 	stream, closeErr := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if closeErr != nil {
 		t.Fatalf("unexpected error: %v", closeErr)
@@ -600,7 +599,7 @@ func TestIntegration_RunText_Convenience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "hello-via-RunText" {
 		t.Errorf("got %q, want %q", got, "hello-via-RunText")
 	}
@@ -665,12 +664,12 @@ func TestIntegration_NestedWorkflow(t *testing.T) {
 	)
 
 	resp, err := outer.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("root")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "root")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	want := "root-outer1-inner1-inner2-outer3"
 	if got != want {
 		t.Errorf("nested output = %q, want %q", got, want)
@@ -687,12 +686,12 @@ func TestIntegration_LargeStepCount(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "large-wf"}, steps...)
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("x")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "x")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	// "x" + 100 dots
 	want := "x" + strings.Repeat(".", n)
 	if got != want {
@@ -712,7 +711,7 @@ func TestIntegration_MetadataPreservedFromLastStep(t *testing.T) {
 
 	wf := workflowagent.New(agent.Config{ID: "meta-wf"}, step)
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -728,24 +727,24 @@ func TestIntegration_MetadataPreservedFromLastStep(t *testing.T) {
 // A -> B, A -> C, B+C -> D, with usage aggregation, session ID, and duration.
 func TestIntegration_DAG_DiamondPipeline(t *testing.T) {
 	stepA := agent.NewCustomAgent(agent.Config{ID: "a"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[analyzed] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[analyzed] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		}, nil
 	})
 	stepB := agent.NewCustomAgent(agent.Config{ID: "b"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[translated] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[translated] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 		}, nil
 	})
 	stepC := agent.NewCustomAgent(agent.Config{ID: "c"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[summarized] " + text)},
-			Usage:    &aimodel.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[summarized] "+text)},
+			Usage:    &schema.Usage{PromptTokens: 3, CompletionTokens: 7, TotalTokens: 10},
 		}, nil
 	})
 	stepD := agent.NewCustomAgent(agent.Config{ID: "d"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
@@ -764,7 +763,7 @@ func TestIntegration_DAG_DiamondPipeline(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("input data")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "input data")},
 		SessionID: "dag-session-1",
 	})
 	if err != nil {
@@ -815,12 +814,12 @@ func TestIntegration_DAG_LinearChain(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-A-B-C" {
 		t.Errorf("got %q, want %q", got, "start-A-B-C")
 	}
@@ -838,10 +837,10 @@ func TestIntegration_DAG_FanOutFanIn(t *testing.T) {
 			// Collect all messages from upstream
 			var combined strings.Builder
 			for _, m := range req.Messages {
-				combined.WriteString(m.Content.Text() + ";")
+				combined.WriteString(m.Text() + ";")
 			}
 			return &schema.RunResponse{
-				Messages: []schema.Message{schema.NewUserMessage(combined.String())},
+				Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, combined.String())},
 			}, nil
 		}), Deps: []string{"b", "c", "d"}},
 	}
@@ -851,12 +850,12 @@ func TestIntegration_DAG_FanOutFanIn(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	// Messages from B, C, D are concatenated in sorted dep ID order
 	if !strings.Contains(got, "start-A-B") && !strings.Contains(got, "start-A-C") && !strings.Contains(got, "start-A-D") {
 		t.Errorf("expected messages from all fan-out branches, got %q", got)
@@ -870,13 +869,13 @@ func TestIntegration_DAG_EmptyNodes(t *testing.T) {
 		t.Fatalf("NewDAG error: %v", err)
 	}
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "empty-dag-sess",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "hello" {
+	if resp.Messages[0].Text() != "hello" {
 		t.Errorf("expected original message echoed back")
 	}
 	if resp.SessionID != "empty-dag-sess" {
@@ -898,7 +897,7 @@ func TestIntegration_DAG_AbortOnFailure(t *testing.T) {
 	}
 
 	_, err = wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err == nil {
 		t.Fatal("expected error from failed DAG node")
@@ -922,13 +921,13 @@ func TestIntegration_DAG_SkipOptionalNode(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// C should have completed successfully (terminal node)
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-A-C" {
 		t.Errorf("got %q, want %q", got, "start-A-C")
 	}
@@ -946,7 +945,7 @@ func TestIntegration_DAG_ConditionalNode(t *testing.T) {
 				return &schema.RunResponse{Messages: req.Messages}, nil
 			}), Deps: []string{"a"},
 			Condition: func(upstream map[string]*schema.RunResponse) bool {
-				return strings.Contains(upstream["a"].Messages[0].Content.Text(), "TRIGGER")
+				return strings.Contains(upstream["a"].Messages[0].Text(), "TRIGGER")
 			},
 		},
 		{ID: "c", Runner: newTextStep("c", "-C"), Deps: []string{"a"}},
@@ -957,7 +956,7 @@ func TestIntegration_DAG_ConditionalNode(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("no-trigger")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "no-trigger")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -966,7 +965,7 @@ func TestIntegration_DAG_ConditionalNode(t *testing.T) {
 		t.Error("conditional node B should not have been called")
 	}
 	// C should have completed
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "no-trigger-A-C" {
 		t.Errorf("got %q, want %q", got, "no-trigger-A-C")
 	}
@@ -983,10 +982,10 @@ func TestIntegration_DAG_InputMapper(t *testing.T) {
 				return &schema.RunResponse{Messages: req.Messages}, nil
 			}), Deps: []string{"a", "b"},
 			InputMapper: func(upstream map[string]*schema.RunResponse) (*schema.RunRequest, error) {
-				aText := upstream["a"].Messages[0].Content.Text()
-				bText := upstream["b"].Messages[0].Content.Text()
+				aText := upstream["a"].Messages[0].Text()
+				bText := upstream["b"].Messages[0].Text()
 				return &schema.RunRequest{
-					Messages: []schema.Message{schema.NewUserMessage(aText + " | " + bText)},
+					Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, aText+" | "+bText)},
 				}, nil
 			},
 		},
@@ -997,12 +996,12 @@ func TestIntegration_DAG_InputMapper(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-A | start-B" {
 		t.Errorf("got %q, want %q", got, "start-A | start-B")
 	}
@@ -1024,7 +1023,7 @@ func TestIntegration_DAG_ContextCancellation(t *testing.T) {
 	}
 
 	_, err = wf.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err == nil {
 		t.Fatal("expected context error")
@@ -1051,13 +1050,13 @@ func TestIntegration_DAG_LastResultAggregator(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// "z" is alphabetically last
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-Z" {
 		t.Errorf("got %q, want %q", got, "start-Z")
 	}
@@ -1084,7 +1083,7 @@ func TestIntegration_DAG_EarlyExit(t *testing.T) {
 	}
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1131,7 +1130,7 @@ func TestIntegration_DAG_MaxConcurrency(t *testing.T) {
 	}
 
 	_, err = wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1185,7 +1184,7 @@ func TestIntegration_DAG_Stream(t *testing.T) {
 	}
 
 	stream, err := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "dag-stream-sess",
 	})
 	if err != nil {
@@ -1240,7 +1239,7 @@ func TestIntegration_DAG_NilResponseError(t *testing.T) {
 	}
 
 	_, err = wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil response")
@@ -1258,13 +1257,13 @@ func TestIntegration_Loop_BasicIteration(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-basic"}, body, nil, 3)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("start")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 		SessionID: "loop-sess-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-iter-iter-iter" {
 		t.Errorf("got %q, want %q", got, "start-iter-iter-iter")
 	}
@@ -1282,21 +1281,21 @@ func TestIntegration_Loop_ConditionTermination(t *testing.T) {
 	var callCount atomic.Int32
 	body := agent.NewCustomAgent(agent.Config{ID: "cond-body"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		callCount.Add(1)
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + "-step")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"-step")},
 		}, nil
 	})
 	condition := func(resp *schema.RunResponse) bool {
 		if resp == nil {
 			return true
 		}
-		return !strings.Contains(resp.Messages[0].Content.Text(), "-step-step-step")
+		return !strings.Contains(resp.Messages[0].Text(), "-step-step-step")
 	}
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-cond"}, body, condition, 0)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("begin")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "begin")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1304,7 +1303,7 @@ func TestIntegration_Loop_ConditionTermination(t *testing.T) {
 	if callCount.Load() != 3 {
 		t.Errorf("expected 3 iterations, got %d", callCount.Load())
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "begin-step-step-step" {
 		t.Errorf("got %q, want %q", got, "begin-step-step-step")
 	}
@@ -1324,7 +1323,7 @@ func TestIntegration_Loop_ZeroIterations(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-zero"}, body, condition, 0)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "zero-sess",
 	})
 	if err != nil {
@@ -1333,7 +1332,7 @@ func TestIntegration_Loop_ZeroIterations(t *testing.T) {
 	if called.Load() {
 		t.Error("body should not have been called")
 	}
-	if resp.Messages[0].Content.Text() != "hello" {
+	if resp.Messages[0].Text() != "hello" {
 		t.Errorf("expected original message echoed back")
 	}
 	if resp.SessionID != "zero-sess" {
@@ -1347,13 +1346,13 @@ func TestIntegration_Loop_UsageAccumulation(t *testing.T) {
 	body := agent.NewCustomAgent(agent.Config{ID: "usage-body"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
 			Messages: req.Messages,
-			Usage:    &aimodel.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			Usage:    &schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 		}, nil
 	})
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-usage"}, body, nil, 4)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1377,16 +1376,16 @@ func TestIntegration_Loop_UsageAccumulation(t *testing.T) {
 func TestIntegration_Loop_OutputChaining(t *testing.T) {
 	var received []string
 	body := agent.NewCustomAgent(agent.Config{ID: "chain-body"}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		received = append(received, text)
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + "+")},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+"+")},
 		}, nil
 	})
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-chain"}, body, nil, 3)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("x")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "x")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1402,7 +1401,7 @@ func TestIntegration_Loop_OutputChaining(t *testing.T) {
 		}
 	}
 	// Final output
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "x+++" {
 		t.Errorf("final output = %q, want %q", got, "x+++")
 	}
@@ -1422,7 +1421,7 @@ func TestIntegration_Loop_ContextCancellation(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-cancel"}, body, condition, 0)
 
 	_, err := wf.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
@@ -1442,7 +1441,7 @@ func TestIntegration_Loop_ErrorPropagation(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-err"}, body, nil, 5)
 
 	_, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err == nil {
 		t.Fatal("expected error from loop body")
@@ -1459,7 +1458,7 @@ func TestIntegration_Loop_Stream(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-stream"}, body, nil, 2)
 
 	stream, err := wf.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "loop-stream-sess",
 	})
 	if err != nil {
@@ -1513,7 +1512,7 @@ func TestIntegration_Loop_SessionIDPreserved(t *testing.T) {
 	wf := workflowagent.NewLoop(agent.Config{ID: "loop-sess"}, body, nil, 3)
 
 	resp, err := wf.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("test")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 		SessionID: "my-loop-session",
 	})
 	if err != nil {
@@ -1545,12 +1544,12 @@ func TestIntegration_NestedLoopInSequential(t *testing.T) {
 	)
 
 	resp, err := outerWf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-PRE-L-L-POST" {
 		t.Errorf("got %q, want %q", got, "start-PRE-L-L-POST")
 	}
@@ -1576,12 +1575,12 @@ func TestIntegration_NestedDAGInSequential(t *testing.T) {
 	)
 
 	resp, err := outerWf.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("start")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-PRE-A-B-POST" {
 		t.Errorf("got %q, want %q", got, "start-PRE-A-B-POST")
 	}
@@ -1601,7 +1600,7 @@ func TestIntegration_DAG_RunText_Convenience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "input-processed" {
 		t.Errorf("got %q, want %q", got, "input-processed")
 	}
@@ -1616,7 +1615,7 @@ func TestIntegration_Loop_RunText_Convenience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "in-x-x" {
 		t.Errorf("got %q, want %q", got, "in-x-x")
 	}

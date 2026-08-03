@@ -19,7 +19,6 @@ package skill_tests
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/service"
@@ -107,38 +106,24 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// capturingChatCompleter records ChatRequests sent to it so tests can inspect
+// capturingCaller records requests sent to it so tests can inspect
 // the system prompt and tools list.
-type capturingChatCompleter struct {
-	mu       sync.Mutex
-	requests []*aimodel.ChatRequest
+type capturingCaller struct {
+	*largemodel.FakeCaller
 }
 
-func (c *capturingChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	c.mu.Lock()
-	c.requests = append(c.requests, req)
-	c.mu.Unlock()
-
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("ok")},
-			FinishReason: aimodel.FinishReasonStop,
-		}},
-		Usage: aimodel.Usage{TotalTokens: 10},
-	}, nil
+// newCapturing returns a mock that answers every call with a terminal reply,
+// so the ReAct loop stops after one iteration and the test can inspect the
+// request it produced.
+func newCapturing() *capturingCaller {
+	return &capturingCaller{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
+			largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, "ok", schema.Usage{}),
+		},
+	}}
 }
 
-func (c *capturingChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c *capturingChatCompleter) getRequests() []*aimodel.ChatRequest {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cp := make([]*aimodel.ChatRequest, len(c.requests))
-	copy(cp, c.requests)
-	return cp
-}
+func (c *capturingCaller) getRequests() []*largemodel.Request { return c.Requests() }
 
 // ---------------------------------------------------------------------------
 // Test 1: Full Lifecycle (no LLM required)
@@ -289,7 +274,7 @@ func TestSkillFullLifecycle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: TaskAgent with Skills (mock ChatCompleter)
+// Test 2: TaskAgent with Skills (mock Caller)
 //
 // Verifies TaskAgent integration:
 //   - Skill instructions are injected into the system prompt
@@ -327,17 +312,18 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "pdf-writer", Description: "Write PDFs"}, noopHandler))
 	must(t, toolReg.Register(schema.ToolDef{Name: "calculator", Description: "Math"}, noopHandler))
 
-	cc := &capturingChatCompleter{}
+	cc := newCapturing()
 
-	a := taskagent.New(agent.Config{ID: "skill-test-agent"},
-		taskagent.WithChatCompleter(cc),
+	a := taskagent.New(
+		agent.Config{ID: "skill-test-agent"},
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Base system prompt.")),
 	)
 
 	resp, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("Process this PDF")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "Process this PDF")},
 		SessionID: sessionID,
 	})
 	if err != nil {
@@ -350,13 +336,13 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	// Verify the system prompt contains skill instructions.
 	reqs := cc.getRequests()
 	if len(reqs) == 0 {
-		t.Fatal("no ChatRequests captured")
+		t.Fatal("no requests captured")
 	}
 
 	sysPrompt := ""
 	for _, msg := range reqs[0].Messages {
-		if msg.Role == aimodel.RoleSystem {
-			sysPrompt = msg.Content.Text()
+		if msg.Role() == schema.RoleSystem {
+			sysPrompt = msg.Text()
 			break
 		}
 	}
@@ -375,7 +361,7 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	tools := reqs[0].Tools
 	toolNames := make(map[string]bool, len(tools))
 	for _, tool := range tools {
-		toolNames[tool.Function.Name] = true
+		toolNames[tool.Name] = true
 	}
 	if !toolNames["pdf-reader"] {
 		t.Error("pdf-reader tool missing from LLM request")
@@ -426,15 +412,16 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-z", Description: "Z"}, noopHandler))
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-w", Description: "W"}, noopHandler))
 
-	cc := &capturingChatCompleter{}
-	a := taskagent.New(agent.Config{ID: "multi-skill-agent"},
-		taskagent.WithChatCompleter(cc),
+	cc := newCapturing()
+	a := taskagent.New(
+		agent.Config{ID: "multi-skill-agent"},
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)
 
 	_, err = a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: sessionID,
 	})
 	must(t, err)
@@ -447,8 +434,8 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	// Both instructions should appear in system prompt.
 	sysPrompt := ""
 	for _, msg := range reqs[0].Messages {
-		if msg.Role == aimodel.RoleSystem {
-			sysPrompt = msg.Content.Text()
+		if msg.Role() == schema.RoleSystem {
+			sysPrompt = msg.Text()
 			break
 		}
 	}
@@ -463,7 +450,7 @@ func TestSkillTaskAgentMultipleSkills(t *testing.T) {
 	tools := reqs[0].Tools
 	toolNames := make(map[string]bool, len(tools))
 	for _, tl := range tools {
-		toolNames[tl.Function.Name] = true
+		toolNames[tl.Name] = true
 	}
 	if !toolNames["tool-x"] || !toolNames["tool-y"] || !toolNames["tool-z"] {
 		t.Errorf("expected tool-x, tool-y, tool-z in tools, got: %v", toolNames)
@@ -493,15 +480,16 @@ func TestSkillNoAllowedToolsPassesAllTools(t *testing.T) {
 	toolReg := tool.NewRegistry()
 	must(t, toolReg.Register(schema.ToolDef{Name: "any-tool", Description: "Any"}, noopHandler))
 
-	cc := &capturingChatCompleter{}
-	a := taskagent.New(agent.Config{ID: "no-tools-agent"},
-		taskagent.WithChatCompleter(cc),
+	cc := newCapturing()
+	a := taskagent.New(
+		agent.Config{ID: "no-tools-agent"},
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)
 
 	_, err = a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: sessionID,
 	})
 	must(t, err)
@@ -542,15 +530,16 @@ func TestSkillMixedAllowedToolsPassesAll(t *testing.T) {
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-a", Description: "A"}, noopHandler))
 	must(t, toolReg.Register(schema.ToolDef{Name: "tool-b", Description: "B"}, noopHandler))
 
-	cc := &capturingChatCompleter{}
-	a := taskagent.New(agent.Config{ID: "mixed-agent"},
-		taskagent.WithChatCompleter(cc),
+	cc := newCapturing()
+	a := taskagent.New(
+		agent.Config{ID: "mixed-agent"},
+		taskagent.WithCaller(cc),
 		taskagent.WithToolRegistry(toolReg),
 		taskagent.WithSkillManager(manager),
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 		SessionID: sessionID,
 	})
 	must(t, err)

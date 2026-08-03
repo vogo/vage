@@ -23,14 +23,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	wrapped := NewTimeoutMiddleware(5 * time.Second).Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,23 +41,25 @@ func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
 }
 
 func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
-	slow := &completerFunc{
-		chat: func(ctx context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+	slow := &CallerFunc{
+		Proto: schema.ProtocolOpenAIChat,
+
+		Chat: func(ctx context.Context, _ *Request) (*Response, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-time.After(5 * time.Second):
-				return &aimodel.ChatResponse{}, nil
+				return &Response{}, nil
 			}
 		},
-		stream: func(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(_ context.Context, _ *Request) (*Stream, error) {
 			return nil, nil
 		},
 	}
 
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(slow)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -70,7 +72,7 @@ func TestTimeoutMiddleware_Stream_Passthrough(t *testing.T) {
 	mock := &mockCompleter{streamResp: nil, streamErr: nil}
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.CallStream(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

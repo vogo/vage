@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/memory"
@@ -47,24 +46,25 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 	ctx := context.Background()
 	for i, text := range []string{"first turn", "second turn", "third turn"} {
 		key := fmt.Sprintf("msg:%06d", i)
-		if err := sess.Set(ctx, key, schema.NewUserMessage(text), 0); err != nil {
+		if err := sess.Set(ctx, key, schema.NewUserMessage(schema.ProtocolOpenAIChat, text), 0); err != nil {
 			t.Fatalf("seed Set %d: %v", i, err)
 		}
 	}
 
 	mm := memory.NewManager(memory.WithSession(sess))
 
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("done")}}
+	fake := newFake(stopResponse("done"))
 
-	a := taskagent.New(agent.Config{ID: "compat-agent", Name: "Compat"},
-		taskagent.WithChatCompleter(fake),
+	a := taskagent.New(
+		agent.Config{ID: "compat-agent", Name: "Compat"},
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Be helpful.")),
 		taskagent.WithMemory(mm),
 	)
 
 	_, err := a.Run(ctx, &schema.RunRequest{
 		SessionID: "compat-session",
-		Messages:  []schema.Message{schema.NewUserMessage("current question")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "current question")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -79,49 +79,51 @@ func TestTaskAgent_ContextAssembly_BehaviorCompat(t *testing.T) {
 	}
 
 	// 0: system
-	if got[0].Role != aimodel.RoleSystem {
-		t.Errorf("messages[0].Role = %q, want %q", got[0].Role, aimodel.RoleSystem)
+	if got[0].Role() != schema.RoleSystem {
+		t.Errorf("messages[0].Role = %q, want %q", got[0].Role(), schema.RoleSystem)
 	}
-	if got[0].Content.Text() != "Be helpful." {
-		t.Errorf("messages[0].Content = %q, want %q", got[0].Content.Text(), "Be helpful.")
+	if got[0].Text() != "Be helpful." {
+		t.Errorf("messages[0].Content = %q, want %q", got[0].Text(), "Be helpful.")
 	}
 
 	// 1..3: history in oldest-first order.
 	want := []string{"first turn", "second turn", "third turn"}
 	for i, w := range want {
 		idx := 1 + i
-		if got[idx].Role != aimodel.RoleUser {
-			t.Errorf("messages[%d].Role = %q, want %q", idx, got[idx].Role, aimodel.RoleUser)
+		if got[idx].Role() != schema.RoleUser {
+			t.Errorf("messages[%d].Role = %q, want %q", idx, got[idx].Role(), schema.RoleUser)
 		}
-		if got[idx].Content.Text() != w {
-			t.Errorf("messages[%d].Content = %q, want %q", idx, got[idx].Content.Text(), w)
+		if got[idx].Text() != w {
+			t.Errorf("messages[%d].Content = %q, want %q", idx, got[idx].Text(), w)
 		}
 	}
 
 	// 4: current request
-	if got[4].Role != aimodel.RoleUser {
-		t.Errorf("messages[4].Role = %q, want %q", got[4].Role, aimodel.RoleUser)
+	if got[4].Role() != schema.RoleUser {
+		t.Errorf("messages[4].Role = %q, want %q", got[4].Role(), schema.RoleUser)
 	}
-	if got[4].Content.Text() != "current question" {
-		t.Errorf("messages[4].Content = %q, want %q", got[4].Content.Text(), "current question")
+	if got[4].Text() != "current question" {
+		t.Errorf("messages[4].Content = %q, want %q", got[4].Text(), "current question")
 	}
 }
 
-// TestTaskAgent_PromptCacheBreakpointPreserved exercises AC-3.4: the
-// prompt-cache breakpoint must still be marked on the system message
-// after the Builder runs (markPromptCacheBreakpoints is the post-step).
-func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
-	fake := &fakeChatCompleter{responses: []*aimodel.ChatResponse{stopResponse("ok")}}
+// TestTaskAgent_PromptCachingReachesRequest exercises AC-3.4: the
+// prompt-caching intent must survive context assembly and reach the request.
+// The vendor breakpoints themselves are rendered by the protocol caller, so
+// this asserts the agent's half of that contract.
+func TestTaskAgent_PromptCachingReachesRequest(t *testing.T) {
+	fake := newFake(stopResponse("ok"))
 
-	a := taskagent.New(agent.Config{ID: "cache-agent"},
-		taskagent.WithChatCompleter(fake),
+	a := taskagent.New(
+		agent.Config{ID: "cache-agent"},
+		taskagent.WithCaller(fake),
 		taskagent.WithSystemPrompt(prompt.StringPrompt("Sys.")),
 		taskagent.WithPromptCaching(true),
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "cache-session",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -132,20 +134,20 @@ func TestTaskAgent_PromptCacheBreakpointPreserved(t *testing.T) {
 	if len(req.Messages) == 0 {
 		t.Fatalf("no messages captured")
 	}
-	if req.Messages[0].Role != aimodel.RoleSystem {
+	if req.Messages[0].Role() != schema.RoleSystem {
 		t.Fatalf("first message is not system: %+v", req.Messages[0])
 	}
-	if !req.Messages[0].CacheBreakpoint {
-		t.Errorf("system message CacheBreakpoint = false, want true")
+	if !req.PromptCaching {
+		t.Errorf("PromptCaching = false, want true")
 	}
 }
 
 // describeMessages formats a message slice as a list of (role, snippet)
 // tuples for failure messages.
-func describeMessages(msgs []aimodel.Message) []string {
+func describeMessages(msgs []schema.Message) []string {
 	out := make([]string, len(msgs))
 	for i, m := range msgs {
-		out[i] = fmt.Sprintf("(%s, %q)", m.Role, m.Content.Text())
+		out[i] = fmt.Sprintf("(%s, %q)", m.Role(), m.Text())
 	}
 	return out
 }

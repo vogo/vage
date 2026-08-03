@@ -21,7 +21,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -53,7 +52,7 @@ func TestLastAssistantText(t *testing.T) {
 	// No assistant message.
 	resp := &schema.RunResponse{
 		Messages: []schema.Message{
-			{Message: aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("user")}},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user"),
 		},
 	}
 
@@ -64,9 +63,9 @@ func TestLastAssistantText(t *testing.T) {
 	// Multiple assistant messages - should return last.
 	resp = &schema.RunResponse{
 		Messages: []schema.Message{
-			{Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("first")}},
-			{Message: aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("user")}},
-			{Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("last")}},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "first"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "user"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "last"),
 		},
 	}
 

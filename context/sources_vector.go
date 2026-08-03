@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/vector"
@@ -157,7 +156,7 @@ func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 
 	rep.OutputN = 1
 	rep.DroppedN = rep.InputN - len(hits)
-	rep.Tokens = s.estimateTokens(text)
+	rep.Tokens = s.estimateTokens(in.Protocol, text)
 	if truncatedToFit {
 		rep.Status = StatusTruncated
 		rep.Note = noteWithRange("truncated to fit budget", hits)
@@ -166,11 +165,8 @@ func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 		rep.Note = noteWithRange("", hits)
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	msg := schema.NewSystemMessage(in.Protocol, text)
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }
 
 // computeQuery selects the query text for this Fetch. QueryFn wins when
@@ -204,7 +200,7 @@ func (s *VectorRecallSource) fitToBudget(budget int, hits []vector.SearchHit, re
 		return text, hits, false
 	}
 
-	tokens := s.estimateTokens(text)
+	tokens := s.estimateTokens(in.Protocol, text)
 	if tokens <= budget {
 		return text, hits, false
 	}
@@ -214,7 +210,7 @@ func (s *VectorRecallSource) fitToBudget(budget int, hits []vector.SearchHit, re
 	for len(hits) > 1 && tokens > budget {
 		hits = hits[:len(hits)-1]
 		text = render(in, hits)
-		tokens = s.estimateTokens(text)
+		tokens = s.estimateTokens(in.Protocol, text)
 	}
 
 	if tokens <= budget {
@@ -233,7 +229,7 @@ func (s *VectorRecallSource) fitToBudget(budget int, hits []vector.SearchHit, re
 	for maxBytes > 0 {
 		hits[0].Document.Text = clampText(original, maxBytes)
 		text = render(in, hits)
-		if s.estimateTokens(text) <= budget {
+		if s.estimateTokens(in.Protocol, text) <= budget {
 			break
 		}
 		maxBytes /= 2
@@ -249,15 +245,12 @@ func (s *VectorRecallSource) fitToBudget(budget int, hits []vector.SearchHit, re
 // memory.DefaultTokenEstimator. The estimator works on schema.Message,
 // so the text is wrapped in a system message — safe approximation
 // because all VectorRecallSource output is system-role.
-func (s *VectorRecallSource) estimateTokens(text string) int {
+func (s *VectorRecallSource) estimateTokens(proto schema.Protocol, text string) int {
 	est := s.TokenEstimator
 	if est == nil {
 		est = memory.DefaultTokenEstimator
 	}
-	return est(schema.FromAIModelMessage(aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}))
+	return est(schema.NewSystemMessage(proto, text))
 }
 
 // defaultQuery is the fallback when VectorRecallSource.QueryFn is nil.
@@ -274,10 +267,10 @@ func defaultQuery(in FetchInput) string {
 	}
 	for i := len(in.Request.Messages) - 1; i >= 0; i-- {
 		m := in.Request.Messages[i]
-		if m.Role != aimodel.RoleUser {
+		if m.Role() != schema.RoleUser {
 			continue
 		}
-		if t := strings.TrimSpace(m.Content.Text()); t != "" {
+		if t := strings.TrimSpace(m.Text()); t != "" {
 			return t
 		}
 	}

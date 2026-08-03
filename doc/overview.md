@@ -29,7 +29,7 @@
 
 | 组 | 领域 | 覆盖的包 | 一句话职责 |
 |----|------|----------|-----------|
-| `agent` | `agent-core` | `agent`、`schema`、`prompt` | Agent 统一抽象与四种形态、供应商中立数据契约、提示词模板 |
+| `agent` | `agent-core` | `agent`、`schema`、`prompt` | Agent 统一抽象与四种形态、承载厂商原生 wire 的数据契约、提示词模板 |
 | `agent` | `orchestration` | `orchestrate`、`checkpoint` | DAG 编排引擎与断点续跑快照 |
 | `memory` | `memory` | `memory`、`context` | 三层记忆、上下文装配与压缩 |
 | `memory` | `session` | `session`、`workspace`、`sessionview` | 会话实体、持久工作区、子代理视图 |

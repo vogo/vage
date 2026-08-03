@@ -6,7 +6,7 @@
 
 | 领域 | 职责 | 覆盖包 |
 |------|------|--------|
-| [agent-core](agent-core/agent-core.md) | Agent 统一抽象与四种形态、供应商中立数据契约、提示词模板 | `agent`、`schema`、`prompt` |
+| [agent-core](agent-core/agent-core.md) | Agent 统一抽象与四种形态、承载厂商原生 wire 的数据契约、提示词模板 | `agent`、`schema`、`prompt` |
 | [orchestration](orchestration/orchestration.md) | DAG 编排引擎、断点续跑快照 | `orchestrate`、`checkpoint` |
 
 ## 共享上下文

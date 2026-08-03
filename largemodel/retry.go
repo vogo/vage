@@ -24,8 +24,6 @@ import (
 	"math/rand/v2"
 	"net"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 const (
@@ -37,10 +35,11 @@ const (
 
 // retryableStatusCodes are HTTP status codes that indicate a transient error.
 var retryableStatusCodes = map[int]bool{
-	429: true, // Too Many Requests
-	500: true, // Internal Server Error
-	502: true, // Bad Gateway
-	503: true, // Service Unavailable
+	429:              true, // Too Many Requests
+	500:              true, // Internal Server Error
+	502:              true, // Bad Gateway
+	503:              true, // Service Unavailable
+	statusOverloaded: true, // 529 Overloaded (Anthropic)
 }
 
 // BackoffStrategy computes the delay before a retry attempt.
@@ -72,8 +71,8 @@ func (b *ExponentialBackoff) Delay(attempt int) time.Duration {
 	return delay + jitter
 }
 
-// RetryMiddleware retries failed ChatCompletion and ChatCompletionStream calls
-// with exponential backoff.
+// RetryMiddleware retries failed Call and CallStream requests with
+// exponential backoff.
 type RetryMiddleware struct {
 	maxRetries      int
 	baseDelay       time.Duration
@@ -134,12 +133,13 @@ func NewRetryMiddleware(opts ...RetryOption) *RetryMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *RetryMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			var lastErr error
 			for attempt := range m.maxRetries + 1 {
-				resp, err := next.ChatCompletion(ctx, req)
+				resp, err := next.Call(ctx, req)
 				if err == nil {
 					return resp, nil
 				}
@@ -158,10 +158,10 @@ func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 
 			return nil, lastErr
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			var lastErr error
 			for attempt := range m.maxRetries + 1 {
-				s, err := next.ChatCompletionStream(ctx, req)
+				s, err := next.CallStream(ctx, req)
 				if err == nil {
 					return s, nil
 				}
@@ -187,7 +187,7 @@ func (m *RetryMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 // It recognises API errors with retryable status codes, network timeouts,
 // temporary network conditions, and unexpected EOF signals.
 func isRetryable(err error) bool {
-	var apiErr *aimodel.APIError
+	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return retryableStatusCodes[apiErr.StatusCode]
 	}

@@ -40,9 +40,20 @@ import (
 )
 
 func main() {
-	a := agent.New("greeter", "Greeter", "A simple greeting agent",
+	cfg := agent.Config{
+		ID:          "greeter",
+		Name:        "Greeter",
+		Description: "A simple greeting agent",
+		Protocol:    schema.ProtocolOpenAIChat,
+	}
+
+	a := agent.NewCustomAgent(cfg,
 		func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-			return schema.TextRunResponse("Hello! How can I help you?"), nil
+			return &schema.RunResponse{
+				Messages: []schema.Message{
+					schema.NewTextMessage(cfg.Protocol, schema.RoleAssistant, "Hello! How can I help you?"),
+				},
+			}, nil
 		},
 	)
 
@@ -50,9 +61,45 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(resp)
+
+	fmt.Println(resp.Messages[0].Text())
 }
 ```
+
+## Connecting a Model
+
+vage speaks each vendor's native protocol directly. A model endpoint is a
+`largemodel.Caller` bound to one protocol at construction time, wrapped in
+whichever governance middlewares you want:
+
+```go
+// OpenAI Chat Completions (or any OpenAI-compatible endpoint).
+caller, err := largemodel.NewOpenAIChatCaller(apiKey, "https://api.openai.com/v1")
+
+// Anthropic Messages. An empty base URL uses https://api.anthropic.com;
+// vendor headers go through the provider's own options.
+caller, err := largemodel.NewAnthropicMessagesCaller(apiKey, "",
+	anthropic.WithBeta("context-1m-2025-08-07"))
+
+model := largemodel.New(caller,
+	largemodel.WithMiddleware(
+		largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
+		largemodel.NewTimeoutMiddleware(30*time.Second),
+	),
+)
+
+a := taskagent.New(
+	agent.Config{ID: "assistant", Protocol: model.Protocol()},
+	taskagent.WithCaller(model),
+	taskagent.WithModel("claude-sonnet-4-5"),
+)
+```
+
+Messages are stored in the wire form of the vendor that produced them, so an
+agent's `Protocol` must match its caller's; replaying a conversation against a
+different protocol fails with `schema.ErrProtocolMismatch` rather than being
+silently converted. Runnable versions of these snippets live in
+[`largemodel/example_test.go`](largemodel/example_test.go).
 
 ## License
 

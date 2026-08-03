@@ -22,7 +22,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -40,12 +39,9 @@ type extraSystemSource struct {
 func (s *extraSystemSource) Name() string { return s.name }
 
 func (s *extraSystemSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchResult, error) {
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(s.text),
-	}
+	msg := schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, s.text)
 	return vctx.FetchResult{
-		Messages: []aimodel.Message{msg},
+		Messages: []schema.Message{msg},
 		Report: schema.ContextSourceReport{
 			Source:  s.name,
 			Status:  vctx.StatusOK,
@@ -73,7 +69,7 @@ func TestBuilder_PluggableSource_AppearsInOutput(t *testing.T) {
 		AgentID:   "plug-agent",
 		Request: &schema.RunRequest{
 			SessionID: "plug-session",
-			Messages:  []schema.Message{schema.NewUserMessage("user q")},
+			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "user q")},
 		},
 	})
 	if err != nil {
@@ -85,14 +81,14 @@ func TestBuilder_PluggableSource_AppearsInOutput(t *testing.T) {
 	}
 
 	// Order: system, custom (system role), user.
-	if res.Messages[0].Content.Text() != "base sys" {
-		t.Errorf("messages[0] = %q, want %q", res.Messages[0].Content.Text(), "base sys")
+	if res.Messages[0].Text() != "base sys" {
+		t.Errorf("messages[0] = %q, want %q", res.Messages[0].Text(), "base sys")
 	}
-	if res.Messages[1].Content.Text() != "<<INJECTED>>" {
-		t.Errorf("messages[1] = %q, want %q", res.Messages[1].Content.Text(), "<<INJECTED>>")
+	if res.Messages[1].Text() != "<<INJECTED>>" {
+		t.Errorf("messages[1] = %q, want %q", res.Messages[1].Text(), "<<INJECTED>>")
 	}
-	if res.Messages[2].Content.Text() != "user q" {
-		t.Errorf("messages[2] = %q, want %q", res.Messages[2].Content.Text(), "user q")
+	if res.Messages[2].Text() != "user q" {
+		t.Errorf("messages[2] = %q, want %q", res.Messages[2].Text(), "user q")
 	}
 
 	// The custom source's report must have been recorded by the builder.

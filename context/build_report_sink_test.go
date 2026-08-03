@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 // captureSink is a BuildReportSink test double that records every Save
@@ -64,7 +64,7 @@ func (c *captureSink) Calls() []captureSinkCall {
 // builder configured with WithBuildReportSink calls Save exactly once
 // per Build, with the same report data the BuildResult exposes.
 func TestDefaultBuilder_BuildReportSink_InvokedOnBuild(t *testing.T) {
-	src := &stubSource{name: "s1", messages: []aimodel.Message{userMsg("hi")}}
+	src := &stubSource{name: "s1", messages: []schema.Message{userMsg("hi")}}
 	sink := &captureSink{}
 
 	builder := NewDefaultBuilder(WithSources(src), WithBuildReportSink(sink))

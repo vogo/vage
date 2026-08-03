@@ -81,7 +81,8 @@ func (m *Manager) Dispatch(ctx context.Context, event schema.Event) {
 		}
 
 		if err := h.OnEvent(ctx, event); err != nil {
-			slog.Warn("sync hook error",
+			slog.Warn(
+				"sync hook error",
 				"event_type", event.Type,
 				"error", err,
 			)
@@ -100,7 +101,8 @@ func (m *Manager) Dispatch(ctx context.Context, event schema.Event) {
 		select {
 		case h.EventChan() <- event:
 		default:
-			slog.Warn("async hook channel full, event dropped",
+			slog.Warn(
+				"async hook channel full, event dropped",
 				"event_type", event.Type,
 			)
 		}

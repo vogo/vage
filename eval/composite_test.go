@@ -39,7 +39,8 @@ func TestCompositeEvaluator_WeightedAverage(t *testing.T) {
 	exactEval, _ := NewExactMatchEval()
 	containsEval, _ := NewContainsEval(&ContainsConfig{Keywords: []string{"hello", "missing"}})
 
-	e, _ := NewCompositeEvaluator(nil,
+	e, _ := NewCompositeEvaluator(
+		nil,
 		WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 		WeightedEvaluator{Evaluator: containsEval, Weight: 1.0},
 	)
@@ -66,7 +67,8 @@ func TestCompositeEvaluator_WeightedAverage(t *testing.T) {
 func TestCompositeEvaluator_ZeroWeights(t *testing.T) {
 	exactEval, _ := NewExactMatchEval()
 
-	e, _ := NewCompositeEvaluator(nil,
+	e, _ := NewCompositeEvaluator(
+		nil,
 		WeightedEvaluator{Evaluator: exactEval, Weight: 0},
 		WeightedEvaluator{Evaluator: exactEval, Weight: 0},
 	)
@@ -92,7 +94,8 @@ func TestCompositeEvaluator_FailFast(t *testing.T) {
 
 	exactEval, _ := NewExactMatchEval()
 
-	e, _ := NewCompositeEvaluator(&CompositeConfig{FailFast: true},
+	e, _ := NewCompositeEvaluator(
+		&CompositeConfig{FailFast: true},
 		WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)
@@ -114,7 +117,8 @@ func TestCompositeEvaluator_NonFailFast(t *testing.T) {
 
 	exactEval, _ := NewExactMatchEval()
 
-	e, _ := NewCompositeEvaluator(nil,
+	e, _ := NewCompositeEvaluator(
+		nil,
 		WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)

@@ -25,11 +25,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -59,24 +59,25 @@ func echoToolReg() tool.ToolRegistry {
 // with the last one Final = true and StopReason == complete.
 func TestCheckpoint_AC_2_1_KIterationsKCheckpoints(t *testing.T) {
 	const k = 4
-	responses := make([]*aimodel.ChatResponse, 0, k)
+	responses := make([]*largemodel.Response, 0, k)
 	for i := range k - 1 {
 		responses = append(responses, makeToolCallResponse("tc"+string(rune('a'+i)), "echo", `{"v":"x"}`, 50))
 	}
 	responses = append(responses, makeStopResponse("done", 50))
 
-	mock := &mockChatCompleter{responses: responses}
+	mock := newMock(responses...)
 	store := checkpoint.NewMapIterationStore()
 
-	a := taskagent.New(agent.Config{ID: "agent-k"},
-		taskagent.WithChatCompleter(mock),
+	a := taskagent.New(
+		agent.Config{ID: "agent-k"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-k",
-		Messages:  []schema.Message{schema.NewUserMessage("plan k")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "plan k")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -108,24 +109,23 @@ func TestCheckpoint_AC_2_1_KIterationsKCheckpoints(t *testing.T) {
 // remain readable. We simulate the crash by exhausting the mock's
 // response list before the run completes.
 func TestCheckpoint_AC_2_2_PartialCheckpointsAfterCrash(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50),
-			makeToolCallResponse("tc-2", "echo", `{"v":"b"}`, 50),
-			// Third call fails (mock returns "no more responses").
-		},
-	}
+	// The third call fails, because the mock runs out of responses.
+	mock := newMock(
+		makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50),
+		makeToolCallResponse("tc-2", "echo", `{"v":"b"}`, 50),
+	)
 	store := checkpoint.NewMapIterationStore()
 
-	a := taskagent.New(agent.Config{ID: "agent-crash"},
-		taskagent.WithChatCompleter(mock),
+	a := taskagent.New(
+		agent.Config{ID: "agent-crash"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-crash",
-		Messages:  []schema.Message{schema.NewUserMessage("crash plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "crash plan")},
 	}); err == nil {
 		t.Fatal("Run: expected error on third call, got nil")
 	}
@@ -152,10 +152,10 @@ func TestCheckpoint_AC_2_3_NoStoreEquivalent(t *testing.T) {
 	if resp1.StopReason != resp2.StopReason {
 		t.Errorf("StopReason mismatch: %q vs %q", resp1.StopReason, resp2.StopReason)
 	}
-	if resp1.Messages[0].Content.Text() != resp2.Messages[0].Content.Text() {
+	if resp1.Messages[0].Text() != resp2.Messages[0].Text() {
 		t.Errorf("text mismatch: %q vs %q",
-			resp1.Messages[0].Content.Text(),
-			resp2.Messages[0].Content.Text())
+			resp1.Messages[0].Text(),
+			resp2.Messages[0].Text())
 	}
 	if resp1.Usage.TotalTokens != resp2.Usage.TotalTokens {
 		t.Errorf("Usage mismatch: %d vs %d", resp1.Usage.TotalTokens, resp2.Usage.TotalTokens)
@@ -164,14 +164,10 @@ func TestCheckpoint_AC_2_3_NoStoreEquivalent(t *testing.T) {
 
 func runOnce(t *testing.T, sessionID string, withStore bool) *schema.RunResponse {
 	t.Helper()
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			makeToolCallResponse("tc-1", "echo", `{"v":"x"}`, 50),
-			makeStopResponse("hello", 50),
-		},
-	}
+	mock := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"x"}`, 50),
+		makeStopResponse("hello", 50))
 	opts := []taskagent.Option{
-		taskagent.WithChatCompleter(mock),
+		taskagent.WithCaller(mock),
 		taskagent.WithToolRegistry(echoToolReg()),
 	}
 	if withStore {
@@ -180,7 +176,7 @@ func runOnce(t *testing.T, sessionID string, withStore bool) *schema.RunResponse
 	a := taskagent.New(agent.Config{ID: "agent-eq"}, opts...)
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: sessionID,
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -196,30 +192,26 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
 
 	// First Run: crashes after 1 successful iter (tool call response).
-	mock1 := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50),
-		},
-	}
-	a1 := taskagent.New(agent.Config{ID: "agent-r"},
-		taskagent.WithChatCompleter(mock1),
+	mock1 := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50))
+	a1 := taskagent.New(
+		agent.Config{ID: "agent-r"},
+		taskagent.WithCaller(mock1),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
 	)
 	_, err := a1.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-r",
-		Messages:  []schema.Message{schema.NewUserMessage("multi-step plan")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "multi-step plan")},
 	})
 	if err == nil {
 		t.Fatal("first Run: want error, got nil")
 	}
 
 	// Resume with a fresh agent + completer that returns a stop response.
-	mock2 := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{makeStopResponse("RESUMED-FINAL", 50)},
-	}
-	a2 := taskagent.New(agent.Config{ID: "agent-r"},
-		taskagent.WithChatCompleter(mock2),
+	mock2 := newMock(makeStopResponse("RESUMED-FINAL", 50))
+	a2 := taskagent.New(
+		agent.Config{ID: "agent-r"},
+		taskagent.WithCaller(mock2),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
 	)
@@ -230,7 +222,7 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 	if resp.StopReason != schema.StopReasonComplete {
 		t.Errorf("StopReason = %q, want complete", resp.StopReason)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "RESUMED-FINAL" {
+	if got := resp.Messages[0].Text(); got != "RESUMED-FINAL" {
 		t.Errorf("text = %q, want RESUMED-FINAL", got)
 	}
 
@@ -245,8 +237,9 @@ func TestCheckpoint_AC_1_1_ResumeContinuesFromLatest(t *testing.T) {
 // returns ErrCheckpointNotFound for an unknown session id.
 func TestCheckpoint_AC_1_3_ResumeUnknownSession(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	a := taskagent.New(agent.Config{ID: "agent-x"},
-		taskagent.WithChatCompleter(&mockChatCompleter{}),
+	a := taskagent.New(
+		agent.Config{ID: "agent-x"},
+		taskagent.WithCaller(newMock()),
 		taskagent.WithIterationStore(store),
 	)
 	_, err := a.Resume(context.Background(), "sess-does-not-exist")
@@ -260,16 +253,15 @@ func TestCheckpoint_AC_1_3_ResumeUnknownSession(t *testing.T) {
 // field; the only way to get full messages is Load.
 func TestCheckpoint_AC_3_1_ListMetadataDoesNotEmbedMessages(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{makeStopResponse("hi", 50)},
-	}
-	a := taskagent.New(agent.Config{ID: "agent-meta"},
-		taskagent.WithChatCompleter(mock),
+	mock := newMock(makeStopResponse("hi", 50))
+	a := taskagent.New(
+		agent.Config{ID: "agent-meta"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-meta",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -299,9 +291,7 @@ func TestCheckpoint_AC_3_1_ListMetadataDoesNotEmbedMessages(t *testing.T) {
 // well-formed payload.
 func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 	store := checkpoint.NewMapIterationStore()
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{makeStopResponse("ok", 50)},
-	}
+	mock := newMock(makeStopResponse("ok", 50))
 
 	hookMgr := hook.NewManager()
 	var (
@@ -319,14 +309,15 @@ func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 		return nil
 	}, schema.EventCheckpointWritten))
 
-	a := taskagent.New(agent.Config{ID: "agent-hook"},
-		taskagent.WithChatCompleter(mock),
+	a := taskagent.New(
+		agent.Config{ID: "agent-hook"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithHookManager(hookMgr),
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-hook",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -362,16 +353,15 @@ func TestCheckpoint_AC_4_1_FileLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileIterationStore: %v", err)
 	}
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{makeStopResponse("done", 50)},
-	}
-	a := taskagent.New(agent.Config{ID: "agent-fs"},
-		taskagent.WithChatCompleter(mock),
+	mock := newMock(makeStopResponse("done", 50))
+	a := taskagent.New(
+		agent.Config{ID: "agent-fs"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 	)
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-fs",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -406,8 +396,8 @@ func TestCheckpoint_FileStore_ConcurrentDifferentSessions(t *testing.T) {
 				SessionID: "sess-" + string(rune('a'+idx)),
 				AgentID:   "agent-c",
 				Iteration: 0,
-				Messages: []aimodel.Message{
-					{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
+				Messages: []schema.Message{
+					schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 				},
 			}
 			if err := store.Save(context.Background(), cp); err != nil {
@@ -435,14 +425,11 @@ func TestCheckpoint_FileStore_ConcurrentDifferentSessions(t *testing.T) {
 // 1 with the first call's usage of 50 ensures the second iteration's
 // pre-call check fires.
 func TestCheckpoint_PreCallBudgetExhausted_FirstIter(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50),
-		},
-	}
+	mock := newMock(makeToolCallResponse("tc-1", "echo", `{"v":"a"}`, 50))
 	store := checkpoint.NewMapIterationStore()
-	a := taskagent.New(agent.Config{ID: "agent-budget"},
-		taskagent.WithChatCompleter(mock),
+	a := taskagent.New(
+		agent.Config{ID: "agent-budget"},
+		taskagent.WithCaller(mock),
 		taskagent.WithIterationStore(store),
 		taskagent.WithToolRegistry(echoToolReg()),
 		taskagent.WithRunTokenBudget(1),
@@ -450,7 +437,7 @@ func TestCheckpoint_PreCallBudgetExhausted_FirstIter(t *testing.T) {
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
 		SessionID: "sess-budget",
-		Messages:  []schema.Message{schema.NewUserMessage("go")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

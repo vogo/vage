@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/routeragent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -37,10 +37,10 @@ func newTextAgent(id, suffix string) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -49,7 +49,7 @@ func newUsageAgent(id string, prompt, completion, total int) agent.Agent {
 	return agent.NewCustomAgent(agent.Config{ID: id}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		return &schema.RunResponse{
 			Messages: req.Messages,
-			Usage:    &aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
+			Usage:    &schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
 		}, nil
 	})
 }
@@ -75,34 +75,35 @@ func routeNil(_ context.Context, _ *schema.RunRequest, _ []routeragent.Route) (*
 	return nil, nil
 }
 
-// --- mockChatCompleter for LLM integration tests ---
+// --- mockCaller for LLM integration tests ---
 
-type mockChatCompleter struct {
-	response *aimodel.ChatResponse
-	err      error
-	captured *aimodel.ChatRequest
+type mockCaller struct {
+	*largemodel.FakeCaller
 }
 
-func (m *mockChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	m.captured = req
-	if m.err != nil {
-		return nil, m.err
+func newMock(resp *largemodel.Response) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{resp},
+	}}
+}
+
+// captured returns the request the router sent, or nil if it sent none.
+func (m *mockCaller) captured() *largemodel.Request {
+	reqs := m.Requests()
+	if len(reqs) == 0 {
+		return nil
 	}
-	return m.response, nil
+
+	return reqs[0]
 }
 
-func (m *mockChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return nil, errors.New("not implemented")
+func newMockErr(err error) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Err: err}}
 }
 
-func llmResponse(text string, prompt, completion, total int) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
-			FinishReason: aimodel.FinishReasonStop,
-		}},
-		Usage: aimodel.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total},
-	}
+func llmResponse(text string, prompt, completion, total int) *largemodel.Response {
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, text,
+		schema.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total})
 }
 
 // --- Integration Tests ---
@@ -121,7 +122,7 @@ func TestIntegration_RoutingAndDelegation_EndToEnd(t *testing.T) {
 		routes, routeragent.WithFunc(routeragent.IndexFunc(2)))
 
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "session-e2e",
 	}
 	resp, err := ra.Run(context.Background(), req)
@@ -130,7 +131,7 @@ func TestIntegration_RoutingAndDelegation_EndToEnd(t *testing.T) {
 	}
 
 	// Verify correct agent was selected
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "hello-C" {
 		t.Errorf("routed output = %q, want %q", got, "hello-C")
 	}
@@ -155,12 +156,12 @@ func TestIntegration_SelectsFirstRoute(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("input")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "input")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "input-FIRST" {
+	if got := resp.Messages[0].Text(); got != "input-FIRST" {
 		t.Errorf("got %q, want %q", got, "input-FIRST")
 	}
 }
@@ -169,7 +170,7 @@ func TestIntegration_SelectsFirstRoute(t *testing.T) {
 func TestIntegration_EmptyRoutes(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "rt"}, nil, routeragent.WithFunc(routeragent.FirstFunc))
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for empty routes")
@@ -186,7 +187,7 @@ func TestIntegration_NilRouteFunc(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes) // no WithFunc
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil routeFunc")
@@ -204,7 +205,7 @@ func TestIntegration_RouteFuncError(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeError))
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error from routeFunc")
@@ -225,7 +226,7 @@ func TestIntegration_RouteFuncReturnsNilAgent(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeNil))
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil agent")
@@ -243,7 +244,7 @@ func TestIntegration_SelectedAgentError(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error from selected agent")
@@ -261,7 +262,7 @@ func TestIntegration_NilResponseError(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error for nil response")
@@ -288,7 +289,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routerFn))
 	_, err := ra.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got: %v", err)
@@ -314,7 +315,7 @@ func TestIntegration_ContextDeadlineExceeded(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 	_, err := ra.Run(ctx, &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error due to deadline exceeded")
@@ -332,7 +333,7 @@ func TestIntegration_SessionIDPreserved(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "sess-42",
 	})
 	if err != nil {
@@ -351,7 +352,7 @@ func TestIntegration_UsagePropagation(t *testing.T) {
 	}
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -385,7 +386,7 @@ func TestIntegration_RequestPassthrough(t *testing.T) {
 	opts := &schema.RunOptions{Model: "gpt-test", Temperature: &temp, MaxTokens: 100}
 	meta := map[string]any{"key": "value", "num": 42}
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "sess-passthrough",
 		Options:   opts,
 		Metadata:  meta,
@@ -422,7 +423,7 @@ func TestIntegration_MetadataPreservedFromSelectedAgent(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -461,7 +462,7 @@ func TestIntegration_RunStream_FullLifecycle(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "stream-router"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 
 	stream, err := ra.RunStream(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("hello")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 		SessionID: "stream-sess",
 	})
 	if err != nil {
@@ -519,7 +520,7 @@ func TestIntegration_RunStream_ErrorSurfaced(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "err-stream"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 
 	stream, err := ra.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error creating stream: %v", err)
@@ -556,7 +557,7 @@ func TestIntegration_RunStream_Close(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "close-rt"}, routes, routeragent.WithFunc(routeragent.FirstFunc))
 
 	stream, closeErr := ra.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if closeErr != nil {
 		t.Fatalf("unexpected error: %v", closeErr)
@@ -597,7 +598,7 @@ func TestIntegration_RunText_Convenience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "hello-via-RunText" {
 		t.Errorf("got %q, want %q", got, "hello-via-RunText")
 	}
@@ -668,12 +669,12 @@ func TestIntegration_ContentBasedRouting(t *testing.T) {
 
 	for _, tt := range tests {
 		resp, err := ra.Run(context.Background(), &schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage(tt.input)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, tt.input)},
 		})
 		if err != nil {
 			t.Fatalf("input=%q: unexpected error: %v", tt.input, err)
 		}
-		got := resp.Messages[0].Content.Text()
+		got := resp.Messages[0].Text()
 		if got != tt.want {
 			t.Errorf("input=%q: got %q, want %q", tt.input, got, tt.want)
 		}
@@ -681,7 +682,7 @@ func TestIntegration_ContentBasedRouting(t *testing.T) {
 
 	// No matching route
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("unrelated topic")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "unrelated topic")},
 	})
 	if err == nil {
 		t.Fatal("expected error for no matching route")
@@ -701,23 +702,23 @@ func TestIntegration_ContentBasedRouting_WithFallback(t *testing.T) {
 
 	// Matched route
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("solve math")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "solve math")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "solve math [math]" {
+	if got := resp.Messages[0].Text(); got != "solve math [math]" {
 		t.Errorf("got %q, want %q", got, "solve math [math]")
 	}
 
 	// Unmatched route falls back to index 1 (chat-agent)
 	resp, err = ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("unrelated topic")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "unrelated topic")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := resp.Messages[0].Content.Text(); got != "unrelated topic [chat]" {
+	if got := resp.Messages[0].Text(); got != "unrelated topic [chat]" {
 		t.Errorf("got %q, want %q", got, "unrelated topic [chat]")
 	}
 }
@@ -727,9 +728,9 @@ func TestIntegration_ContentBasedRouting_WithFallback(t *testing.T) {
 func TestIntegration_RouterWithWorkflowSubAgent(t *testing.T) {
 	// Import workflowagent indirectly through a CustomAgent that acts like a mini-pipeline
 	pipeline := agent.NewCustomAgent(agent.Config{ID: "pipeline"}, func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-		text := req.Messages[0].Content.Text()
+		text := req.Messages[0].Text()
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage("[processed] " + text)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "[processed] "+text)},
 		}, nil
 	})
 
@@ -740,12 +741,12 @@ func TestIntegration_RouterWithWorkflowSubAgent(t *testing.T) {
 	ra := routeragent.New(agent.Config{ID: "composed-rt"}, routes, routeragent.WithFunc(routeragent.IndexFunc(1)))
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("data")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "data")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "[processed] data" {
 		t.Errorf("got %q, want %q", got, "[processed] data")
 	}
@@ -794,7 +795,7 @@ func TestIntegration_LLMRouting_EndToEnd(t *testing.T) {
 		{Agent: newTextAgent("email-agent", " [email]"), Description: "Handles email operations"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "llm-router", Name: "LLM Router", Description: "routes via LLM"},
 		routes,
@@ -802,14 +803,14 @@ func TestIntegration_LLMRouting_EndToEnd(t *testing.T) {
 	)
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("What's the weather?")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "What's the weather?")},
 		SessionID: "llm-sess",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "What's the weather? [weather]" {
 		t.Errorf("output = %q, want %q", got, "What's the weather? [weather]")
 	}
@@ -826,7 +827,7 @@ func TestIntegration_LLMRouting_UsageAggregation(t *testing.T) {
 	}
 
 	// LLM routing costs (8, 2, 10)
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -834,7 +835,7 @@ func TestIntegration_LLMRouting_UsageAggregation(t *testing.T) {
 	)
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -861,7 +862,7 @@ func TestIntegration_LLMRouting_UsageAggregation_AgentNoUsage(t *testing.T) {
 		{Agent: newTextAgent("sub", ""), Description: "agent without usage"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 8, 2, 10)}
+	mock := newMock(llmResponse("0", 8, 2, 10))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -869,7 +870,7 @@ func TestIntegration_LLMRouting_UsageAggregation_AgentNoUsage(t *testing.T) {
 	)
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -890,7 +891,7 @@ func TestIntegration_LLMRouting_Fallback(t *testing.T) {
 		{Agent: newTextAgent("other", " [other]"), Description: "other agent"},
 	}
 
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -898,12 +899,12 @@ func TestIntegration_LLMRouting_Fallback(t *testing.T) {
 	)
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "test [default]" {
 		t.Errorf("got %q, want %q", got, "test [default]")
 	}
@@ -916,7 +917,7 @@ func TestIntegration_LLMRouting_NoFallback_Error(t *testing.T) {
 		{Agent: newTextAgent("sub", ""), Description: "agent"},
 	}
 
-	mock := &mockChatCompleter{err: errors.New("LLM unavailable")}
+	mock := newMockErr(errors.New("LLM unavailable"))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -924,7 +925,7 @@ func TestIntegration_LLMRouting_NoFallback_Error(t *testing.T) {
 	)
 
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -942,7 +943,7 @@ func TestIntegration_LLMRouting_InvalidResponse_Fallback(t *testing.T) {
 		{Agent: newTextAgent("other", " [other]"), Description: "other"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("I think you should use agent 0", 5, 3, 8)}
+	mock := newMock(llmResponse("I think you should use agent 0", 5, 3, 8))
 	ra := routeragent.New(
 		agent.Config{ID: "rt"},
 		routes,
@@ -950,12 +951,12 @@ func TestIntegration_LLMRouting_InvalidResponse_Fallback(t *testing.T) {
 	)
 
 	resp, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("test")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "test [other]" {
 		t.Errorf("got %q, want %q", got, "test [other]")
 	}
@@ -970,26 +971,26 @@ func TestIntegration_LLMRouting_PromptVerification(t *testing.T) {
 		{Agent: newTextAgent("c", ""), Description: "Sends emails"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	fn := routeragent.LLMFunc(mock, "my-model", -1)
 
 	ra := routeragent.New(agent.Config{ID: "rt"}, routes, routeragent.WithFunc(fn))
 
 	_, err := ra.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("What's the forecast?")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "What's the forecast?")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if mock.captured == nil {
+	if mock.captured() == nil {
 		t.Fatal("expected captured request")
 	}
-	if mock.captured.Model != "my-model" {
-		t.Errorf("Model = %q, want %q", mock.captured.Model, "my-model")
+	if mock.captured().Model != "my-model" {
+		t.Errorf("Model = %q, want %q", mock.captured().Model, "my-model")
 	}
 
-	sysText := mock.captured.Messages[0].Content.Text()
+	sysText := mock.captured().Messages[0].Text()
 	for _, desc := range []string{"Handles weather queries", "Manages calendar events", "Sends emails"} {
 		if !strings.Contains(sysText, desc) {
 			t.Errorf("system prompt missing description %q", desc)
@@ -1002,7 +1003,7 @@ func TestIntegration_LLMRouting_PromptVerification(t *testing.T) {
 		}
 	}
 
-	userText := mock.captured.Messages[1].Content.Text()
+	userText := mock.captured().Messages[1].Text()
 	if userText != "What's the forecast?" {
 		t.Errorf("user text = %q, want %q", userText, "What's the forecast?")
 	}
@@ -1014,7 +1015,7 @@ func TestIntegration_LLMRouting_RunStream(t *testing.T) {
 		{Agent: newTextAgent("sub", "-llm-streamed"), Description: "agent"},
 	}
 
-	mock := &mockChatCompleter{response: llmResponse("0", 5, 3, 8)}
+	mock := newMock(llmResponse("0", 5, 3, 8))
 	ra := routeragent.New(
 		agent.Config{ID: "llm-stream-rt"},
 		routes,
@@ -1022,7 +1023,7 @@ func TestIntegration_LLMRouting_RunStream(t *testing.T) {
 	)
 
 	stream, err := ra.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("hello")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

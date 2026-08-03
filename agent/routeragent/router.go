@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 )
@@ -36,7 +35,7 @@ type Route struct {
 // RouteResult holds the result of a routing decision.
 type RouteResult struct {
 	Agent agent.Agent
-	Usage *aimodel.Usage // optional usage from the routing decision itself
+	Usage *schema.Usage // optional usage from the routing decision itself
 }
 
 // RouteFunc selects which agent to route a request to.
@@ -116,7 +115,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 	// Aggregate usage from routing decision and selected agent.
 	if result.Usage != nil {
-		totalUsage := &aimodel.Usage{}
+		totalUsage := &schema.Usage{}
 		totalUsage.Add(result.Usage)
 		if resp.Usage != nil {
 			totalUsage.Add(resp.Usage)

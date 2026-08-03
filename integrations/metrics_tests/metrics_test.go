@@ -26,13 +26,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
 // Test 2a: MetricsMiddleware propagates CacheReadTokens in sync path.
-// Creates a MetricsMiddleware wrapping a mock ChatCompleter returning fixed
+// Creates a MetricsMiddleware wrapping a mock Caller returning fixed
 // usage with CacheReadTokens, and verifies dispatched LLMCallEndData includes it.
 func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	// Set up mock server returning usage with cache tokens via OpenAI protocol.
@@ -60,10 +59,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(
-		aimodel.WithAPIKey("sk-test"),
-		aimodel.WithBaseURL(srv.URL),
-	)
+	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -76,9 +72,9 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
@@ -139,10 +135,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(
-		aimodel.WithAPIKey("sk-test"),
-		aimodel.WithBaseURL(srv.URL),
-	)
+	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -155,9 +148,9 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	stream, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{
+	stream, err := wrapped.CallStream(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletionStream: %v", err)
@@ -232,10 +225,7 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(
-		aimodel.WithAPIKey("sk-test"),
-		aimodel.WithBaseURL(srv.URL),
-	)
+	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -248,9 +238,9 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 	mw := largemodel.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
-	_, err = wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{
+	_, err = wrapped.Call(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
-		Messages: []aimodel.Message{{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("Hi")}},
+		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
 	if err != nil {
 		t.Fatalf("ChatCompletion: %v", err)

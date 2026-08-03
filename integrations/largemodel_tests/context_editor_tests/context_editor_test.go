@@ -34,7 +34,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/hook"
@@ -43,8 +42,8 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// recordingCompleter records every ChatRequest the upstream middleware
-// chain passes down. It implements aimodel.ChatCompleter so it can sit
+// recordingCompleter records every Request the upstream middleware
+// chain passes down. It implements largemodel.Caller so it can sit
 // directly under the ContextEditorMiddleware in the wrap chain — every
 // request the editor forwards is captured here for inspection.
 //
@@ -53,72 +52,30 @@ import (
 // is returned from ChatCompletionStream — the streaming path is exercised
 // via a real SSE httptest.Server in the dedicated stream test below.
 type recordingCompleter struct {
-	mu            sync.Mutex
-	requests      []*aimodel.ChatRequest
-	chatResponses []*aimodel.ChatResponse
-	chatCalls     int
+	*largemodel.FakeCaller
 }
 
-func (r *recordingCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	r.mu.Lock()
-	// Snapshot the messages slice so subsequent appends by the agent's
-	// ReAct loop cannot retroactively change what we recorded.
-	snap := *req
-	snap.Messages = append([]aimodel.Message(nil), req.Messages...)
-	r.requests = append(r.requests, &snap)
-	idx := r.chatCalls
-	r.chatCalls++
-	r.mu.Unlock()
-
-	if idx >= len(r.chatResponses) {
-		return nil, fmt.Errorf("recordingCompleter: no response at call %d", idx)
-	}
-	resp := r.chatResponses[idx]
-	if resp == nil {
-		return stopResponse("ok"), nil
-	}
-	return resp, nil
-}
-
-func (r *recordingCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return nil, errors.New("recordingCompleter: streaming not implemented")
-}
-
-func (r *recordingCompleter) snapshot() []*aimodel.ChatRequest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]*aimodel.ChatRequest, len(r.requests))
-	copy(out, r.requests)
-	return out
-}
+func (r *recordingCompleter) snapshot() []*largemodel.Request { return r.Requests() }
 
 // stopResponse returns a minimal assistant "stop" response.
-func stopResponse(text string) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message:      aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
-			FinishReason: aimodel.FinishReasonStop,
-		}},
-		Usage: aimodel.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+func stopResponse(text string) *largemodel.Response {
+	return &largemodel.Response{
+		Message:      schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", nil),
+		FinishReason: largemodel.FinishReasonStop,
+		Usage:        schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}
 }
 
 // toolCallResponse returns an assistant tool_calls response with a single call.
-func toolCallResponse(toolCallID, name, args string) *aimodel.ChatResponse {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:    aimodel.RoleAssistant,
-				Content: aimodel.NewTextContent(""),
-				ToolCalls: []aimodel.ToolCall{{
-					ID:       toolCallID,
-					Type:     "function",
-					Function: aimodel.FunctionCall{Name: name, Arguments: args},
-				}},
-			},
-			FinishReason: aimodel.FinishReasonToolCalls,
-		}},
-		Usage: aimodel.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+func toolCallResponse(toolCallID, name, args string) *largemodel.Response {
+	return &largemodel.Response{
+		Message: schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{
+			ID:        toolCallID,
+			Name:      name,
+			Arguments: args,
+		}}),
+		FinishReason: largemodel.FinishReasonToolCalls,
+		Usage:        schema.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 	}
 }
 
@@ -136,10 +93,10 @@ func echoRegistry(payload string) tool.ToolRegistry {
 }
 
 // countToolResults returns the number of RoleTool messages in msgs.
-func countToolResults(msgs []aimodel.Message) int {
+func countToolResults(msgs []schema.Message) int {
 	n := 0
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			n++
 		}
 	}
@@ -148,10 +105,10 @@ func countToolResults(msgs []aimodel.Message) int {
 
 // countElided returns the number of RoleTool messages whose content
 // looks like the editor's placeholder text.
-func countElided(msgs []aimodel.Message) int {
+func countElided(msgs []schema.Message) int {
 	n := 0
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleTool && strings.Contains(m.Content.Text(), "context_edited") {
+		if m.Role() == schema.RoleTool && strings.Contains(m.Text(), "context_edited") {
 			n++
 		}
 	}
@@ -160,11 +117,11 @@ func countElided(msgs []aimodel.Message) int {
 
 // assistantToolCallIDs returns the assistant ToolCalls[].ID values from
 // the most recent assistant message in msgs (in declaration order).
-func assistantToolCallIDs(msgs []aimodel.Message) []string {
+func assistantToolCallIDs(msgs []schema.Message) []string {
 	var ids []string
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleAssistant {
-			for _, tc := range m.ToolCalls {
+		if m.Role() == schema.RoleAssistant {
+			for _, tc := range m.ToolCalls() {
 				ids = append(ids, tc.ID)
 			}
 		}
@@ -174,11 +131,11 @@ func assistantToolCallIDs(msgs []aimodel.Message) []string {
 
 // toolResultIDs returns the tool_call_id of each RoleTool message in
 // msgs in slice order.
-func toolResultIDs(msgs []aimodel.Message) []string {
+func toolResultIDs(msgs []schema.Message) []string {
 	var ids []string
 	for _, m := range msgs {
-		if m.Role == aimodel.RoleTool {
-			ids = append(ids, m.ToolCallID)
+		if m.Role() == schema.RoleTool {
+			ids = append(ids, m.ToolCallID())
 		}
 	}
 	return ids
@@ -193,26 +150,24 @@ func toolResultIDs(msgs []aimodel.Message) []string {
 // that the final RunResponse text is unaffected.
 func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 	const k = 2
-	rc := &recordingCompleter{
-		chatResponses: []*aimodel.ChatResponse{
-			toolCallResponse("call-1", "echo", `{"i":1}`),
-			toolCallResponse("call-2", "echo", `{"i":2}`),
-			toolCallResponse("call-3", "echo", `{"i":3}`),
-			toolCallResponse("call-4", "echo", `{"i":4}`),
-			stopResponse("FINAL_OUTPUT"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{"i":1}`),
+		toolCallResponse("call-2", "echo", `{"i":2}`),
+		toolCallResponse("call-3", "echo", `{"i":3}`),
+		toolCallResponse("call-4", "echo", `{"i":4}`),
+		stopResponse("FINAL_OUTPUT"),
+	}}}
 
 	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(k))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-long"},
-		taskagent.WithChatCompleter(rc),
+		taskagent.WithCaller(rc),
 		taskagent.WithToolRegistry(echoRegistry(strings.Repeat("y", 200))),
 		taskagent.WithContextEditor(editor),
 	)
 
 	resp, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("go")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -253,7 +208,7 @@ func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 
 		// Every tool_result must still carry a non-empty ToolCallID.
 		for _, m := range reqs[i].Messages {
-			if m.Role == aimodel.RoleTool && m.ToolCallID == "" {
+			if m.Role() == schema.RoleTool && m.ToolCallID() == "" {
 				t.Errorf("req[%d] tool_result missing ToolCallID: %+v", i, m)
 			}
 		}
@@ -276,7 +231,7 @@ func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 	}
 
 	// The agent's final response must reflect the LLM's final text.
-	if len(resp.Messages) == 0 || resp.Messages[0].Content.Text() != "FINAL_OUTPUT" {
+	if len(resp.Messages) == 0 || resp.Messages[0].Text() != "FINAL_OUTPUT" {
 		t.Errorf("unexpected final response: %+v", resp.Messages)
 	}
 }
@@ -304,25 +259,23 @@ func TestIntegration_ContextEditor_EventEmission(t *testing.T) {
 		largemodel.WithContextEditDispatch(mgr.Dispatch),
 	)
 
-	rc := &recordingCompleter{
-		chatResponses: []*aimodel.ChatResponse{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			toolCallResponse("call-4", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		toolCallResponse("call-4", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-evt"},
-		taskagent.WithChatCompleter(rc),
+		taskagent.WithCaller(rc),
 		taskagent.WithToolRegistry(echoRegistry(strings.Repeat("z", 128))),
 		taskagent.WithContextEditor(editor),
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("go")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -402,24 +355,24 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 	// Build a request directly so we can compare slice headers — the
 	// TaskAgent path always re-allocates messages, so we exercise the
 	// middleware in isolation here.
-	req := &aimodel.ChatRequest{
+	req := &largemodel.Request{
 		Model: "test",
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")},
-			{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("hi")},
-			{Role: aimodel.RoleAssistant, ToolCalls: []aimodel.ToolCall{
-				{ID: "t-1", Function: aimodel.FunctionCall{Name: "x"}},
-				{ID: "t-2", Function: aimodel.FunctionCall{Name: "x"}},
-			}},
-			{Role: aimodel.RoleTool, ToolCallID: "t-1", Content: aimodel.NewTextContent("a")},
-			{Role: aimodel.RoleTool, ToolCallID: "t-2", Content: aimodel.NewTextContent("b")},
+		Messages: []schema.Message{
+			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi"),
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
+				{ID: "t-1", Name: "x"},
+				{ID: "t-2", Name: "x"},
+			}),
+			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-1", "a", false),
+			schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "t-2", "b", false),
 		},
 	}
 
-	rc := &recordingCompleter{chatResponses: []*aimodel.ChatResponse{stopResponse("ok")}}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{stopResponse("ok")}}}
 	wrapped := editor.Wrap(rc)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), req); err != nil {
+	if _, err := wrapped.Call(context.Background(), req); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)
 	}
 
@@ -457,24 +410,24 @@ func TestIntegration_ContextEditor_MinElidedBytesThreshold(t *testing.T) {
 		largemodel.WithContextEditDispatch(mgr.Dispatch),
 	)
 
-	rc := &recordingCompleter{
-		chatResponses: []*aimodel.ChatResponse{
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
 			toolCallResponse("call-1", "echo", `{}`),
 			toolCallResponse("call-2", "echo", `{}`),
 			toolCallResponse("call-3", "echo", `{}`),
 			stopResponse("done"),
 		},
-	}
+	}}
 
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-thresh"},
-		taskagent.WithChatCompleter(rc),
+		taskagent.WithCaller(rc),
 		taskagent.WithToolRegistry(echoRegistry("tiny")),
 		taskagent.WithContextEditor(editor),
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("go")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -507,9 +460,9 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := aimodel.NewClient(aimodel.WithAPIKey("test"), aimodel.WithBaseURL(srv.URL))
+	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
 	if err != nil {
-		t.Fatalf("aimodel.NewClient: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
 	}
 
 	cap := &streamCapturer{inner: client}
@@ -517,13 +470,13 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(k))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-stream"},
-		taskagent.WithChatCompleter(cap),
+		taskagent.WithCaller(cap),
 		taskagent.WithToolRegistry(echoRegistry(strings.Repeat("s", 128))),
 		taskagent.WithContextEditor(editor),
 	)
 
 	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("go")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	})
 	if err != nil {
 		t.Fatalf("RunStream: %v", err)
@@ -573,25 +526,23 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 // regression guard: a TaskAgent constructed without WithContextEditor
 // must run identical scenarios with zero elisions in any request.
 func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
-	rc := &recordingCompleter{
-		chatResponses: []*aimodel.ChatResponse{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			toolCallResponse("call-4", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		toolCallResponse("call-4", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	a := taskagent.New(
 		agent.Config{ID: "no-editor"},
-		taskagent.WithChatCompleter(rc),
+		taskagent.WithCaller(rc),
 		taskagent.WithToolRegistry(echoRegistry(strings.Repeat("p", 200))),
 		// no WithContextEditor — chain must be untouched.
 	)
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("go")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
 	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -606,7 +557,7 @@ func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
 // TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant asserts
 // that after a multi-iteration Run, the caller-supplied RunRequest.Messages
 // stay byte-for-byte unchanged AND every internal tool_result the agent
-// appended carries the FULL original payload (only the OUTBOUND ChatRequest
+// appended carries the FULL original payload (only the OUTBOUND Request
 // gets edited; the agent's own accumulator must remain intact).
 //
 // Strategy: snapshot the user RunRequest before Run; after Run, compare.
@@ -616,24 +567,22 @@ func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
 // LLM's stop text (no corruption) and that NO request claims more
 // tool_results than were actually executed.
 func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.T) {
-	rc := &recordingCompleter{
-		chatResponses: []*aimodel.ChatResponse{
-			toolCallResponse("call-1", "echo", `{}`),
-			toolCallResponse("call-2", "echo", `{}`),
-			toolCallResponse("call-3", "echo", `{}`),
-			stopResponse("done"),
-		},
-	}
+	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
+		toolCallResponse("call-1", "echo", `{}`),
+		toolCallResponse("call-2", "echo", `{}`),
+		toolCallResponse("call-3", "echo", `{}`),
+		stopResponse("done"),
+	}}}
 
 	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(1))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-mut"},
-		taskagent.WithChatCompleter(rc),
+		taskagent.WithCaller(rc),
 		taskagent.WithToolRegistry(echoRegistry(strings.Repeat("M", 100))),
 		taskagent.WithContextEditor(editor),
 	)
 
-	original := []schema.Message{schema.NewUserMessage("hi")}
+	original := []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}
 	req := &schema.RunRequest{
 		Messages: append([]schema.Message(nil), original...),
 	}
@@ -644,21 +593,21 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 	}
 
 	// The caller's original RunRequest.Messages slice must not have
-	// been written through. We compare the underlying aimodel.Message
+	// been written through. We compare the underlying schema.Message
 	// content text since that's the surface the editor would have
 	// touched.
 	if len(req.Messages) != len(original) {
 		t.Errorf("req.Messages length changed: got %d want %d", len(req.Messages), len(original))
 	}
 	for i := range original {
-		if req.Messages[i].Content.Text() != original[i].Content.Text() {
+		if req.Messages[i].Text() != original[i].Text() {
 			t.Errorf("req.Messages[%d] mutated: got %q want %q",
-				i, req.Messages[i].Content.Text(), original[i].Content.Text())
+				i, req.Messages[i].Text(), original[i].Text())
 		}
 	}
 
 	// Final response sanity.
-	if len(resp.Messages) == 0 || resp.Messages[0].Content.Text() != "done" {
+	if len(resp.Messages) == 0 || resp.Messages[0].Text() != "done" {
 		t.Errorf("unexpected final response: %+v", resp.Messages)
 	}
 
@@ -684,8 +633,8 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 	// 100-byte "M" payload — proves the agent's accumulator and the
 	// editor's "keep last K" both preserved newest content verbatim.
 	for j := len(r3.Messages) - 1; j >= 0; j-- {
-		if r3.Messages[j].Role == aimodel.RoleTool {
-			text := r3.Messages[j].Content.Text()
+		if r3.Messages[j].Role() == schema.RoleTool {
+			text := r3.Messages[j].Text()
 			if strings.Contains(text, "context_edited") {
 				t.Error("most recent tool_result was elided — keep_last_k violated")
 			}
@@ -702,38 +651,45 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 // — duplicated here because they are package-private to taskagent).
 // ---------------------------------------------------------------------
 
-// streamCapturer wraps an inner ChatCompleter and records every
-// outbound ChatCompletionStream request it forwards. It is the stream
-// counterpart of recordingCompleter and lets the test assert on the
-// post-edit messages without needing access to taskagent internals.
+// streamCapturer wraps an inner Caller and records every outbound request it
+// forwards. It is the stream counterpart of recordingCompleter and lets the
+// test assert on the post-edit messages without needing access to taskagent
+// internals.
 type streamCapturer struct {
 	mu       sync.Mutex
-	inner    aimodel.ChatCompleter
-	requests []*aimodel.ChatRequest
+	inner    largemodel.Caller
+	requests []*largemodel.Request
 }
 
-func (s *streamCapturer) ChatCompletion(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	s.mu.Lock()
-	snap := *req
-	snap.Messages = append([]aimodel.Message(nil), req.Messages...)
-	s.requests = append(s.requests, &snap)
-	s.mu.Unlock()
-	return s.inner.ChatCompletion(ctx, req)
-}
-
-func (s *streamCapturer) ChatCompletionStream(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	s.mu.Lock()
-	snap := *req
-	snap.Messages = append([]aimodel.Message(nil), req.Messages...)
-	s.requests = append(s.requests, &snap)
-	s.mu.Unlock()
-	return s.inner.ChatCompletionStream(ctx, req)
-}
-
-func (s *streamCapturer) snapshot() []*aimodel.ChatRequest {
+// record snapshots a request so later mutation by the callee cannot alter
+// what the test observes.
+func (s *streamCapturer) record(req *largemodel.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]*aimodel.ChatRequest, len(s.requests))
+
+	snap := *req
+	snap.Messages = append([]schema.Message(nil), req.Messages...)
+	s.requests = append(s.requests, &snap)
+}
+
+func (s *streamCapturer) Protocol() schema.Protocol { return s.inner.Protocol() }
+
+func (s *streamCapturer) Call(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	s.record(req)
+
+	return s.inner.Call(ctx, req)
+}
+
+func (s *streamCapturer) CallStream(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+	s.record(req)
+
+	return s.inner.CallStream(ctx, req)
+}
+
+func (s *streamCapturer) snapshot() []*largemodel.Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*largemodel.Request, len(s.requests))
 	copy(out, s.requests)
 	return out
 }

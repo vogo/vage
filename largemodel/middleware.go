@@ -15,32 +15,34 @@
  * limitations under the License.
  */
 
-// Package largemodel provides middleware for aimodel.ChatCompleter,
-// adding retry, caching, rate limiting, timeout, and logging capabilities.
+// Package largemodel calls vendor model APIs and wraps them in the
+// cross-cutting governance vage applies to every call: retry, caching, rate
+// limiting, circuit breaking, timeouts, budgets, logging and metrics.
+//
+// vage speaks each vendor's native protocol directly — OpenAI Chat
+// Completions, OpenAI Responses, and Anthropic Messages — rather than through
+// a vendor-neutral abstraction. A model is bound to one protocol at
+// configuration time, and the Caller for that protocol owns the translation
+// between vage's Request/Response envelopes and that vendor's wire types.
+// Middlewares wrap a Caller and see only the envelopes.
 package largemodel
 
-import (
-	"context"
-
-	"github.com/vogo/aimodel"
-)
-
-// Middleware wraps a ChatCompleter to add cross-cutting behavior.
+// Middleware wraps a Caller to add cross-cutting behavior.
 type Middleware interface {
-	Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
+	Wrap(next Caller) Caller
 }
 
 // MiddlewareFunc adapts a plain function to the Middleware interface.
-type MiddlewareFunc func(next aimodel.ChatCompleter) aimodel.ChatCompleter
+type MiddlewareFunc func(next Caller) Caller
 
 // Wrap implements Middleware.
-func (f MiddlewareFunc) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
+func (f MiddlewareFunc) Wrap(next Caller) Caller {
 	return f(next)
 }
 
 // Chain applies middlewares around base so that middlewares[0] is outermost
 // and middlewares[len-1] is innermost (closest to base).
-func Chain(base aimodel.ChatCompleter, middlewares ...Middleware) aimodel.ChatCompleter {
+func Chain(base Caller, middlewares ...Middleware) Caller {
 	wrapped := base
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		wrapped = middlewares[i].Wrap(wrapped)
@@ -51,8 +53,9 @@ func Chain(base aimodel.ChatCompleter, middlewares ...Middleware) aimodel.ChatCo
 
 // DefaultChain is like Chain but skips nil entries in the middleware slice.
 // Recommended ordering: Log → CircuitBreaker → RateLimit → Retry → Timeout → Cache → base.
-func DefaultChain(base aimodel.ChatCompleter, middlewares ...Middleware) aimodel.ChatCompleter {
+func DefaultChain(base Caller, middlewares ...Middleware) Caller {
 	var mws []Middleware
+
 	for _, mw := range middlewares {
 		if mw != nil {
 			mws = append(mws, mw)
@@ -60,18 +63,4 @@ func DefaultChain(base aimodel.ChatCompleter, middlewares ...Middleware) aimodel
 	}
 
 	return Chain(base, mws...)
-}
-
-// completerFunc is a ChatCompleter implemented by two functions.
-type completerFunc struct {
-	chat   func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error)
-	stream func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error)
-}
-
-func (c *completerFunc) ChatCompletion(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	return c.chat(ctx, req)
-}
-
-func (c *completerFunc) ChatCompletionStream(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return c.stream(ctx, req)
 }

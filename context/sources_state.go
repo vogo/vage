@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/session"
 )
@@ -103,15 +102,12 @@ func (s *SessionStateSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 		return FetchResult{Report: rep}, nil
 	}
 
-	msg := aimodel.Message{
-		Role:    aimodel.RoleSystem,
-		Content: aimodel.NewTextContent(text),
-	}
+	msg := schema.NewSystemMessage(in.Protocol, text)
 
 	rep.Status = StatusOK
 	rep.OutputN = 1
 
-	return FetchResult{Messages: []aimodel.Message{msg}, Report: rep}, nil
+	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
 }
 
 // defaultStateRender returns a StateRenderer that prints "<key>: <value>"

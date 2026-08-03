@@ -22,20 +22,20 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 	sentinel := errors.New("budget exceeded: session tokens 100/100")
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "should-not-reach"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "should-not-reach"}}
 
 	mw := NewBudgetMiddleware(
 		func(_ context.Context) error { return sentinel },
-		func(_ context.Context, _ aimodel.Usage) { t.Fatal("postRecord must not run when preCheck fails") },
+		func(_ context.Context, _ schema.Usage) { t.Fatal("postRecord must not run when preCheck fails") },
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("preCheck error should propagate, got %v", err)
 	}
@@ -45,19 +45,19 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 }
 
 func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{
+	mock := &mockCompleter{chatResp: &Response{
 		ID:    "ok",
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
 
-	var recorded aimodel.Usage
+	var recorded schema.Usage
 	mw := NewBudgetMiddleware(
 		nil,
-		func(_ context.Context, u aimodel.Usage) { recorded = u },
+		func(_ context.Context, u schema.Usage) { recorded = u },
 	)
 	wrapped := mw.Wrap(mock)
 
-	if _, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{}); err != nil {
+	if _, err := wrapped.Call(context.Background(), &Request{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if recorded.PromptTokens != 10 || recorded.CompletionTokens != 5 {
@@ -66,12 +66,12 @@ func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
 }
 
 func TestBudgetMiddlewareTransparentWhenNilClosures(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 
 	mw := NewBudgetMiddleware(nil, nil)
 	wrapped := mw.Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,11 +90,11 @@ func TestBudgetMiddlewareStreamPreCheckBlocks(t *testing.T) {
 	var postRecordHit bool
 	mw := NewBudgetMiddleware(
 		func(_ context.Context) error { return sentinel },
-		func(_ context.Context, _ aimodel.Usage) { postRecordHit = true },
+		func(_ context.Context, _ schema.Usage) { postRecordHit = true },
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.CallStream(context.Background(), &Request{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("stream preCheck error should propagate, got %v", err)
 	}
@@ -115,11 +115,11 @@ func TestBudgetMiddlewareStreamPassesThroughWhenUpstreamNil(t *testing.T) {
 	var hits int
 	mw := NewBudgetMiddleware(
 		nil,
-		func(_ context.Context, _ aimodel.Usage) { hits++ },
+		func(_ context.Context, _ schema.Usage) { hits++ },
 	)
 	wrapped := mw.Wrap(mock)
 
-	s, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	s, err := wrapped.CallStream(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected stream err: %v", err)
 	}

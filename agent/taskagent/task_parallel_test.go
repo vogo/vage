@@ -25,35 +25,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
 // batchToolCallResponse returns a single-assistant-message response whose
 // ToolCalls slice contains one entry per (id, name, args) triple.
-func batchToolCallResponse(calls ...[3]string) *aimodel.ChatResponse {
-	tcs := make([]aimodel.ToolCall, 0, len(calls))
+func batchToolCallResponse(calls ...[3]string) *largemodel.Response {
+	tcs := make([]schema.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		tcs = append(tcs, aimodel.ToolCall{
-			ID:       c[0],
-			Type:     "function",
-			Function: aimodel.FunctionCall{Name: c[1], Arguments: c[2]},
-		})
+		tcs = append(tcs, schema.ToolCall{ID: c[0], Name: c[1], Arguments: c[2]})
 	}
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{{
-			Message: aimodel.Message{
-				Role:      aimodel.RoleAssistant,
-				Content:   aimodel.NewTextContent(""),
-				ToolCalls: tcs,
-			},
-			FinishReason: aimodel.FinishReasonToolCalls,
-		}},
-		Usage: aimodel.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-	}
+
+	return largemodel.FakeToolCallResponse(testProtocol, tcs,
+		schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
 }
 
 // captureHook collects every event dispatched through hook.Manager in the
@@ -78,15 +66,11 @@ func (c *captureHook) Filter() []string { return nil }
 // TestParallelToolCalls_WallClockIsMax verifies AC-1.1: two concurrent 200ms
 // tool calls complete in ~200ms (max), not ~400ms (sum).
 func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "slow", `{"delay_ms":200}`},
-				[3]string{"tc-2", "slow", `{"delay_ms":200}`},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "slow", `{"delay_ms":200}`},
+		[3]string{"tc-2", "slow", `{"delay_ms":200}`},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -97,11 +81,11 @@ func TestParallelToolCalls_WallClockIsMax(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("run two slow tools")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "run two slow tools")},
 	})
 	elapsed := time.Since(start)
 
@@ -121,21 +105,17 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
 
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "sleep100", "{}"},
-				[3]string{"tc-2", "sleep100", "{}"},
-				[3]string{"tc-3", "sleep100", "{}"},
-				[3]string{"tc-4", "sleep100", "{}"},
-				[3]string{"tc-5", "sleep100", "{}"},
-				[3]string{"tc-6", "sleep100", "{}"},
-				[3]string{"tc-7", "sleep100", "{}"},
-				[3]string{"tc-8", "sleep100", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "sleep100", "{}"},
+		[3]string{"tc-2", "sleep100", "{}"},
+		[3]string{"tc-3", "sleep100", "{}"},
+		[3]string{"tc-4", "sleep100", "{}"},
+		[3]string{"tc-5", "sleep100", "{}"},
+		[3]string{"tc-6", "sleep100", "{}"},
+		[3]string{"tc-7", "sleep100", "{}"},
+		[3]string{"tc-8", "sleep100", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -156,14 +136,14 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 	)
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("8 calls, cap 4")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "8 calls, cap 4")},
 	})
 	elapsed := time.Since(start)
 
@@ -185,17 +165,13 @@ func TestParallelToolCalls_RespectsConcurrencyCap(t *testing.T) {
 // Start events precede all End events, and both sequences follow ToolCalls
 // slice order even when tools finish out-of-order.
 func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "wait", `{"ms":120}`}, // slowest
-				[3]string{"tc-2", "wait", `{"ms":40}`},
-				[3]string{"tc-3", "wait", `{"ms":80}`},
-				[3]string{"tc-4", "wait", `{"ms":20}`}, // fastest
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "wait", `{"ms":120}`}, // slowest
+		[3]string{"tc-2", "wait", `{"ms":40}`},
+		[3]string{"tc-3", "wait", `{"ms":80}`},
+		[3]string{"tc-4", "wait", `{"ms":20}`}, // fastest
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -217,14 +193,14 @@ func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(4),
 		WithHookManager(mgr),
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("four waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "four waits")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -282,15 +258,11 @@ func TestParallelToolCalls_EventOrderingDeterministic(t *testing.T) {
 // TestParallelToolCalls_DurationIsPerCall verifies AC-2.3: the Duration field
 // on EventToolCallEnd reflects each tool's own wall-clock, not the batch total.
 func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "wait", `{"ms":50}`},
-				[3]string{"tc-2", "wait", `{"ms":150}`},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "wait", `{"ms":50}`},
+		[3]string{"tc-2", "wait", `{"ms":150}`},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -309,9 +281,9 @@ func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
 	_ = mgr.Start(context.Background())
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg), WithHookManager(mgr))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg), WithHookManager(mgr))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("two waits")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "two waits")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -345,16 +317,12 @@ func TestParallelToolCalls_DurationIsPerCall(t *testing.T) {
 // one failing tool does not abort the batch, and tool-result messages line
 // up 1:1 with the ToolCalls slice in original order.
 func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "ok", "{}"},
-				[3]string{"tc-2", "fail", "{}"},
-				[3]string{"tc-3", "ok", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "ok", "{}"},
+		[3]string{"tc-2", "fail", "{}"},
+		[3]string{"tc-3", "ok", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -370,9 +338,9 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 		},
 	)
 
-	a := New(agent.Config{}, WithChatCompleter(mock), WithToolRegistry(reg))
+	a := New(agent.Config{}, WithCaller(mock), WithToolRegistry(reg))
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("mixed")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "mixed")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v (tool errors should not abort the loop)", err)
@@ -380,10 +348,10 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 
 	// Inspect the second LLM request: the three tool-result messages must
 	// follow the assistant message in the same ToolCalls order.
-	secondReq := mock.requests[1]
-	var toolMsgs []aimodel.Message
+	secondReq := mock.Requests()[1]
+	var toolMsgs []schema.Message
 	for _, m := range secondReq.Messages {
-		if m.Role == aimodel.RoleTool {
+		if m.Role() == schema.RoleTool {
 			toolMsgs = append(toolMsgs, m)
 		}
 	}
@@ -392,12 +360,12 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 	}
 	wantIDs := []string{"tc-1", "tc-2", "tc-3"}
 	for i, m := range toolMsgs {
-		if m.ToolCallID != wantIDs[i] {
-			t.Errorf("tool msg %d: ToolCallID = %q, want %q", i, m.ToolCallID, wantIDs[i])
+		if m.ToolCallID() != wantIDs[i] {
+			t.Errorf("tool msg %d: ToolCallID = %q, want %q", i, m.ToolCallID(), wantIDs[i])
 		}
 	}
 	// Middle message carries the error text surfaced by executeToolCall.
-	if got := toolMsgs[1].Content.Text(); got != "boom" {
+	if got := toolMsgs[1].Text(); got != "boom" {
 		t.Errorf("error message body = %q, want %q", got, "boom")
 	}
 }
@@ -405,16 +373,12 @@ func TestParallelToolCalls_ErrorInOneDoesNotBlockSiblings(t *testing.T) {
 // TestSerialToolCalls_WhenCapIsOne verifies AC-4.1: cap=1 forces serial
 // execution, which is visible as summed rather than maxed latency.
 func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse(
-				[3]string{"tc-1", "sleep50", "{}"},
-				[3]string{"tc-2", "sleep50", "{}"},
-				[3]string{"tc-3", "sleep50", "{}"},
-			),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse(
+		[3]string{"tc-1", "sleep50", "{}"},
+		[3]string{"tc-2", "sleep50", "{}"},
+		[3]string{"tc-3", "sleep50", "{}"},
+	),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -427,14 +391,14 @@ func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(1),
 	)
 
 	start := time.Now()
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("serial")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "serial")},
 	})
 	elapsed := time.Since(start)
 
@@ -452,12 +416,8 @@ func TestSerialToolCalls_WhenCapIsOne(t *testing.T) {
 // cap being irrelevant. Also smoke-tests that the behaviour is identical
 // to the pre-P1-7 single-call code.
 func TestSingleToolCall_UsesFastPath(t *testing.T) {
-	mock := &mockChatCompleter{
-		responses: []*aimodel.ChatResponse{
-			batchToolCallResponse([3]string{"tc-1", "echo", `{"v":"hi"}`}),
-			stopResponse("done"),
-		},
-	}
+	mock := newMock(batchToolCallResponse([3]string{"tc-1", "echo", `{"v":"hi"}`}),
+		stopResponse("done"))
 
 	reg := tool.NewRegistry()
 	_ = reg.Register(
@@ -469,22 +429,22 @@ func TestSingleToolCall_UsesFastPath(t *testing.T) {
 
 	a := New(
 		agent.Config{},
-		WithChatCompleter(mock),
+		WithCaller(mock),
 		WithToolRegistry(reg),
 		WithMaxParallelToolCalls(8), // high cap but only one call
 	)
 
 	_, err := a.Run(context.Background(), &schema.RunRequest{
-		Messages: []schema.Message{schema.NewUserMessage("one")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "one")},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	secondReq := mock.requests[1]
+	secondReq := mock.Requests()[1]
 	last := secondReq.Messages[len(secondReq.Messages)-1]
-	if last.Role != aimodel.RoleTool || last.ToolCallID != "tc-1" || last.Content.Text() != `{"v":"hi"}` {
+	if last.Role() != schema.RoleTool || last.ToolCallID() != "tc-1" || last.Text() != `{"v":"hi"}` {
 		t.Errorf("single-call transcript mismatch: role=%s id=%s body=%q",
-			last.Role, last.ToolCallID, last.Content.Text())
+			last.Role(), last.ToolCallID(), last.Text())
 	}
 }
 

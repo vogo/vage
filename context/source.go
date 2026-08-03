@@ -28,7 +28,6 @@ package vctx
 import (
 	"context"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -96,6 +95,11 @@ type FetchInput struct {
 	AgentID   string
 	Intent    string             // optional tag, e.g. "react-iter"
 	Request   *schema.RunRequest // current-turn request (may be nil)
+	// Protocol is the wire protocol the assembled messages are destined for.
+	// Sources that synthesize messages must build them in this protocol's
+	// wire form, since vage stores messages natively rather than converting
+	// between vendors.
+	Protocol schema.Protocol
 	// Budget is the token allowance for this source's output. 0 means
 	// unlimited; > 0 is a soft hint — the source may emit more, in which
 	// case the Builder applies its fallback trim.
@@ -105,7 +109,7 @@ type FetchInput struct {
 
 // FetchResult is the value Source.Fetch returns.
 type FetchResult struct {
-	Messages []aimodel.Message
+	Messages []schema.Message
 	Report   schema.ContextSourceReport
 }
 
@@ -128,13 +132,17 @@ type BuildInput struct {
 	AgentID   string
 	Intent    string
 	Request   *schema.RunRequest
-	Budget    int
-	Vars      map[string]any
+	// Protocol is the wire protocol the assembled prompt is destined for.
+	// It is forwarded to every Source so synthesized messages are built in
+	// the matching vendor wire form.
+	Protocol schema.Protocol
+	Budget   int
+	Vars     map[string]any
 }
 
 // BuildResult is the value Builder.Build returns.
 type BuildResult struct {
-	Messages []aimodel.Message
+	Messages []schema.Message
 	Report   BuildReport
 }
 
@@ -146,6 +154,7 @@ func fromBuildInput(in BuildInput) FetchInput {
 		AgentID:   in.AgentID,
 		Intent:    in.Intent,
 		Request:   in.Request,
+		Protocol:  in.Protocol,
 		Vars:      in.Vars,
 	}
 }

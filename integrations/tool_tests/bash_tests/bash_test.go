@@ -33,6 +33,7 @@ import (
 	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -548,14 +549,10 @@ func TestToolDefSchemaForLLMCompatibility(t *testing.T) {
 		t.Errorf("expected additionalProperties=false, got %v", params["additionalProperties"])
 	}
 
-	// Verify conversion to aimodel.Tool works.
-	aiTools := tool.ToAIModelTools([]schema.ToolDef{def})
-	if len(aiTools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(aiTools))
-	}
-
-	if aiTools[0].Function.Name != "bash" {
-		t.Errorf("expected function name 'bash', got %q", aiTools[0].Function.Name)
+	// The tool definition travels on the request as-is; the protocol caller
+	// renders it into the vendor's own tool shape.
+	if def.Name != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", def.Name)
 	}
 }
 
@@ -641,8 +638,9 @@ func TestExecuteErrorThenSuccess(t *testing.T) {
 // asking it to execute a bash command, and verifies the expected output
 // appears in the response. Skipped if no API key is available.
 func TestBashToolWithLLMAgent(t *testing.T) {
-	client, err := aimodel.NewClient(
-		aimodel.WithDefaultModel(aimodel.GetEnv("OPENAI_MODEL")),
+	client, err := largemodel.NewOpenAIChatCaller(
+		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
+		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Skipf("Skipping LLM integration test: failed to create aimodel client: %v", err)
@@ -653,11 +651,12 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 		t.Fatalf("failed to register bash tool: %v", err)
 	}
 
-	a := taskagent.New(agent.Config{
-		ID:   "bash-test-agent",
-		Name: "Bash Test Agent",
-	},
-		taskagent.WithChatCompleter(client),
+	a := taskagent.New(
+		agent.Config{
+			ID:   "bash-test-agent",
+			Name: "Bash Test Agent",
+		},
+		taskagent.WithCaller(client),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant with access to a bash tool. Use it to execute shell commands when asked.",
@@ -670,7 +669,7 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 
 	resp, err := a.Run(ctx, &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("Execute exactly this bash command and report the output verbatim: `echo vage-test-ok`"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Execute exactly this bash command and report the output verbatim: `echo vage-test-ok`"),
 		},
 	})
 	if err != nil {
@@ -679,8 +678,8 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 
 	var responseText strings.Builder
 	for _, msg := range resp.Messages {
-		if msg.Role == aimodel.RoleAssistant {
-			text := msg.Content.Text()
+		if msg.Role() == schema.RoleAssistant {
+			text := msg.Text()
 			if text != "" {
 				responseText.WriteString(text)
 			}

@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 // noSleep is a test sleep function that returns immediately.
@@ -36,10 +36,12 @@ type failingCompleter struct {
 	failCount int
 	calls     int
 	failErr   error
-	resp      *aimodel.ChatResponse
+	resp      *Response
 }
 
-func (f *failingCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (f *failingCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (f *failingCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
 	f.calls++
 	if f.calls <= f.failCount {
 		return nil, f.failErr
@@ -48,15 +50,15 @@ func (f *failingCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequ
 	return f.resp, nil
 }
 
-func (f *failingCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (f *failingCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
 	return nil, nil
 }
 
 func TestRetryMiddleware_SuccessNoRetry(t *testing.T) {
-	mock := &mockCompleter{chatResp: &aimodel.ChatResponse{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
 	wrapped := NewRetryMiddleware(withSleepFn(noSleep)).Wrap(mock)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,16 +73,16 @@ func TestRetryMiddleware_SuccessNoRetry(t *testing.T) {
 }
 
 func TestRetryMiddleware_RetryOnRetryableError(t *testing.T) {
-	retryableErr := &aimodel.APIError{StatusCode: 429, Message: "rate limited"}
+	retryableErr := &APIError{StatusCode: 429, Message: "rate limited"}
 	fc := &failingCompleter{
 		failCount: 2,
 		failErr:   retryableErr,
-		resp:      &aimodel.ChatResponse{ID: "recovered"},
+		resp:      &Response{ID: "recovered"},
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,16 +97,16 @@ func TestRetryMiddleware_RetryOnRetryableError(t *testing.T) {
 }
 
 func TestRetryMiddleware_NoRetryOnNonRetryableError(t *testing.T) {
-	nonRetryableErr := &aimodel.APIError{StatusCode: 400, Message: "bad request"}
+	nonRetryableErr := &APIError{StatusCode: 400, Message: "bad request"}
 	fc := &failingCompleter{
 		failCount: 5,
 		failErr:   nonRetryableErr,
-		resp:      &aimodel.ChatResponse{ID: "never"},
+		resp:      &Response{ID: "never"},
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -115,16 +117,16 @@ func TestRetryMiddleware_NoRetryOnNonRetryableError(t *testing.T) {
 }
 
 func TestRetryMiddleware_ExhaustedRetries(t *testing.T) {
-	retryableErr := &aimodel.APIError{StatusCode: 503, Message: "service unavailable"}
+	retryableErr := &APIError{StatusCode: 503, Message: "service unavailable"}
 	fc := &failingCompleter{
 		failCount: 10,
 		failErr:   retryableErr,
-		resp:      &aimodel.ChatResponse{ID: "never"},
+		resp:      &Response{ID: "never"},
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(2), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
@@ -142,11 +144,13 @@ type failingStreamCompleter struct {
 	failErr   error
 }
 
-func (f *failingStreamCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (f *failingStreamCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (f *failingStreamCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
 	return nil, nil
 }
 
-func (f *failingStreamCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (f *failingStreamCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
 	f.calls++
 	if f.calls <= f.failCount {
 		return nil, f.failErr
@@ -156,7 +160,7 @@ func (f *failingStreamCompleter) ChatCompletionStream(_ context.Context, _ *aimo
 }
 
 func TestRetryMiddleware_StreamRetry(t *testing.T) {
-	retryableErr := &aimodel.APIError{StatusCode: 429, Message: "rate limited"}
+	retryableErr := &APIError{StatusCode: 429, Message: "rate limited"}
 	fc := &failingStreamCompleter{
 		failCount: 2,
 		failErr:   retryableErr,
@@ -164,7 +168,7 @@ func TestRetryMiddleware_StreamRetry(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.CallStream(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +180,7 @@ func TestRetryMiddleware_StreamRetry(t *testing.T) {
 }
 
 func TestRetryMiddleware_StreamNoRetryOnNonRetryable(t *testing.T) {
-	nonRetryableErr := &aimodel.APIError{StatusCode: 400, Message: "bad request"}
+	nonRetryableErr := &APIError{StatusCode: 400, Message: "bad request"}
 	fc := &failingStreamCompleter{
 		failCount: 5,
 		failErr:   nonRetryableErr,
@@ -184,7 +188,7 @@ func TestRetryMiddleware_StreamNoRetryOnNonRetryable(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.CallStream(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -195,7 +199,7 @@ func TestRetryMiddleware_StreamNoRetryOnNonRetryable(t *testing.T) {
 }
 
 func TestRetryMiddleware_StreamExhaustedRetries(t *testing.T) {
-	retryableErr := &aimodel.APIError{StatusCode: 503, Message: "service unavailable"}
+	retryableErr := &APIError{StatusCode: 503, Message: "service unavailable"}
 	fc := &failingStreamCompleter{
 		failCount: 10,
 		failErr:   retryableErr,
@@ -203,7 +207,7 @@ func TestRetryMiddleware_StreamExhaustedRetries(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(2), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletionStream(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.CallStream(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
@@ -215,17 +219,17 @@ func TestRetryMiddleware_StreamExhaustedRetries(t *testing.T) {
 }
 
 func TestRetryMiddleware_NonAPIError(t *testing.T) {
-	// A plain errors.New value is not a *aimodel.APIError, net.Error, or io.EOF,
+	// A plain errors.New value is not a *APIError, net.Error, or io.EOF,
 	// so it must not be retried.
 	fc := &failingCompleter{
 		failCount: 5,
 		failErr:   errors.New("permission denied"),
-		resp:      &aimodel.ChatResponse{},
+		resp:      &Response{},
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), withSleepFn(noSleep)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	_, err := wrapped.Call(context.Background(), &Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -283,11 +287,11 @@ func (e *timeoutError) Timeout() bool   { return true }
 func (e *timeoutError) Temporary() bool { return true }
 
 func TestRetryMiddleware_ContextCancelled(t *testing.T) {
-	retryableErr := &aimodel.APIError{StatusCode: 500, Message: "server error"}
+	retryableErr := &APIError{StatusCode: 500, Message: "server error"}
 	fc := &failingCompleter{
 		failCount: 10,
 		failErr:   retryableErr,
-		resp:      &aimodel.ChatResponse{},
+		resp:      &Response{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -298,7 +302,7 @@ func TestRetryMiddleware_ContextCancelled(t *testing.T) {
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(5), withSleepFn(sleepFn)).Wrap(fc)
 
-	_, err := wrapped.ChatCompletion(ctx, &aimodel.ChatRequest{})
+	_, err := wrapped.Call(ctx, &Request{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -351,15 +355,15 @@ func TestExponentialBackoff_Delay(t *testing.T) {
 func TestRetryMiddleware_WithCustomBackoff(t *testing.T) {
 	// Fixed backoff that always returns 0 (no delay).
 	fixed := &fixedBackoff{}
-	retryableErr := &aimodel.APIError{StatusCode: 429, Message: "rate limited"}
+	retryableErr := &APIError{StatusCode: 429, Message: "rate limited"}
 	fc := &failingCompleter{
 		failCount: 2,
 		failErr:   retryableErr,
-		resp:      &aimodel.ChatResponse{ID: "recovered"},
+		resp:      &Response{ID: "recovered"},
 	}
 
 	wrapped := NewRetryMiddleware(WithMaxRetries(3), WithBackoff(fixed)).Wrap(fc)
-	resp, err := wrapped.ChatCompletion(context.Background(), &aimodel.ChatRequest{})
+	resp, err := wrapped.Call(context.Background(), &Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -393,7 +397,7 @@ func TestRetryMiddleware_RetryableStatusCodes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := &aimodel.APIError{StatusCode: tt.code}
+		err := &APIError{StatusCode: tt.code}
 		if got := isRetryable(err); got != tt.retryable {
 			t.Errorf("isRetryable(status %d) = %v, want %v", tt.code, got, tt.retryable)
 		}

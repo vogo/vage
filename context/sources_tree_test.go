@@ -160,7 +160,7 @@ func TestTreeSource_OK_Render(t *testing.T) {
 	if len(res.Messages) != 1 {
 		t.Fatalf("messages=%d want 1", len(res.Messages))
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 
 	// Spot-check landmarks. The exact layout is a documented format and the
 	// test pins enough markers to fail loudly on accidental reflows.
@@ -189,7 +189,7 @@ func TestTreeSource_NoCursor_RendersRootOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	// When cursor falls back to root, no separate Path section needs printing.
 	if strings.Contains(body, "### Path") {
 		t.Errorf("did not expect Path block when cursor==root\n%s", body)
@@ -213,7 +213,7 @@ func TestTreeSource_SiblingsTruncation(t *testing.T) {
 	}
 	src := &SessionTreeSource{Store: &stubTreeStore{tr: tr}}
 	res, _ := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "(... and ") {
 		t.Errorf("expected truncation marker; body:\n%s", body)
 	}
@@ -228,7 +228,7 @@ func TestTreeSource_ByteCap(t *testing.T) {
 	if res.Report.Status != StatusTruncated {
 		t.Errorf("Status=%s want truncated", res.Report.Status)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if len(body) > 200 {
 		t.Errorf("body bytes=%d > MaxBytes=200", len(body))
 	}
@@ -358,7 +358,7 @@ func TestTreeSource_MaxPathDepth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 
 	// Cursor's summary should remain in the Path block.
 	if !strings.Contains(body, "extra detail B") {
@@ -387,7 +387,7 @@ func TestTreeSource_FoldsPromotedChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if strings.Contains(body, "schema confirmed") {
 		t.Errorf("promoted child rendered; want hidden\n%s", body)
 	}
@@ -413,7 +413,7 @@ func TestTreeSource_IncludePromotedDisablesFolding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "schema confirmed") {
 		t.Errorf("IncludePromoted=true should render promoted child\n%s", body)
 	}
@@ -435,7 +435,7 @@ func TestTreeSource_PathPromotedStillRendered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	if !strings.Contains(body, "wire dispatcher") {
 		t.Errorf("path node (cursor) was hidden despite being on path\n%s", body)
 	}
@@ -467,7 +467,7 @@ func TestTreeSource_RecentDoneSiblingSkipsPromoted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := res.Messages[0].Content.Text()
+	body := res.Messages[0].Text()
 	// We're at root, which has no parent — so the renderer's recent-sibling
 	// section should not appear at all. Check by absence: a node titled
 	// "older done sibling" shouldn't show under "Recently completed".

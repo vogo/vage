@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/schema"
 )
@@ -38,7 +37,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 	// Find the last user message.
 	idx := -1
 	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == aimodel.RoleUser {
+		if req.Messages[i].Role() == schema.RoleUser {
 			idx = i
 			break
 		}
@@ -50,7 +49,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 
 	msg := &guard.Message{
 		Direction: guard.DirectionInput,
-		Content:   req.Messages[idx].Content.Text(),
+		Content:   req.Messages[idx].Text(),
 		AgentID:   a.ID(),
 		SessionID: req.SessionID,
 		Metadata:  req.Metadata,
@@ -66,7 +65,7 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 	}
 
 	if result.Action == guard.ActionRewrite {
-		req.Messages[idx].Content = aimodel.NewTextContent(msg.Content)
+		req.Messages[idx].SetText(msg.Content)
 	}
 
 	return nil
@@ -79,7 +78,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 		return respMsgs, nil
 	}
 
-	text := respMsgs[0].Content.Text()
+	text := respMsgs[0].Text()
 
 	msg := &guard.Message{
 		Direction: guard.DirectionOutput,
@@ -99,7 +98,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 	}
 
 	if result.Action == guard.ActionRewrite {
-		respMsgs[0].Content = aimodel.NewTextContent(msg.Content)
+		respMsgs[0].SetText(msg.Content)
 	}
 
 	return respMsgs, nil
@@ -112,7 +111,7 @@ func (a *Agent) runOutputGuards(ctx context.Context, sessionID string, respMsgs 
 // guard produced no material outcome.
 // When no guards are configured, IsError results, or non-text content, the
 // input is returned unchanged and evt is nil.
-func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc aimodel.ToolCall, result schema.ToolResult) (schema.ToolResult, *schema.Event) {
+func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc schema.ToolCall, result schema.ToolResult) (schema.ToolResult, *schema.Event) {
 	if len(a.toolResultGuards) == 0 {
 		return result, nil
 	}
@@ -145,7 +144,7 @@ func (a *Agent) runToolResultGuards(ctx context.Context, rc *runContext, tc aimo
 		SessionID: rc.sessionID,
 		Metadata: map[string]any{
 			guard.MetaToolCallID: tc.ID,
-			guard.MetaToolName:   tc.Function.Name,
+			guard.MetaToolName:   tc.Name,
 		},
 	}
 
@@ -216,14 +215,14 @@ func (a *Agent) maxToolResultSeverity(hits []string) string {
 // structured warning log as a side effect. The returned event must be
 // dispatched by the caller via the channel appropriate for the execution
 // mode (a.dispatch for non-streaming, send for streaming).
-func (a *Agent) buildGuardCheckEvent(rc *runContext, tc aimodel.ToolCall, text, guardName, action string, hits []string, severity, reason string) schema.Event {
+func (a *Agent) buildGuardCheckEvent(rc *runContext, tc schema.ToolCall, text, guardName, action string, hits []string, severity, reason string) schema.Event {
 	const snippetMax = 200
 
 	snippet := safeSnippet(text, snippetMax)
 
 	attrs := []any{
 		"guard", guardName,
-		"tool", tc.Function.Name,
+		"tool", tc.Name,
 		"tool_call_id", tc.ID,
 		"action", action,
 		"rules", hits,
@@ -242,7 +241,7 @@ func (a *Agent) buildGuardCheckEvent(rc *runContext, tc aimodel.ToolCall, text, 
 	return schema.NewEvent(schema.EventGuardCheck, a.ID(), rc.sessionID, schema.GuardCheckData{
 		GuardName:  guardName,
 		ToolCallID: tc.ID,
-		ToolName:   tc.Function.Name,
+		ToolName:   tc.Name,
 		Action:     action,
 		RuleHits:   hits,
 		Severity:   severity,

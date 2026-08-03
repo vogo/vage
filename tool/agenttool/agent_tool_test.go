@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -49,15 +48,10 @@ func newMockAgent(id, name, desc string, runFunc func(ctx context.Context, req *
 func TestRegister(t *testing.T) {
 	t.Run("DefaultExecution", func(t *testing.T) {
 		ag := newMockAgent("agent-1", "test-agent", "A test agent", func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-			input := req.Messages[0].Content.Text()
+			input := req.Messages[0].Text()
 			return &schema.RunResponse{
 				Messages: []schema.Message{
-					{
-						Message: aimodel.Message{
-							Role:    aimodel.RoleAssistant,
-							Content: aimodel.NewTextContent("Echo: " + input),
-						},
-					},
+					schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input),
 				},
 			}, nil
 		})
@@ -87,7 +81,8 @@ func TestRegister(t *testing.T) {
 		})
 
 		r := tool.NewRegistry()
-		regErr := Register(r, ag,
+		regErr := Register(
+			r, ag,
 			WithName("custom-name"),
 			WithDescription("custom description"),
 		)
@@ -282,15 +277,10 @@ func TestRegister(t *testing.T) {
 
 	t.Run("CustomArgExtractor", func(t *testing.T) {
 		ag := newMockAgent("agent-extractor", "extractor-agent", "test extractor", func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-			input := req.Messages[0].Content.Text()
+			input := req.Messages[0].Text()
 			return &schema.RunResponse{
 				Messages: []schema.Message{
-					{
-						Message: aimodel.Message{
-							Role:    aimodel.RoleAssistant,
-							Content: aimodel.NewTextContent("Got: " + input),
-						},
-					},
+					schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Got: "+input),
 				},
 			}, nil
 		})
@@ -302,7 +292,8 @@ func TestRegister(t *testing.T) {
 		}
 
 		r := tool.NewRegistry()
-		regErr := Register(r, ag,
+		regErr := Register(
+			r, ag,
 			WithArgExtractor(extractor),
 		)
 		if regErr != nil {

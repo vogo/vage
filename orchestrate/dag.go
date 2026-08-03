@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -70,7 +69,7 @@ type dagExecutor struct {
 	inDegree      map[string]int
 	terminalNodes map[string]bool
 
-	totalUsage aimodel.Usage
+	totalUsage schema.Usage
 	hasUsage   bool
 }
 

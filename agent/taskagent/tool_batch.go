@@ -23,17 +23,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
 // executeToolCall runs a single tool call and returns the result.
-func (a *Agent) executeToolCall(ctx context.Context, tc aimodel.ToolCall) schema.ToolResult {
+func (a *Agent) executeToolCall(ctx context.Context, tc schema.ToolCall) schema.ToolResult {
 	if a.toolRegistry == nil {
-		return schema.ErrorResult(tc.ID, fmt.Sprintf("tool %q: no registry configured", tc.Function.Name))
+		return schema.ErrorResult(tc.ID, fmt.Sprintf("tool %q: no registry configured", tc.Name))
 	}
 
-	tr, err := a.toolRegistry.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+	tr, err := a.toolRegistry.Execute(ctx, tc.Name, tc.Arguments)
 	if err != nil {
 		return schema.ErrorResult(tc.ID, err.Error())
 	}
@@ -61,10 +60,10 @@ func (a *Agent) executeToolBatch(
 	ctx context.Context,
 	rc *runContext,
 	agentID string,
-	toolCalls []aimodel.ToolCall,
+	toolCalls []schema.ToolCall,
 	emitResultEvent bool,
 	eventSink func(schema.Event) error,
-) ([]aimodel.Message, error) {
+) ([]schema.Message, error) {
 	n := len(toolCalls)
 	if n == 0 {
 		return nil, nil
@@ -85,8 +84,8 @@ func (a *Agent) executeToolBatch(
 	for i, tc := range toolCalls {
 		if err := eventSink(schema.NewEvent(schema.EventToolCallStart, agentID, rc.sessionID, schema.ToolCallStartData{
 			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
-			Arguments:  tc.Function.Arguments,
+			ToolName:   tc.Name,
+			Arguments:  tc.Arguments,
 		})); err != nil {
 			return nil, err
 		}
@@ -115,7 +114,7 @@ func (a *Agent) executeToolBatch(
 		for i, tc := range toolCalls {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(i int, tc aimodel.ToolCall) {
+			go func(i int, tc schema.ToolCall) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				results[i] = a.executeToolCall(ctx, tc)
@@ -127,11 +126,11 @@ func (a *Agent) executeToolBatch(
 
 	// Dispatch End / Guard / (optional) Result events + build tool messages
 	// in ToolCalls order — matches pre-P1-7 observable sequence.
-	toolMsgs := make([]aimodel.Message, 0, n)
+	toolMsgs := make([]schema.Message, 0, n)
 	for i, tc := range toolCalls {
 		if err := eventSink(schema.NewEvent(schema.EventToolCallEnd, agentID, rc.sessionID, schema.ToolCallEndData{
 			ToolCallID: tc.ID,
-			ToolName:   tc.Function.Name,
+			ToolName:   tc.Name,
 			Duration:   durations[i].Milliseconds(),
 		})); err != nil {
 			return nil, err
@@ -147,18 +146,16 @@ func (a *Agent) executeToolBatch(
 		if emitResultEvent {
 			if err := eventSink(schema.NewEvent(schema.EventToolResult, agentID, rc.sessionID, schema.ToolResultData{
 				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
+				ToolName:   tc.Name,
 				Result:     res,
 			})); err != nil {
 				return nil, err
 			}
 		}
 
-		toolMsgs = append(toolMsgs, aimodel.Message{
-			Role:       aimodel.RoleTool,
-			ToolCallID: res.ToolCallID,
-			Content:    aimodel.NewTextContent(toolResultText(res)),
-		})
+		toolMsgs = append(toolMsgs, schema.NewToolResultMessage(
+			a.Protocol(), res.ToolCallID, toolResultText(res), res.IsError,
+		))
 	}
 
 	return toolMsgs, nil

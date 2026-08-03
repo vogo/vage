@@ -52,7 +52,8 @@ func buildGitCommand(ctx context.Context, dir, pattern string) *exec.Cmd {
 
 	// git ls-files with --cached (tracked) and --others --exclude-standard (untracked but not ignored).
 	// The pattern is passed directly — git ls-files supports glob patterns.
-	cmd := exec.CommandContext(ctx, gitPath, "-C", dir,
+	cmd := exec.CommandContext(
+		ctx, gitPath, "-C", dir,
 		"ls-files",
 		"--cached",
 		"--others",

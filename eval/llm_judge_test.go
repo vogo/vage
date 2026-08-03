@@ -33,14 +33,14 @@ func TestLLMJudgeEval_NilCompleter(t *testing.T) {
 }
 
 func TestLLMJudgeEval_EmptyModel(t *testing.T) {
-	_, err := NewLLMJudgeEval(&mockCompleter{}, "")
+	_, err := NewLLMJudgeEval(newMockCompleter("", nil), "")
 	if err == nil {
 		t.Error("expected error for empty model")
 	}
 }
 
 func TestLLMJudgeEval_NilActual(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{}, "model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("", nil), "model")
 
 	_, err := e.Evaluate(context.Background(), &EvalCase{ID: "nil"})
 	if err == nil {
@@ -49,13 +49,11 @@ func TestLLMJudgeEval_NilActual(t *testing.T) {
 }
 
 func TestLLMJudgeEval_StandardFormat(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		response: "SCORE: 0.8\nPASSED: true\nREASONING: good output",
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("SCORE: 0.8\nPASSED: true\nREASONING: good output", nil), "test-model")
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "standard",
-		Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+		Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 		Actual: makeResponse("output"),
 	})
 	if err != nil {
@@ -72,9 +70,7 @@ func TestLLMJudgeEval_StandardFormat(t *testing.T) {
 }
 
 func TestLLMJudgeEval_MarkdownFormat(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		response: "**SCORE:** 0.9\n**PASSED:** true\n**REASONING:** great work",
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("**SCORE:** 0.9\n**PASSED:** true\n**REASONING:** great work", nil), "test-model")
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "markdown",
@@ -90,9 +86,7 @@ func TestLLMJudgeEval_MarkdownFormat(t *testing.T) {
 }
 
 func TestLLMJudgeEval_MissingScore(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		response: "PASSED: true\nREASONING: no score",
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("PASSED: true\nREASONING: no score", nil), "test-model")
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "missing-score",
@@ -112,9 +106,7 @@ func TestLLMJudgeEval_MissingScore(t *testing.T) {
 }
 
 func TestLLMJudgeEval_CompleterError(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		err: errors.New("api error"),
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("", errors.New("api error")), "test-model")
 
 	_, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "api-error",
@@ -126,13 +118,11 @@ func TestLLMJudgeEval_CompleterError(t *testing.T) {
 }
 
 func TestLLMJudgeEval_WithExpectedAndCriteria(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		response: "SCORE: 0.7\nPASSED: false\nREASONING: partial match",
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("SCORE: 0.7\nPASSED: false\nREASONING: partial match", nil), "test-model")
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:       "with-expected",
-		Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("question")}},
+		Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "question")}},
 		Expected: makeResponse("expected answer"),
 		Actual:   makeResponse("actual answer"),
 		Criteria: []string{"accuracy", "completeness"},
@@ -147,9 +137,7 @@ func TestLLMJudgeEval_WithExpectedAndCriteria(t *testing.T) {
 }
 
 func TestLLMJudgeEval_MultiLineReasoning(t *testing.T) {
-	e, _ := NewLLMJudgeEval(&mockCompleter{
-		response: "SCORE: 0.6\nPASSED: true\nREASONING: first line\nsecond line\nthird line",
-	}, "test-model")
+	e, _ := NewLLMJudgeEval(newMockCompleter("SCORE: 0.6\nPASSED: true\nREASONING: first line\nsecond line\nthird line", nil), "test-model")
 
 	result, err := e.Evaluate(context.Background(), &EvalCase{
 		ID:     "multiline",

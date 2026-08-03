@@ -20,12 +20,14 @@ package largemodel
 import (
 	"context"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
-// Model wraps a ChatCompleter with a middleware chain.
+// Model is a configured model endpoint: one protocol Caller with vage's
+// governance middlewares wrapped around it. It is itself a Caller, so a Model
+// can be nested or passed anywhere a plain Caller is accepted.
 type Model struct {
-	completer aimodel.ChatCompleter
+	caller Caller
 }
 
 // ModelOption configures a Model.
@@ -43,23 +45,28 @@ func WithMiddleware(mws ...Middleware) ModelOption {
 }
 
 // New creates a Model by chaining middlewares around base.
-func New(base aimodel.ChatCompleter, opts ...ModelOption) *Model {
+func New(base Caller, opts ...ModelOption) *Model {
 	cfg := &modelConfig{}
 	for _, o := range opts {
 		o(cfg)
 	}
 
-	completer := Chain(base, cfg.middlewares...)
-
-	return &Model{completer: completer}
+	return &Model{caller: Chain(base, cfg.middlewares...)}
 }
 
-// ChatCompletion delegates to the wrapped completer.
-func (m *Model) ChatCompletion(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	return m.completer.ChatCompletion(ctx, req)
+// Protocol reports the wire protocol of the underlying caller.
+func (m *Model) Protocol() schema.Protocol {
+	return m.caller.Protocol()
 }
 
-// ChatCompletionStream delegates to the wrapped completer.
-func (m *Model) ChatCompletionStream(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return m.completer.ChatCompletionStream(ctx, req)
+// Call performs one non-streaming model call through the middleware chain.
+func (m *Model) Call(ctx context.Context, req *Request) (*Response, error) {
+	return m.caller.Call(ctx, req)
 }
+
+// CallStream performs one streaming model call through the middleware chain.
+func (m *Model) CallStream(ctx context.Context, req *Request) (*Stream, error) {
+	return m.caller.CallStream(ctx, req)
+}
+
+var _ Caller = (*Model)(nil)

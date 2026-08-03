@@ -23,7 +23,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 type captureSink struct {
@@ -52,16 +52,18 @@ func (s *captureSink) NewCorrelationID() string {
 }
 
 type stubCompleter struct {
-	resp   *aimodel.ChatResponse
+	resp   *Response
 	err    error
-	stream *aimodel.Stream
+	stream *Stream
 }
 
-func (s *stubCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (s *stubCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (s *stubCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
 	return s.resp, s.err
 }
 
-func (s *stubCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (s *stubCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
 	return s.stream, s.err
 }
 
@@ -69,15 +71,16 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	sink := &captureSink{}
 	mw := NewDebugMiddleware(sink)
 	stub := &stubCompleter{
-		resp: &aimodel.ChatResponse{
-			Model:   "m",
-			Choices: []aimodel.Choice{{Message: aimodel.Message{Content: aimodel.NewTextContent("hi")}, FinishReason: "stop"}},
-			Usage:   aimodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
+		resp: &Response{
+			Model:        "m",
+			Message:      schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "hi", "", nil),
+			FinishReason: "stop",
+			Usage:        schema.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7},
 		},
 	}
 	c := mw.Wrap(stub)
 
-	_, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "m"})
+	_, err := c.Call(context.Background(), &Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +105,7 @@ func TestDebugMiddleware_Error(t *testing.T) {
 	stub := &stubCompleter{err: errors.New("bad")}
 	c := mw.Wrap(stub)
 
-	_, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{Model: "m"})
+	_, err := c.Call(context.Background(), &Request{Model: "m"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -116,9 +119,9 @@ func TestDebugMiddleware_Error(t *testing.T) {
 
 func TestDebugMiddleware_NoopSink(t *testing.T) {
 	mw := NewDebugMiddleware(nil)
-	stub := &stubCompleter{resp: &aimodel.ChatResponse{}}
+	stub := &stubCompleter{resp: &Response{}}
 	c := mw.Wrap(stub)
-	if _, err := c.ChatCompletion(context.Background(), &aimodel.ChatRequest{}); err != nil {
+	if _, err := c.Call(context.Background(), &Request{}); err != nil {
 		t.Fatal(err)
 	}
 }

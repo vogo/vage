@@ -25,18 +25,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 const defaultCacheTTL = 5 * time.Minute
 
 // Cache stores and retrieves chat completion responses.
 type Cache interface {
-	Get(ctx context.Context, key string) (*aimodel.ChatResponse, bool)
-	Set(ctx context.Context, key string, resp *aimodel.ChatResponse, ttl time.Duration)
+	Get(ctx context.Context, key string) (*Response, bool)
+	Set(ctx context.Context, key string, resp *Response, ttl time.Duration)
 }
 
-// CacheMiddleware caches ChatCompletion responses.
+// CacheMiddleware caches Call responses.
 // Stream calls are passed through without caching.
 type CacheMiddleware struct {
 	cache Cache
@@ -62,20 +62,21 @@ func NewCacheMiddleware(c Cache, opts ...CacheOption) *CacheMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *CacheMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-			key, err := cacheKey(req)
+func (m *CacheMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+			key, err := cacheKey(next.Protocol(), req)
 			if err != nil {
 				// Skip cache on marshal failure; call downstream directly.
-				return next.ChatCompletion(ctx, req)
+				return next.Call(ctx, req)
 			}
 
 			if resp, ok := m.cache.Get(ctx, key); ok {
 				return resp, nil
 			}
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -84,46 +85,40 @@ func (m *CacheMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter
 
 			return resp, nil
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
-			return next.ChatCompletionStream(ctx, req)
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+			return next.CallStream(ctx, req)
 		},
 	}
 }
 
-// cacheKeyData is the deterministic subset of ChatRequest used for cache keys.
-// All fields that influence model output must be included here.
+// cacheKeyData is the deterministic subset of a Request used for cache keys.
+// Every field that influences model output must be included here.
+//
+// Protocol is part of the key because messages are stored in vendor-native
+// wire form: the same conversation addressed to two protocols is two distinct
+// calls with two distinct responses.
 type cacheKeyData struct {
-	Model               string            `json:"model"`
-	Messages            []aimodel.Message `json:"messages"`
-	Tools               []aimodel.Tool    `json:"tools,omitempty"`
-	Temperature         *float64          `json:"temperature,omitempty"`
-	MaxCompletionTokens *int              `json:"max_completion_tokens,omitempty"`
-	TopP                *float64          `json:"top_p,omitempty"`
-	N                   *int              `json:"n,omitempty"`
-	Stop                []string          `json:"stop,omitempty"`
-	FrequencyPenalty    *float64          `json:"frequency_penalty,omitempty"`
-	PresencePenalty     *float64          `json:"presence_penalty,omitempty"`
-	Seed                *int              `json:"seed,omitempty"`
-	ResponseFormat      any               `json:"response_format,omitempty"`
-	ToolChoice          any               `json:"tool_choice,omitempty"`
+	Protocol      schema.Protocol  `json:"protocol"`
+	Model         string           `json:"model"`
+	Messages      []schema.Message `json:"messages"`
+	Tools         []schema.ToolDef `json:"tools,omitempty"`
+	Temperature   *float64         `json:"temperature,omitempty"`
+	MaxTokens     *int             `json:"max_tokens,omitempty"`
+	Stop          []string         `json:"stop,omitempty"`
+	PromptCaching bool             `json:"prompt_caching,omitempty"`
 }
 
 // cacheKey produces a SHA-256 hex digest from the deterministic request fields.
-func cacheKey(req *aimodel.ChatRequest) (string, error) {
+func cacheKey(proto schema.Protocol, req *Request) (string, error) {
 	data := cacheKeyData{
-		Model:               req.Model,
-		Messages:            req.Messages,
-		Tools:               req.Tools,
-		Temperature:         req.Temperature,
-		MaxCompletionTokens: req.MaxCompletionTokens,
-		TopP:                req.TopP,
-		N:                   req.N,
-		Stop:                req.Stop,
-		FrequencyPenalty:    req.FrequencyPenalty,
-		PresencePenalty:     req.PresencePenalty,
-		Seed:                req.Seed,
-		ResponseFormat:      req.ResponseFormat,
-		ToolChoice:          req.ToolChoice,
+		Protocol:      proto,
+		Model:         req.Model,
+		Messages:      req.Messages,
+		Tools:         req.Tools,
+		Temperature:   req.Temperature,
+		MaxTokens:     req.MaxTokens,
+		Stop:          req.Stop,
+		PromptCaching: req.PromptCaching,
 	}
 
 	b, err := json.Marshal(data)
@@ -147,7 +142,7 @@ type MapCache struct {
 }
 
 type cacheEntry struct {
-	resp      *aimodel.ChatResponse
+	resp      *Response
 	expiresAt time.Time
 	createdAt time.Time
 }
@@ -175,7 +170,7 @@ func NewMapCache(opts ...MapCacheOption) *MapCache {
 }
 
 // Get returns a cached response if present and not expired.
-func (c *MapCache) Get(_ context.Context, key string) (*aimodel.ChatResponse, bool) {
+func (c *MapCache) Get(_ context.Context, key string) (*Response, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -194,7 +189,7 @@ func (c *MapCache) Get(_ context.Context, key string) (*aimodel.ChatResponse, bo
 // Set stores a response with the given TTL.
 // It lazily removes expired entries and evicts the oldest entry when the cache
 // is at capacity before inserting the new one.
-func (c *MapCache) Set(_ context.Context, key string, resp *aimodel.ChatResponse, ttl time.Duration) {
+func (c *MapCache) Set(_ context.Context, key string, resp *Response, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

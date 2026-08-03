@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/session"
 	"github.com/vogo/vage/sessionview"
@@ -38,14 +37,9 @@ func makeEchoAgent(t *testing.T, gotCtx *context.Context) *mockAgent {
 	return newMockAgent("sub-1", "subagent", "echoes input",
 		func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 			*gotCtx = ctx
-			input := req.Messages[0].Content.Text()
+			input := req.Messages[0].Text()
 			return &schema.RunResponse{
-				Messages: []schema.Message{{
-					Message: aimodel.Message{
-						Role:    aimodel.RoleAssistant,
-						Content: aimodel.NewTextContent("Echo: " + input),
-					},
-				}},
+				Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "Echo: "+input)},
 			}, nil
 		})
 }
@@ -103,7 +97,8 @@ func TestRegister_WithSessionContext_CreatesChild(t *testing.T) {
 
 	reg := tool.NewRegistry()
 	var minted atomic.Int32
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string {
 			minted.Add(1)
@@ -176,7 +171,8 @@ func TestRegister_WithSessionContext_ParentIDMissing(t *testing.T) {
 	store := session.NewMapSessionStore()
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "standalone-child" }),
 	); err != nil {
@@ -214,7 +210,8 @@ func TestRegister_WithViewBuilder(t *testing.T) {
 	}
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "c" }),
 		WithViewBuilder(func(parentSID, childSID, subgoal string) *sessionview.SessionView {
@@ -264,7 +261,8 @@ func TestRegister_WithSessionContext_DuplicateChildIDFails(t *testing.T) {
 	store := session.NewMapSessionStore()
 
 	reg := tool.NewRegistry()
-	if err := Register(reg, ag,
+	if err := Register(
+		reg, ag,
 		WithSessionContext(store),
 		WithChildIDFunc(func() string { return "stuck" }),
 	); err != nil {

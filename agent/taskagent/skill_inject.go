@@ -20,19 +20,17 @@ package taskagent
 import (
 	"strings"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
-// prepareAITools converts registry tools to aimodel.Tool slice, applying any filter.
-func (a *Agent) prepareAITools(filter []string) []aimodel.Tool {
+// prepareAITools returns the registry's tool definitions, applying any filter.
+func (a *Agent) prepareAITools(filter []string) []schema.ToolDef {
 	if a.toolRegistry == nil {
 		return nil
 	}
 
-	defs := a.toolRegistry.List()
-	defs = tool.FilterTools(defs, filter)
-	return tool.ToAIModelTools(defs)
+	return tool.FilterTools(a.toolRegistry.List(), filter)
 }
 
 // mergeSkillToolFilter merges skill AllowedTools with the request-level tool filter.
@@ -121,31 +119,10 @@ func (a *Agent) injectSkillInstructions(br *buildResult, sessionID string) {
 	skillText := sb.String()
 
 	// If there is a system message, append to it; otherwise prepend a new system message.
-	if len(br.messages) > 0 && br.messages[0].Role == aimodel.RoleSystem {
-		existing := br.messages[0].Content.Text()
-		br.messages[0].Content = aimodel.NewTextContent(existing + skillText)
+	if len(br.messages) > 0 && br.messages[0].Role() == schema.RoleSystem {
+		br.messages[0].SetText(br.messages[0].Text() + skillText)
 	} else {
-		sysMsg := aimodel.Message{
-			Role:    aimodel.RoleSystem,
-			Content: aimodel.NewTextContent(skillText),
-		}
-		br.messages = append([]aimodel.Message{sysMsg}, br.messages...)
-	}
-}
-
-// markPromptCacheBreakpoints attaches cache-breakpoint hints to the two
-// stable per-session surfaces: the last system message (if any) and the
-// last tool definition (if any). Messages and tools are slice-backed, so
-// mutating in place propagates to every ReAct iteration that reuses the
-// slice for the outgoing ChatRequest.
-func markPromptCacheBreakpoints(messages []aimodel.Message, tools []aimodel.Tool) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == aimodel.RoleSystem {
-			messages[i].CacheBreakpoint = true
-			break
-		}
-	}
-	if len(tools) > 0 {
-		tools[len(tools)-1].CacheBreakpoint = true
+		sysMsg := schema.NewSystemMessage(schema.ProtocolOf(br.messages), skillText)
+		br.messages = append([]schema.Message{sysMsg}, br.messages...)
 	}
 }

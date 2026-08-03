@@ -51,10 +51,10 @@ func appendRunner(suffix string) *mockRunner {
 	return newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewUserMessage(text + suffix)},
+			Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text+suffix)},
 		}, nil
 	})
 }
@@ -73,7 +73,7 @@ func errorRunner(err error) *mockRunner {
 
 func makeReq(text string) *schema.RunRequest {
 	return &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage(text)},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, text)},
 		SessionID: "test-session",
 	}
 }
@@ -157,7 +157,7 @@ func TestRunDAG_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B" {
 		t.Errorf("got %q, want %q", got, "start-A-B")
 	}
@@ -187,7 +187,8 @@ func TestRunDAG_WithMaxConcurrency(t *testing.T) {
 		{ID: "C", Runner: runner, Deps: []string{"root"}},
 		{ID: "D", Runner: runner, Deps: []string{"root"}},
 	}
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithMaxConcurrency(2),
 	)
 	if err != nil {
@@ -204,13 +205,14 @@ func TestRunDAG_WithAggregator(t *testing.T) {
 		{ID: "A", Runner: appendRunner("-A"), Deps: []string{"root"}},
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"root"}},
 	}
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithAggregator(orchestrate.LastResultAggregator()),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-B" {
 		t.Errorf("got %q, want %q", got, "start-B")
 	}
@@ -221,7 +223,8 @@ func TestRunDAG_WithEarlyExit(t *testing.T) {
 		{ID: "A", Runner: appendRunner("-A")},
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"}},
 	}
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEarlyExit(func(nodeID string, _ *schema.RunResponse) bool {
 			return nodeID == "A"
 		}),
@@ -240,7 +243,8 @@ func TestRunDAG_WithCheckpointStore(t *testing.T) {
 		{ID: "A", Runner: appendRunner("-A")},
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"}},
 	}
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 	)
 	if err != nil {
@@ -274,7 +278,8 @@ func TestRunDAG_WithPriorityScheduling(t *testing.T) {
 		{ID: "high", Runner: makeOrderRunner("high"), Deps: []string{"root"}, Priority: 100},
 		{ID: "mid", Runner: makeOrderRunner("mid"), Deps: []string{"root"}, Priority: 50},
 	}
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithPriorityScheduling(false),
 		orchestrate.WithMaxConcurrency(1),
 	)
@@ -313,7 +318,8 @@ func TestRunDAG_WithResourceLimits(t *testing.T) {
 		{ID: "C", Runner: gpuRunner, Deps: []string{"root"}, ResourceTags: []string{"gpu"}},
 	}
 
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithResourceLimits(map[string]int{"gpu": 1}),
 	)
 	if err != nil {
@@ -346,7 +352,8 @@ func TestRunDAG_WithCompensation(t *testing.T) {
 		{ID: "B", Runner: errorRunner(errors.New("fail")), Deps: []string{"A"}},
 	}
 
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCompensation(&orchestrate.CompensateConfig{
 			Strategy:   orchestrate.BackwardCompensate,
 			MaxRetries: 1,
@@ -370,7 +377,8 @@ func TestRunDAG_MultipleOptions(t *testing.T) {
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"}},
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"A"}},
 	}
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithMaxConcurrency(2),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithAggregator(orchestrate.ConcatMessagesAggregator()),
@@ -393,7 +401,8 @@ func TestEventHandler_StartAndComplete(t *testing.T) {
 		{ID: "A", Runner: appendRunner("-A")},
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"}},
 	}
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEventHandler(handler),
 	)
 	if err != nil {
@@ -422,7 +431,8 @@ func TestEventHandler_OnNodeFailed(t *testing.T) {
 	nodes := []orchestrate.Node{
 		{ID: "A", Runner: errorRunner(errors.New("fail"))},
 	}
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEventHandler(handler),
 	)
 	if err == nil {
@@ -451,7 +461,8 @@ func TestEventHandler_ParallelNodes(t *testing.T) {
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"root"}},
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"root"}},
 	}
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEventHandler(handler),
 	)
 	if err != nil {
@@ -486,7 +497,8 @@ func TestEventHandler_CheckpointError(t *testing.T) {
 		{ID: "A", Runner: appendRunner("-A")},
 	}
 
-	_, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	_, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithEventHandler(handler),
 	)
@@ -519,7 +531,8 @@ func TestEventHandler_SkippedConditional(t *testing.T) {
 		},
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"A"}},
 	}
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEventHandler(handler),
 	)
 	if err != nil {
@@ -550,7 +563,8 @@ func TestDAG_ResourceOverlappingTags_NoDeadlock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := orchestrate.RunDAG(ctx, nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		ctx, nodes, makeReq("start"),
 		orchestrate.WithResourceLimits(map[string]int{"gpu": 2, "memory": 2}),
 	)
 	if err != nil {
@@ -576,7 +590,8 @@ func TestDAG_ResourceWithRateLimits(t *testing.T) {
 		{ID: "B", Runner: runner, Deps: []string{"root"}, ResourceTags: []string{"api"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithResourceLimits(map[string]int{"api": 1}),
 		orchestrate.WithResourceRateLimits(map[string]float64{"api": 100.0}),
 	)
@@ -679,7 +694,8 @@ func TestIntegration_CheckpointWithEventHandler(t *testing.T) {
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"A"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithEventHandler(handler),
 		orchestrate.WithMaxConcurrency(2),
@@ -730,7 +746,8 @@ func TestIntegration_PriorityWithResources(t *testing.T) {
 		{ID: "high", Runner: makeOrderRunner("high"), Deps: []string{"root"}, Priority: 100, ResourceTags: []string{"gpu"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithPriorityScheduling(false),
 		orchestrate.WithMaxConcurrency(1),
 		orchestrate.WithResourceLimits(map[string]int{"gpu": 1}),
@@ -765,7 +782,8 @@ func TestIntegration_ConditionalSkipWithCheckpoint(t *testing.T) {
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"A"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithEventHandler(handler),
 	)
@@ -801,7 +819,8 @@ func TestIntegration_BackpressureWithTimeline(t *testing.T) {
 		{ID: "B", Runner: runner, Deps: []string{"root"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithBackpressure(&orchestrate.BackpressureConfig{
 			InitialConcurrency: 2,
 			MinConcurrency:     1,
@@ -887,13 +906,14 @@ func TestIntegration_CheckpointResume_WithEventHandler(t *testing.T) {
 	}
 
 	_ = store.Save(context.Background(), "test-session", "A", &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage("start-A")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A")},
 	})
 	_ = store.Save(context.Background(), "test-session", "B", &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage("start-A-B")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A-B")},
 	})
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithEventHandler(handler),
 	)
@@ -933,7 +953,8 @@ func TestIntegration_LargeDAG_ConcurrencyAndTimeline(t *testing.T) {
 	}
 	nodes = append(nodes, orchestrate.Node{ID: "sink", Runner: passthroughRunner(), Deps: deps})
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithMaxConcurrency(5),
 		orchestrate.WithEventHandler(handler),
 	)
@@ -968,7 +989,8 @@ func TestIntegration_CriticalPathWithEventHandler(t *testing.T) {
 		{ID: "D", Runner: appendRunner("-D"), Deps: []string{"B", "C"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithPriorityScheduling(true),
 		orchestrate.WithMaxConcurrency(2),
 		orchestrate.WithEventHandler(handler),
@@ -991,7 +1013,8 @@ func TestIntegration_EarlyExitWithTimeline(t *testing.T) {
 		{ID: "C", Runner: appendRunner("-C"), Deps: []string{"B"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithEarlyExit(func(nodeID string, _ *schema.RunResponse) bool {
 			return nodeID == "A"
 		}),
@@ -1017,7 +1040,8 @@ func TestIntegration_SkipOptionalWithEventHandler(t *testing.T) {
 		{ID: "normal", Runner: appendRunner("-ok"), Deps: []string{"root"}},
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), nodes, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), nodes, makeReq("start"),
 		orchestrate.WithErrorStrategy(orchestrate.Skip),
 		orchestrate.WithEventHandler(handler),
 	)
@@ -1070,7 +1094,7 @@ func TestBuildDAG_LinearChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDAG error: %v", err)
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B-C" {
 		t.Errorf("got %q, want %q", got, "start-A-B-C")
 	}
@@ -1095,7 +1119,8 @@ func TestBuildDAG_Diamond(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithMaxConcurrency(2),
 	)
 	if err != nil {
@@ -1125,7 +1150,8 @@ func TestBuildDAG_WithEventHandler(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithEventHandler(handler),
 	)
 	if err != nil {
@@ -1173,7 +1199,8 @@ func TestBuildDAG_WithCheckpointAndPriority(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithCheckpointStore(store),
 		orchestrate.WithPriorityScheduling(false),
 		orchestrate.WithMaxConcurrency(1),
@@ -1223,7 +1250,8 @@ func TestBuildDAG_WithCompensation(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	_, err = orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	_, err = orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithCompensation(&orchestrate.CompensateConfig{
 			Strategy:   orchestrate.BackwardCompensate,
 			MaxRetries: 1,
@@ -1305,7 +1333,8 @@ func TestBuildDAG_WithResourceLimits(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	_, err = orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	_, err = orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithResourceLimits(map[string]int{"gpu": 1}),
 	)
 	if err != nil {
@@ -1341,7 +1370,8 @@ func TestBuildDAG_LargeFanOutFanIn(t *testing.T) {
 		t.Fatalf("BuildDAG error: %v", err)
 	}
 
-	result, err := orchestrate.RunDAG(context.Background(), built, makeReq("start"),
+	result, err := orchestrate.RunDAG(
+		context.Background(), built, makeReq("start"),
 		orchestrate.WithMaxConcurrency(4),
 		orchestrate.WithEventHandler(handler),
 	)

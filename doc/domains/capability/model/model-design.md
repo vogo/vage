@@ -2,6 +2,17 @@
 
 对应领域行为见 [model.md](model.md)。
 
+## 协议调用层
+
+| 文件 | 职责 |
+|------|------|
+| `largemodel/call.go` | `Caller` 接口与 `Request`/`Response`/`Chunk` 信封;中间件只看见这一层 |
+| `largemodel/openai_chat.go` | OpenAI Chat Completions:直连 `provider/openai` native 客户端,双向转换 wire 类型 |
+| `largemodel/anthropic_messages.go` | Anthropic Messages:直连 `provider/anthropic` native 客户端;吸收 system 提升、content block、必填 max_tokens 三处结构差异 |
+| `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
+| `largemodel/errors.go` | `APIError` 归一化,供重试/熔断/溢出统一判定 |
+| `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
+
 ## 中间件清单
 
 | 文件 | 中间件 | 作用 |
@@ -20,9 +31,12 @@
 
 ## 关键设计决策
 
+- **协议直连而非中立抽象**:每种厂商协议一个 `Caller` 实现,直接调用该 provider 的 native 客户端。代价是调用层感知协议差异,收益是不必为了统一而做有损归一,厂商新能力也不必先等一层中立抽象补齐。
+- **信封隔离厂商类型**:`Request`/`Response`/`Chunk` 是 vage 自己的调用信封,厂商 wire 类型只出现在 provider 实现内部,因此中间件对协议无感、可跨协议复用。
+- **prompt caching 下沉到 provider**:调用层只在请求上表达"要缓存"的意图,cache_control 断点由 Anthropic provider 渲染;OpenAI 自动缓存相同前缀,该意图无 wire 效果。
 - **装饰器链而非配置开关**:每个可靠性/治理关注点是一个独立中间件,使用方按需组合、自定排序。语义由组合顺序显式表达,而非隐藏在标志位里。
 - **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
-- **浅拷贝编辑**:编辑作用于 `ChatRequest` 的浅拷贝,绝不篡改调用方原始请求。
+- **浅拷贝编辑**:编辑作用于 `Request` 的浅拷贝(`Request.Clone`),绝不篡改调用方原始请求。
 - **资源感知折叠**:stale_resource 判定通过 `ResourceLookupFunc` 查询工具资源语义(每个被检查的工具调用查一次,须廉价,在热路径上),识别被后续写操作作废的旧读结果。
 - **工件外置**:超过单条字节上限的工具结果经 `ArtifactWriter` 按 (sessionID, name) 外置,提示里留短引用;写入须对跨会话并发安全。
 

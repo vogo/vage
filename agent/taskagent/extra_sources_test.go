@@ -21,7 +21,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/schema"
@@ -37,8 +36,8 @@ type markerSource struct {
 func (m *markerSource) Name() string { return "marker_" + m.marker }
 func (m *markerSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchResult, error) {
 	return vctx.FetchResult{
-		Messages: []aimodel.Message{
-			{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("MARKER:" + m.marker)},
+		Messages: []schema.Message{
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "MARKER:"+m.marker),
 		},
 		Report: schema.ContextSourceReport{
 			Source:  "marker_" + m.marker,
@@ -52,13 +51,14 @@ func (m *markerSource) Fetch(_ context.Context, _ vctx.FetchInput) (vctx.FetchRe
 // [system, session_memory(empty), ...extras, request] is preserved when
 // extra sources are plugged in via WithExtraSources.
 func TestWithExtraSources_Order(t *testing.T) {
-	a := New(agent.Config{ID: "t1"},
+	a := New(
+		agent.Config{ID: "t1"},
 		WithExtraSources(&markerSource{marker: "alpha"}, &markerSource{marker: "beta"}),
 	)
 
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
@@ -75,13 +75,13 @@ func TestWithExtraSources_Order(t *testing.T) {
 	if got := len(br.messages); got != 3 {
 		t.Fatalf("messages = %d, want 3 — got %+v", got, br.messages)
 	}
-	if got := br.messages[0].Content.Text(); got != "MARKER:alpha" {
+	if got := br.messages[0].Text(); got != "MARKER:alpha" {
 		t.Errorf("messages[0] = %q, want MARKER:alpha", got)
 	}
-	if got := br.messages[1].Content.Text(); got != "MARKER:beta" {
+	if got := br.messages[1].Text(); got != "MARKER:beta" {
 		t.Errorf("messages[1] = %q, want MARKER:beta", got)
 	}
-	if got := br.messages[2].Role; got != aimodel.RoleUser {
+	if got := br.messages[2].Role(); got != schema.RoleUser {
 		t.Errorf("messages[2].Role = %q, want user", got)
 	}
 }
@@ -89,7 +89,8 @@ func TestWithExtraSources_Order(t *testing.T) {
 // TestWithExtraSources_NilSkipped ensures that calling WithExtraSources(nil)
 // or passing a nil entry doesn't panic and is a no-op.
 func TestWithExtraSources_NilSkipped(t *testing.T) {
-	a := New(agent.Config{ID: "t1"},
+	a := New(
+		agent.Config{ID: "t1"},
 		WithExtraSources(nil, &markerSource{marker: "only"}, nil),
 	)
 	if got := len(a.extraSources); got != 1 {
@@ -105,7 +106,7 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 	a := New(agent.Config{ID: "t1"})
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
-		Messages:  []schema.Message{schema.NewUserMessage("hi")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
 	})
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
@@ -115,7 +116,7 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 	if len(br.messages) != 1 {
 		t.Fatalf("messages = %d, want 1: %+v", len(br.messages), br.messages)
 	}
-	if br.messages[0].Role != aimodel.RoleUser {
-		t.Errorf("role = %q, want user", br.messages[0].Role)
+	if br.messages[0].Role() != schema.RoleUser {
+		t.Errorf("role = %q, want user", br.messages[0].Role())
 	}
 }

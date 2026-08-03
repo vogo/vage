@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -154,7 +153,7 @@ func newHandler(ag agent.Agent, extract ArgExtractor, sessCfg *sessionConfig) to
 		}
 
 		req := schema.RunRequest{
-			Messages: []schema.Message{schema.NewUserMessage(input)},
+			Messages: []schema.Message{schema.NewUserMessage(ag.Protocol(), input)},
 		}
 
 		runCtx, childSID, sessionErr := setupChildSession(ctx, sessCfg, ag, input)
@@ -169,8 +168,8 @@ func newHandler(ag agent.Agent, extract ArgExtractor, sessCfg *sessionConfig) to
 
 		var parts []string
 		for _, msg := range resp.Messages {
-			if msg.Role == aimodel.RoleAssistant {
-				text := msg.Content.Text()
+			if msg.Role() == schema.RoleAssistant {
+				text := msg.Text()
 				if text != "" {
 					parts = append(parts, text)
 				}

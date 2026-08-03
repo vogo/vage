@@ -29,8 +29,8 @@ func TestSlidingWindowCompressor_UnderWindow(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []schema.Message{
-		schema.NewUserMessage("hello"),
-		schema.NewUserMessage("world"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "world"),
 	}
 
 	result, err := c.Compress(ctx, msgs, 0)
@@ -47,10 +47,10 @@ func TestSlidingWindowCompressor_OverWindow(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []schema.Message{
-		schema.NewUserMessage("first"),
-		schema.NewUserMessage("second"),
-		schema.NewUserMessage("third"),
-		schema.NewUserMessage("fourth"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "first"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "second"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "third"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "fourth"),
 	}
 
 	result, err := c.Compress(ctx, msgs, 0)
@@ -60,11 +60,11 @@ func TestSlidingWindowCompressor_OverWindow(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("Compress len = %d, want 2", len(result))
 	}
-	if result[0].Content.Text() != "third" {
-		t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "third")
+	if result[0].Text() != "third" {
+		t.Errorf("result[0] = %q, want %q", result[0].Text(), "third")
 	}
-	if result[1].Content.Text() != "fourth" {
-		t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "fourth")
+	if result[1].Text() != "fourth" {
+		t.Errorf("result[1] = %q, want %q", result[1].Text(), "fourth")
 	}
 }
 
@@ -73,9 +73,9 @@ func TestSlidingWindowCompressor_ExactWindow(t *testing.T) {
 	ctx := context.Background()
 
 	msgs := []schema.Message{
-		schema.NewUserMessage("a"),
-		schema.NewUserMessage("b"),
-		schema.NewUserMessage("c"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
 	}
 
 	result, err := c.Compress(ctx, msgs, 0)
@@ -92,7 +92,7 @@ func TestSlidingWindowCompressor_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage("hi")}, 0)
+	_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}, 0)
 	if err == nil {
 		t.Error("expected error for canceled context")
 	}
@@ -122,11 +122,11 @@ func TestSlidingWindowCompressor_MaxTokens(t *testing.T) {
 	t.Run("unlimited", func(t *testing.T) {
 		c := NewSlidingWindowCompressor(3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),     // 1 token
-			schema.NewUserMessage("bbbbbbbb"), // 2 tokens
-			schema.NewUserMessage("cccc"),     // 1 token
-			schema.NewUserMessage("dddd"),     // 1 token
-			schema.NewUserMessage("eeee"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbbbbbb"), // 2 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),     // 1 token
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -140,11 +140,11 @@ func TestSlidingWindowCompressor_MaxTokens(t *testing.T) {
 	t.Run("trims within window", func(t *testing.T) {
 		c := NewSlidingWindowCompressor(5)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),                 // 1 token
-			schema.NewUserMessage("bbbbbbbb"),             // 2 tokens
-			schema.NewUserMessage("cccccccccccccccccccc"), // 5 tokens
-			schema.NewUserMessage("dddd"),                 // 1 token
-			schema.NewUserMessage("eeee"),                 // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),                 // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbbbbbb"),             // 2 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccccccccccccccccccc"), // 5 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"),                 // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),                 // 1 token
 		}
 		// Budget=2 fits last 2 messages (1+1=2)
 		result, err := c.Compress(context.Background(), msgs, 2)
@@ -154,18 +154,18 @@ func TestSlidingWindowCompressor_MaxTokens(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "dddd" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "dddd")
+		if result[0].Text() != "dddd" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "dddd")
 		}
-		if result[1].Content.Text() != "eeee" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "eeee")
+		if result[1].Text() != "eeee" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "eeee")
 		}
 	})
 
 	t.Run("single oversized message", func(t *testing.T) {
 		c := NewSlidingWindowCompressor(3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("this is a long message that exceeds the budget"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "this is a long message that exceeds the budget"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 1)
 		if err != nil {
@@ -199,8 +199,8 @@ func TestCompressFunc(t *testing.T) {
 
 	ctx := context.Background()
 	msgs := []schema.Message{
-		schema.NewUserMessage("a"),
-		schema.NewUserMessage("b"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
 	}
 
 	result, err := f.Compress(ctx, msgs, 0)
@@ -210,7 +210,7 @@ func TestCompressFunc(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("Compress len = %d, want 1", len(result))
 	}
-	if result[0].Content.Text() != "b" {
-		t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "b")
+	if result[0].Text() != "b" {
+		t.Errorf("result[0] = %q, want %q", result[0].Text(), "b")
 	}
 }

@@ -40,7 +40,7 @@ func (s *RequestMessagesSource) Name() string { return SourceNameRequestMessages
 // MustInclude reports true: the current-turn request is never trimmed.
 func (s *RequestMessagesSource) MustInclude() bool { return true }
 
-// Fetch unwraps Request.Messages into aimodel.Message form. nil Request
+// Fetch unwraps Request.Messages into schema.Message form. nil Request
 // or empty Messages produce Status="skipped".
 func (s *RequestMessagesSource) Fetch(_ context.Context, in FetchInput) (FetchResult, error) {
 	rep := schema.ContextSourceReport{Source: SourceNameRequestMessages}
@@ -50,7 +50,7 @@ func (s *RequestMessagesSource) Fetch(_ context.Context, in FetchInput) (FetchRe
 		return FetchResult{Report: rep}, nil
 	}
 
-	out := schema.ToAIModelMessages(in.Request.Messages)
+	out := in.Request.Messages
 	rep.Status = StatusOK
 	rep.InputN = len(out)
 	rep.OutputN = len(out)

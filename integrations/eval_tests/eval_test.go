@@ -23,8 +23,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/eval"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -32,12 +32,7 @@ import (
 func makeResponse(text string) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(text),
-				},
-			},
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text),
 		},
 	}
 }
@@ -53,22 +48,16 @@ func makeResponseWithDuration(text string, durationMs int64) *schema.RunResponse
 // makeResponseWithUsage creates a RunResponse with a single assistant message and usage.
 func makeResponseWithUsage(text string, totalTokens int) *schema.RunResponse {
 	resp := makeResponse(text)
-	resp.Usage = &aimodel.Usage{TotalTokens: totalTokens}
+	resp.Usage = &schema.Usage{TotalTokens: totalTokens}
 
 	return resp
 }
 
 // makeResponseWithToolCalls creates a RunResponse with assistant tool call messages.
-func makeResponseWithToolCalls(calls ...aimodel.ToolCall) *schema.RunResponse {
+func makeResponseWithToolCalls(calls ...schema.ToolCall) *schema.RunResponse {
 	return &schema.RunResponse{
 		Messages: []schema.Message{
-			{
-				Message: aimodel.Message{
-					Role:      aimodel.RoleAssistant,
-					Content:   aimodel.NewTextContent(""),
-					ToolCalls: calls,
-				},
-			},
+			schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", calls),
 		},
 	}
 }
@@ -306,8 +295,8 @@ func TestIntegration_ToolCall_SequenceMatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	searchCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "search"}}
-	calcCall := aimodel.ToolCall{Function: aimodel.FunctionCall{Name: "calculate"}}
+	searchCall := schema.ToolCall{Name: "search"}
+	calcCall := schema.ToolCall{Name: "calculate"}
 
 	// Full match.
 	c1 := &eval.EvalCase{
@@ -381,14 +370,17 @@ func TestIntegration_ToolCall_StrictArgs(t *testing.T) {
 
 	ctx := context.Background()
 
-	expectedCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
+	expectedCall := schema.ToolCall{
+		Name:      "search",
+		Arguments: `{"q":"hello"}`,
 	}
-	matchingCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"hello"}`},
+	matchingCall := schema.ToolCall{
+		Name:      "search",
+		Arguments: `{"q":"hello"}`,
 	}
-	differentArgsCall := aimodel.ToolCall{
-		Function: aimodel.FunctionCall{Name: "search", Arguments: `{"q":"world"}`},
+	differentArgsCall := schema.ToolCall{
+		Name:      "search",
+		Arguments: `{"q":"world"}`,
 	}
 
 	// Same name, different arguments in strict mode.
@@ -607,7 +599,8 @@ func TestIntegration_Composite_WeightedAverage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	composite, err := eval.NewCompositeEvaluator(nil,
+	composite, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: containsEval, Weight: 1.0},
 	)
@@ -643,7 +636,8 @@ func TestIntegration_Composite_WeightedAverage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	composite2, err := eval.NewCompositeEvaluator(nil,
+	composite2, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: containsEval2, Weight: 1.0},
 	)
@@ -683,7 +677,8 @@ func TestIntegration_Composite_NonFailFast(t *testing.T) {
 	}
 
 	// Non-fail-fast: should continue past errors.
-	composite, err := eval.NewCompositeEvaluator(nil,
+	composite, err := eval.NewCompositeEvaluator(
+		nil,
 		eval.WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)
@@ -711,7 +706,8 @@ func TestIntegration_Composite_NonFailFast(t *testing.T) {
 	}
 
 	// Fail-fast: should return error immediately.
-	compositeFf, err := eval.NewCompositeEvaluator(&eval.CompositeConfig{FailFast: true},
+	compositeFf, err := eval.NewCompositeEvaluator(
+		&eval.CompositeConfig{FailFast: true},
 		eval.WeightedEvaluator{Evaluator: errorEval, Weight: 1.0},
 		eval.WeightedEvaluator{Evaluator: exactEval, Weight: 1.0},
 	)
@@ -962,7 +958,7 @@ func TestIntegration_RunAndEvaluate(t *testing.T) {
 	runFn := func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		text := ""
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 
 		return makeResponse(text), nil
@@ -976,12 +972,12 @@ func TestIntegration_RunAndEvaluate(t *testing.T) {
 	cases := []*eval.EvalCase{
 		{
 			ID:       "run-pass",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("hello"),
 		},
 		{
 			ID:       "run-fail",
-			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("hello")}},
+			Input:    &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}},
 			Expected: makeResponse("world"),
 		},
 	}
@@ -1067,7 +1063,7 @@ func TestIntegration_LLMJudge_RobustParsing(t *testing.T) {
 
 			c := &eval.EvalCase{
 				ID:     "judge-" + tt.name,
-				Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage("test")}},
+				Input:  &schema.RunRequest{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}},
 				Actual: makeResponse("test output"),
 			}
 
@@ -1095,24 +1091,17 @@ func TestIntegration_LLMJudge_RobustParsing(t *testing.T) {
 	}
 }
 
-// mockCompleter implements aimodel.ChatCompleter for testing.
+// mockCompleter is a scripted largemodel.Caller for testing.
 type mockCompleter struct {
 	response string
 }
 
-func (m *mockCompleter) ChatCompletion(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	return &aimodel.ChatResponse{
-		Choices: []aimodel.Choice{
-			{
-				Message: aimodel.Message{
-					Role:    aimodel.RoleAssistant,
-					Content: aimodel.NewTextContent(m.response),
-				},
-			},
-		},
-	}, nil
+func (m *mockCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (m *mockCompleter) Call(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, m.response, schema.Usage{}), nil
 }
 
-func (m *mockCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *mockCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	return nil, errors.New("not implemented")
 }

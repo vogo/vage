@@ -30,9 +30,9 @@ func TestTokenBudgetCompressor(t *testing.T) {
 
 	t.Run("under budget", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"), // 1 token
-			schema.NewUserMessage("bbbb"), // 1 token
-			schema.NewUserMessage("cccc"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"), // 1 token
 		}
 		result, err := c.Compress(context.Background(), msgs, 100)
 		if err != nil {
@@ -45,8 +45,8 @@ func TestTokenBudgetCompressor(t *testing.T) {
 
 	t.Run("exact budget", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),     // 1 token
-			schema.NewUserMessage("bbbbbbbb"), // 2 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbbbbbb"), // 2 tokens
 		}
 		result, err := c.Compress(context.Background(), msgs, 3)
 		if err != nil {
@@ -59,10 +59,10 @@ func TestTokenBudgetCompressor(t *testing.T) {
 
 	t.Run("over budget", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),     // 1 token
-			schema.NewUserMessage("bbbb"),     // 1 token
-			schema.NewUserMessage("cccccccc"), // 2 tokens
-			schema.NewUserMessage("dddd"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccccccc"), // 2 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"),     // 1 token
 		}
 		// Budget=3 fits last 2 (2+1=3)
 		result, err := c.Compress(context.Background(), msgs, 3)
@@ -72,17 +72,17 @@ func TestTokenBudgetCompressor(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "cccccccc" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "cccccccc")
+		if result[0].Text() != "cccccccc" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "cccccccc")
 		}
-		if result[1].Content.Text() != "dddd" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "dddd")
+		if result[1].Text() != "dddd" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "dddd")
 		}
 	})
 
 	t.Run("single oversized message", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage(strings.Repeat("x", 100)), // 25 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("x", 100)), // 25 tokens
 		}
 		result, err := c.Compress(context.Background(), msgs, 1)
 		if err != nil {
@@ -107,7 +107,7 @@ func TestTokenBudgetCompressor(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage("hi")}, 100)
+		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}, 100)
 		if err == nil {
 			t.Error("expected error for cancelled context")
 		}
@@ -115,11 +115,11 @@ func TestTokenBudgetCompressor(t *testing.T) {
 
 	t.Run("unlimited maxTokens=0", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),
-			schema.NewUserMessage("bbbb"),
-			schema.NewUserMessage("cccc"),
-			schema.NewUserMessage("dddd"),
-			schema.NewUserMessage("eeee"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {

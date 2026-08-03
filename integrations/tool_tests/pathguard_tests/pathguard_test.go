@@ -229,7 +229,8 @@ func registerBash(t *testing.T, fx *pathguardFixture) (*tool.Registry, *bash.Pat
 	guardian := bash.NewPathGuardian([]string{fx.allowedDir}, fx.allowedDir)
 
 	reg := tool.NewRegistry()
-	if err := bash.Register(reg,
+	if err := bash.Register(
+		reg,
 		bash.WithPathGuardian(guardian),
 		bash.WithWorkingDir(fx.allowedDir),
 	); err != nil {
@@ -252,7 +253,8 @@ func TestRead_Reject(t *testing.T) {
 	t.Run("literal_dotdot", func(t *testing.T) {
 		outsideName := filepath.Base(fx.outsideDir)
 		escapePath := filepath.Join(fx.allowedDir, "..", outsideName, "secret.txt")
-		assertRejected(t, reg, "read",
+		assertRejected(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": escapePath}),
 			"path not allowed",
 			"read/literal_dotdot",
@@ -262,7 +264,8 @@ func TestRead_Reject(t *testing.T) {
 	// Vector 2: an absolute path to an unrelated sensitive file (/etc/passwd).
 	// This is the canonical "direct exfiltration" case in requirement US-3.
 	t.Run("absolute_outside", func(t *testing.T) {
-		assertRejected(t, reg, "read",
+		assertRejected(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": "/etc/passwd"}),
 			"path not allowed",
 			"read/absolute_outside",
@@ -273,7 +276,8 @@ func TestRead_Reject(t *testing.T) {
 	// outside directory; accessing a child through the symlink must be
 	// rejected (os.Root refuses to traverse out-of-root symlinks atomically).
 	t.Run("symlink_outside", func(t *testing.T) {
-		assertRejected(t, reg, "read",
+		assertRejected(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": filepath.Join(fx.escapeSymlink, "secret.txt")}),
 			"read tool",
 			"read/symlink_outside",
@@ -283,7 +287,8 @@ func TestRead_Reject(t *testing.T) {
 	// Vector 4 (tool-specific for read): empty path. Guard's surface check
 	// rejects empty input before any filesystem call.
 	t.Run("empty_path", func(t *testing.T) {
-		assertRejected(t, reg, "read",
+		assertRejected(
+			t, reg, "read",
 			`{"file_path":""}`,
 			"must not be empty",
 			"read/empty_path",
@@ -299,7 +304,8 @@ func TestRead_Legal(t *testing.T) {
 	// Legal 1: reading a file by its canonical absolute path inside the
 	// allow-list. The baseline success path.
 	t.Run("absolute_inside", func(t *testing.T) {
-		assertAccepted(t, reg, "read",
+		assertAccepted(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": fx.insideFile}),
 			"read/absolute_inside",
 			func(text string) {
@@ -313,7 +319,8 @@ func TestRead_Legal(t *testing.T) {
 	// Legal 2: reading the allow-listed directory itself produces a listing.
 	// Verifies directory-mode read still works under a guard.
 	t.Run("directory_listing", func(t *testing.T) {
-		assertAccepted(t, reg, "read",
+		assertAccepted(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": fx.allowedDir}),
 			"read/directory_listing",
 			func(text string) {
@@ -329,7 +336,8 @@ func TestRead_Legal(t *testing.T) {
 	t.Run("offset_limit", func(t *testing.T) {
 		multiline := toolkit.WriteTestFile(t, fx.allowedDir, "multiline.txt",
 			"line1\nline2\nline3\nline4")
-		assertAccepted(t, reg, "read",
+		assertAccepted(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": multiline, "offset": 2, "limit": 2}),
 			"read/offset_limit",
 			func(text string) {
@@ -348,7 +356,8 @@ func TestRead_Legal(t *testing.T) {
 			t.Fatal(err)
 		}
 		nested := toolkit.WriteTestFile(t, nestedDir, "buried.txt", "buried")
-		assertAccepted(t, reg, "read",
+		assertAccepted(
+			t, reg, "read",
 			mustJSON(t, map[string]any{"file_path": nested}),
 			"read/nested_inside",
 			func(text string) {
@@ -372,7 +381,8 @@ func TestWrite_Reject(t *testing.T) {
 	t.Run("literal_dotdot", func(t *testing.T) {
 		outsideName := filepath.Base(fx.outsideDir)
 		escape := filepath.Join(fx.allowedDir, "..", outsideName, "planted.txt")
-		assertRejected(t, reg, "write",
+		assertRejected(
+			t, reg, "write",
 			mustJSON(t, map[string]any{"file_path": escape, "content": "x"}),
 			"path not allowed",
 			"write/literal_dotdot",
@@ -382,7 +392,8 @@ func TestWrite_Reject(t *testing.T) {
 	// Vector 2: absolute path outside the allow-list — attempt to overwrite
 	// /etc/hosts is the classic destructive request.
 	t.Run("absolute_outside", func(t *testing.T) {
-		assertRejected(t, reg, "write",
+		assertRejected(
+			t, reg, "write",
 			mustJSON(t, map[string]any{"file_path": "/etc/hosts", "content": "127.0.0.1 bad"}),
 			"path not allowed",
 			"write/absolute_outside",
@@ -394,7 +405,8 @@ func TestWrite_Reject(t *testing.T) {
 	// resolves outside and must be rejected.
 	t.Run("symlink_outside", func(t *testing.T) {
 		target := filepath.Join(fx.escapeSymlink, "planted.txt")
-		assertRejected(t, reg, "write",
+		assertRejected(
+			t, reg, "write",
 			mustJSON(t, map[string]any{"file_path": target, "content": "x"}),
 			"write tool",
 			"write/symlink_outside",
@@ -403,7 +415,8 @@ func TestWrite_Reject(t *testing.T) {
 
 	// Vector 4 (tool-specific): empty file_path — surface-check rejection.
 	t.Run("empty_path", func(t *testing.T) {
-		assertRejected(t, reg, "write",
+		assertRejected(
+			t, reg, "write",
 			`{"file_path":"","content":"x"}`,
 			"must not be empty",
 			"write/empty_path",
@@ -475,7 +488,8 @@ func TestEdit_Reject(t *testing.T) {
 	t.Run("literal_dotdot", func(t *testing.T) {
 		outsideName := filepath.Base(fx.outsideDir)
 		escape := filepath.Join(fx.allowedDir, "..", outsideName, "editable.txt")
-		assertRejected(t, reg, "edit",
+		assertRejected(
+			t, reg, "edit",
 			mustJSON(t, map[string]any{"file_path": escape, "old_string": "before", "new_string": "after"}),
 			"path not allowed",
 			"edit/literal_dotdot",
@@ -485,7 +499,8 @@ func TestEdit_Reject(t *testing.T) {
 	// Vector 2: absolute outside path — attempt to rewrite a real file
 	// outside the allow-list.
 	t.Run("absolute_outside", func(t *testing.T) {
-		assertRejected(t, reg, "edit",
+		assertRejected(
+			t, reg, "edit",
 			mustJSON(t, map[string]any{"file_path": outsideTarget, "old_string": "before", "new_string": "after"}),
 			"path not allowed",
 			"edit/absolute_outside",
@@ -496,7 +511,8 @@ func TestEdit_Reject(t *testing.T) {
 	// traverses a symlink to the outside editable file.
 	t.Run("symlink_outside", func(t *testing.T) {
 		target := filepath.Join(fx.escapeSymlink, "editable.txt")
-		assertRejected(t, reg, "edit",
+		assertRejected(
+			t, reg, "edit",
 			mustJSON(t, map[string]any{"file_path": target, "old_string": "before", "new_string": "after"}),
 			"edit tool",
 			"edit/symlink_outside",
@@ -505,7 +521,8 @@ func TestEdit_Reject(t *testing.T) {
 
 	// Vector 4 (tool-specific): empty file_path — surface-check rejection.
 	t.Run("empty_path", func(t *testing.T) {
-		assertRejected(t, reg, "edit",
+		assertRejected(
+			t, reg, "edit",
 			`{"file_path":"","old_string":"a","new_string":"b"}`,
 			"must not be empty",
 			"edit/empty_path",
@@ -599,7 +616,8 @@ func TestGlob_Reject(t *testing.T) {
 	t.Run("literal_dotdot", func(t *testing.T) {
 		outsideName := filepath.Base(fx.outsideDir)
 		escape := filepath.Join(fx.allowedDir, "..", outsideName)
-		assertRejected(t, reg, "glob",
+		assertRejected(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "*.txt", "path": escape}),
 			"path not allowed",
 			"glob/literal_dotdot",
@@ -608,7 +626,8 @@ func TestGlob_Reject(t *testing.T) {
 
 	// Vector 2: absolute outside path (/etc).
 	t.Run("absolute_outside", func(t *testing.T) {
-		assertRejected(t, reg, "glob",
+		assertRejected(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "*.conf", "path": "/etc"}),
 			"path not allowed",
 			"glob/absolute_outside",
@@ -618,7 +637,8 @@ func TestGlob_Reject(t *testing.T) {
 	// Vector 3: search path traverses an in-allowlist symlink that points
 	// outside. The guard's Check resolves to an outside path and rejects.
 	t.Run("symlink_outside", func(t *testing.T) {
-		assertRejected(t, reg, "glob",
+		assertRejected(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "*.txt", "path": fx.escapeSymlink}),
 			"symlink resolves outside",
 			"glob/symlink_outside",
@@ -629,7 +649,8 @@ func TestGlob_Reject(t *testing.T) {
 	// blocks this independently of the path guard to prevent escapes via
 	// the pattern itself.
 	t.Run("dotdot_pattern", func(t *testing.T) {
-		assertRejected(t, reg, "glob",
+		assertRejected(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "../**/*.txt", "path": fx.allowedDir}),
 			"must not contain '..'",
 			"glob/dotdot_pattern",
@@ -652,7 +673,8 @@ func TestGlob_Legal(t *testing.T) {
 
 	// Legal 1: glob at the allow-listed root with a simple "*".
 	t.Run("root_star", func(t *testing.T) {
-		assertAccepted(t, reg, "glob",
+		assertAccepted(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "*.txt", "path": fx.allowedDir}),
 			"glob/root_star",
 			func(text string) {
@@ -666,7 +688,8 @@ func TestGlob_Legal(t *testing.T) {
 	// Legal 2: recursive glob (**/*.go) inside a nested subdirectory of the
 	// allow-list.
 	t.Run("recursive_pattern", func(t *testing.T) {
-		assertAccepted(t, reg, "glob",
+		assertAccepted(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "**/*.go", "path": fx.allowedDir}),
 			"glob/recursive_pattern",
 			func(text string) {
@@ -687,7 +710,8 @@ func TestGlob_Legal(t *testing.T) {
 
 	// Legal 4: glob with a specific prefix pattern inside a subdirectory.
 	t.Run("prefix_pattern", func(t *testing.T) {
-		assertAccepted(t, reg, "glob",
+		assertAccepted(
+			t, reg, "glob",
 			mustJSON(t, map[string]any{"pattern": "src/alpha*", "path": fx.allowedDir}),
 			"glob/prefix_pattern",
 			func(text string) {
@@ -710,7 +734,8 @@ func TestGrep_Reject(t *testing.T) {
 	t.Run("literal_dotdot", func(t *testing.T) {
 		outsideName := filepath.Base(fx.outsideDir)
 		escape := filepath.Join(fx.allowedDir, "..", outsideName)
-		assertRejected(t, reg, "grep",
+		assertRejected(
+			t, reg, "grep",
 			mustJSON(t, map[string]any{"pattern": "secret", "path": escape}),
 			"path not allowed",
 			"grep/literal_dotdot",
@@ -719,7 +744,8 @@ func TestGrep_Reject(t *testing.T) {
 
 	// Vector 2: absolute path outside the allow-list (/etc).
 	t.Run("absolute_outside", func(t *testing.T) {
-		assertRejected(t, reg, "grep",
+		assertRejected(
+			t, reg, "grep",
 			mustJSON(t, map[string]any{"pattern": "root", "path": "/etc"}),
 			"path not allowed",
 			"grep/absolute_outside",
@@ -728,7 +754,8 @@ func TestGrep_Reject(t *testing.T) {
 
 	// Vector 3: search via a symlink that escapes the allow-list.
 	t.Run("symlink_outside", func(t *testing.T) {
-		assertRejected(t, reg, "grep",
+		assertRejected(
+			t, reg, "grep",
 			mustJSON(t, map[string]any{"pattern": "secret", "path": fx.escapeSymlink}),
 			"symlink resolves outside",
 			"grep/symlink_outside",
@@ -742,7 +769,8 @@ func TestGrep_Reject(t *testing.T) {
 		if err := grep.Register(reg2, grep.WithPathGuard(fx.guard)); err != nil {
 			t.Fatalf("grep.Register: %v", err)
 		}
-		assertRejected(t, reg2, "grep",
+		assertRejected(
+			t, reg2, "grep",
 			mustJSON(t, map[string]any{"pattern": "whatever"}),
 			"no search path provided",
 			"grep/empty_path_no_workdir",
@@ -759,7 +787,8 @@ func TestGrep_Legal(t *testing.T) {
 
 	// Legal 1: pattern found in the allow-listed dir.
 	t.Run("match_in_root", func(t *testing.T) {
-		assertAccepted(t, reg, "grep",
+		assertAccepted(
+			t, reg, "grep",
 			mustJSON(t, map[string]any{"pattern": "needle", "path": fx.allowedDir}),
 			"grep/match_in_root",
 			func(text string) {
@@ -773,7 +802,8 @@ func TestGrep_Legal(t *testing.T) {
 	// Legal 2: pattern with no matches returns a clean "No matches found."
 	// message, not an error.
 	t.Run("no_match_is_success", func(t *testing.T) {
-		assertAccepted(t, reg, "grep",
+		assertAccepted(
+			t, reg, "grep",
 			mustJSON(t, map[string]any{"pattern": "definitely_not_present_xyz", "path": fx.allowedDir}),
 			"grep/no_match_is_success",
 			func(text string) {
@@ -826,7 +856,8 @@ func TestBash_Reject(t *testing.T) {
 	// Vector 2: absolute path argument outside the allow-list — classified
 	// TierBlocked by rule "path-outside-allowed"; BashTool hard-blocks.
 	t.Run("absolute_outside_blocked", func(t *testing.T) {
-		assertRejected(t, reg, "bash",
+		assertRejected(
+			t, reg, "bash",
 			mustJSON(t, map[string]any{"command": "cat /etc/passwd"}),
 			"path-outside-allowed",
 			"bash/absolute_outside_blocked",
@@ -837,7 +868,8 @@ func TestBash_Reject(t *testing.T) {
 	// path is classified TierBlocked "cd-outside-allowed". This is the
 	// closest per-design-row equivalent of the other tools' symlink vector.
 	t.Run("cd_outside_blocked", func(t *testing.T) {
-		assertRejected(t, reg, "bash",
+		assertRejected(
+			t, reg, "bash",
 			mustJSON(t, map[string]any{"command": "cd /etc"}),
 			"cd-outside-allowed",
 			"bash/cd_outside_blocked",
@@ -849,7 +881,8 @@ func TestBash_Reject(t *testing.T) {
 	// sub-command and the /etc/passwd token is TierBlocked, so BashTool
 	// hard-blocks.
 	t.Run("command_substitution_blocked", func(t *testing.T) {
-		assertRejected(t, reg, "bash",
+		assertRejected(
+			t, reg, "bash",
 			mustJSON(t, map[string]any{"command": "echo $(cat /etc/passwd)"}),
 			"path-outside-allowed",
 			"bash/command_substitution_blocked",
@@ -870,7 +903,8 @@ func TestBash_Legal(t *testing.T) {
 	// Legal 1: a plain echo with no path arguments — TierCaution, passes
 	// the hard-block gate and executes.
 	t.Run("plain_echo", func(t *testing.T) {
-		assertAccepted(t, reg, "bash",
+		assertAccepted(
+			t, reg, "bash",
 			mustJSON(t, map[string]any{"command": "echo hello"}),
 			"bash/plain_echo",
 			func(text string) {
@@ -885,7 +919,8 @@ func TestBash_Legal(t *testing.T) {
 	// does not fire because the path is under the allow-list.
 	t.Run("cat_inside_absolute", func(t *testing.T) {
 		inside := filepath.Join(fx.allowedDir, "hello.sh.txt")
-		assertAccepted(t, reg, "bash",
+		assertAccepted(
+			t, reg, "bash",
 			mustJSON(t, map[string]any{"command": fmt.Sprintf("cat %s", inside)}),
 			"bash/cat_inside_absolute",
 			func(text string) {

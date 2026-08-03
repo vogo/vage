@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
@@ -36,37 +35,24 @@ import (
 // =============================================================================
 
 func newSystemMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func newAssistantMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func newToolMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleTool, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "call-1", text, false)
 }
 
 func newAssistantWithToolCalls(text string) schema.Message {
-	return schema.Message{
-		Message: aimodel.Message{
-			Role:    aimodel.RoleAssistant,
-			Content: aimodel.NewTextContent(text),
-			ToolCalls: []aimodel.ToolCall{
-				{ID: "call-1", Function: aimodel.FunctionCall{Name: "test_tool", Arguments: "{}"}},
-			},
+	return schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", []schema.ToolCall{
+		{
+			ID: "call-1", Name: "test_tool",
+			Arguments: "{}",
 		},
-		Timestamp: time.Now(),
-	}
+	})
 }
 
 // =============================================================================
@@ -109,7 +95,7 @@ func TestIntegration_AllCompressors_InterfaceCompliance(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				msgs := []schema.Message{schema.NewUserMessage("hello")}
+				msgs := []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello")}
 				_, err := c.Compress(ctx, msgs, 100)
 				if err == nil {
 					t.Fatal("expected error for cancelled context")
@@ -125,7 +111,7 @@ func TestIntegration_AllCompressors_InterfaceCompliance(t *testing.T) {
 	t.Run("single message returns non-empty output", func(t *testing.T) {
 		for name, c := range compressors {
 			t.Run(name, func(t *testing.T) {
-				msgs := []schema.Message{schema.NewUserMessage("hello world")}
+				msgs := []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello world")}
 				result, err := c.Compress(context.Background(), msgs, 100)
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -140,9 +126,9 @@ func TestIntegration_AllCompressors_InterfaceCompliance(t *testing.T) {
 	// Test: unlimited budget (maxTokens=0) returns messages for all compressors.
 	t.Run("unlimited budget preserves messages", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),
-			schema.NewUserMessage("bbbb"),
-			schema.NewUserMessage("cccc"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),
 		}
 		for name, c := range compressors {
 			t.Run(name, func(t *testing.T) {
@@ -169,13 +155,13 @@ func TestIntegration_CompressorChaining(t *testing.T) {
 	// Test: SlidingWindow then TokenBudget — first reduces by count, then by tokens.
 	t.Run("SlidingWindow then TokenBudget", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),                  // 1 token
-			schema.NewUserMessage("bbbb"),                  // 1 token
-			schema.NewUserMessage("cccc"),                  // 1 token
-			schema.NewUserMessage(strings.Repeat("d", 40)), // 10 tokens
-			schema.NewUserMessage("eeee"),                  // 1 token
-			schema.NewUserMessage(strings.Repeat("f", 20)), // 5 tokens
-			schema.NewUserMessage("gggg"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("d", 40)), // 10 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("f", 20)), // 5 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "gggg"),                  // 1 token
 		}
 
 		// Step 1: SlidingWindow keeps last 5
@@ -198,11 +184,11 @@ func TestIntegration_CompressorChaining(t *testing.T) {
 		if len(step2) != 3 {
 			t.Fatalf("after TokenBudget: got %d, want 3", len(step2))
 		}
-		if step2[0].Content.Text() != "eeee" {
-			t.Errorf("step2[0] = %q, want %q", step2[0].Content.Text(), "eeee")
+		if step2[0].Text() != "eeee" {
+			t.Errorf("step2[0] = %q, want %q", step2[0].Text(), "eeee")
 		}
-		if step2[2].Content.Text() != "gggg" {
-			t.Errorf("step2[2] = %q, want %q", step2[2].Content.Text(), "gggg")
+		if step2[2].Text() != "gggg" {
+			t.Errorf("step2[2] = %q, want %q", step2[2].Text(), "gggg")
 		}
 	})
 
@@ -210,12 +196,12 @@ func TestIntegration_CompressorChaining(t *testing.T) {
 	// then summarizes remaining older messages.
 	t.Run("ImportanceRanking then SummarizeAndTrunc", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("system prompt"),            // high priority
-			schema.NewUserMessage("user question 1"),     // medium
-			newAssistantMessage(strings.Repeat("a", 80)), // low, 20 tokens
-			schema.NewUserMessage("user question 2"),     // medium
-			newAssistantMessage("short answer"),          // low
-			schema.NewUserMessage("user question 3"),     // medium
+			newSystemMessage("system prompt"),                                   // high priority
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 1"), // medium
+			newAssistantMessage(strings.Repeat("a", 80)),                        // low, 20 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 2"), // medium
+			newAssistantMessage("short answer"),                                 // low
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user question 3"), // medium
 		}
 
 		// Step 1: ImportanceRanking with budget that drops long assistant message
@@ -275,9 +261,9 @@ func TestIntegration_CompressFunc_Wrapping(t *testing.T) {
 	)
 
 	msgs := []schema.Message{
-		schema.NewUserMessage("aaaa"),     // 1 token
-		schema.NewUserMessage("bbbbbbbb"), // 2 tokens
-		schema.NewUserMessage("cccc"),     // 1 token
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),     // 1 token
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbbbbbb"), // 2 tokens
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),     // 1 token
 	}
 
 	result, err := compressor.Compress(context.Background(), msgs, 3)
@@ -301,12 +287,12 @@ func TestIntegration_SlidingWindow_MaxTokens_EndToEnd(t *testing.T) {
 	t.Run("window and token budget interact correctly", func(t *testing.T) {
 		c := memory.NewSlidingWindowCompressor(4)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),                  // 1 token
-			schema.NewUserMessage(strings.Repeat("b", 20)), // 5 tokens
-			schema.NewUserMessage("cccc"),                  // 1 token
-			schema.NewUserMessage(strings.Repeat("d", 20)), // 5 tokens
-			schema.NewUserMessage("eeee"),                  // 1 token
-			schema.NewUserMessage("ffff"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("b", 20)), // 5 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("d", 20)), // 5 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),                  // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "ffff"),                  // 1 token
 		}
 		// Window=4 keeps last 4: cccc(1), d*20(5), eeee(1), ffff(1)
 		// Budget=2 keeps last: eeee(1) + ffff(1) = 2
@@ -317,11 +303,11 @@ func TestIntegration_SlidingWindow_MaxTokens_EndToEnd(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "eeee" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "eeee")
+		if result[0].Text() != "eeee" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "eeee")
 		}
-		if result[1].Content.Text() != "ffff" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "ffff")
+		if result[1].Text() != "ffff" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "ffff")
 		}
 	})
 
@@ -329,11 +315,11 @@ func TestIntegration_SlidingWindow_MaxTokens_EndToEnd(t *testing.T) {
 	t.Run("all window messages fit budget", func(t *testing.T) {
 		c := memory.NewSlidingWindowCompressor(3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"), // 1 token
-			schema.NewUserMessage("bbbb"), // 1 token
-			schema.NewUserMessage("cccc"), // 1 token
-			schema.NewUserMessage("dddd"), // 1 token
-			schema.NewUserMessage("eeee"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"), // 1 token
 		}
 		// Window=3, budget=100: last 3 messages (3 tokens, well under budget)
 		result, err := c.Compress(context.Background(), msgs, 100)
@@ -349,7 +335,7 @@ func TestIntegration_SlidingWindow_MaxTokens_EndToEnd(t *testing.T) {
 	t.Run("oversized single message always returned", func(t *testing.T) {
 		c := memory.NewSlidingWindowCompressor(5)
 		msgs := []schema.Message{
-			schema.NewUserMessage(strings.Repeat("x", 200)), // 50 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("x", 200)), // 50 tokens
 		}
 		result, err := c.Compress(context.Background(), msgs, 1)
 		if err != nil {
@@ -373,12 +359,12 @@ func TestIntegration_TokenBudget_DiverseMessages(t *testing.T) {
 	// Test: conversation with mixed roles — budget keeps most recent that fit.
 	t.Run("mixed role conversation under budget pressure", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("You are a helpful assistant"),       // ~8 tokens
-			schema.NewUserMessage("What is the weather?"),         // ~5 tokens
-			newAssistantMessage("Let me check the weather tool."), // ~8 tokens
-			newToolMessage("Weather: sunny, 25C"),                 // ~5 tokens
-			newAssistantMessage("The weather is sunny and 25C."),  // ~8 tokens
-			schema.NewUserMessage("Thanks!"),                      // ~1 token
+			newSystemMessage("You are a helpful assistant"),                          // ~8 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "What is the weather?"), // ~5 tokens
+			newAssistantMessage("Let me check the weather tool."),                    // ~8 tokens
+			newToolMessage("Weather: sunny, 25C"),                                    // ~5 tokens
+			newAssistantMessage("The weather is sunny and 25C."),                     // ~8 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Thanks!"),              // ~1 token
 		}
 
 		// Budget of 10 should keep the last few messages
@@ -390,8 +376,8 @@ func TestIntegration_TokenBudget_DiverseMessages(t *testing.T) {
 			t.Fatal("expected at least one message")
 		}
 		// Last message should always be present
-		if result[len(result)-1].Content.Text() != "Thanks!" {
-			t.Errorf("last message = %q, want %q", result[len(result)-1].Content.Text(), "Thanks!")
+		if result[len(result)-1].Text() != "Thanks!" {
+			t.Errorf("last message = %q, want %q", result[len(result)-1].Text(), "Thanks!")
 		}
 		// Should be fewer messages than input
 		if len(result) >= len(msgs) {
@@ -402,8 +388,8 @@ func TestIntegration_TokenBudget_DiverseMessages(t *testing.T) {
 	// Test: all messages fit — no truncation.
 	t.Run("all messages fit within budget", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"), // 1 token
-			schema.NewUserMessage("bbbb"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"), // 1 token
 		}
 		result, err := c.Compress(context.Background(), msgs, 1000)
 		if err != nil {
@@ -429,7 +415,7 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 			summarizedMsgs = msgs
 			var parts []string
 			for _, m := range msgs {
-				parts = append(parts, fmt.Sprintf("[%s]: %s", m.Role, m.Content.Text()))
+				parts = append(parts, fmt.Sprintf("[%s]: %s", m.Role(), m.Text()))
 			}
 			return "Previous conversation: " + strings.Join(parts, "; "), nil
 		}
@@ -437,11 +423,11 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		c := memory.NewSummarizeAndTruncCompressor(summarizer, 3)
 		msgs := []schema.Message{
 			newSystemMessage("You are helpful"),
-			schema.NewUserMessage("Hello"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "Hello"),
 			newAssistantMessage("Hi there!"),
-			schema.NewUserMessage("What's 2+2?"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "What's 2+2?"),
 			newAssistantMessage("4"),
-			schema.NewUserMessage("And 3+3?"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "And 3+3?"),
 			newAssistantMessage("6"),
 		}
 
@@ -462,10 +448,10 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 
 		// Verify summary message structure
 		summary := result[0]
-		if summary.Role != aimodel.RoleUser {
-			t.Errorf("summary role = %q, want %q", summary.Role, aimodel.RoleUser)
+		if summary.Role() != schema.RoleUser {
+			t.Errorf("summary role = %q, want %q", summary.Role(), schema.RoleUser)
 		}
-		if !strings.Contains(summary.Content.Text(), "Previous conversation") {
+		if !strings.Contains(summary.Text(), "Previous conversation") {
 			t.Error("summary should contain 'Previous conversation'")
 		}
 		if summary.Metadata == nil {
@@ -482,14 +468,14 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		}
 
 		// Verify recent messages preserved (last 3 of 7: "4", "And 3+3?", "6")
-		if result[1].Content.Text() != "4" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "4")
+		if result[1].Text() != "4" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "4")
 		}
-		if result[2].Content.Text() != "And 3+3?" {
-			t.Errorf("result[2] = %q, want %q", result[2].Content.Text(), "And 3+3?")
+		if result[2].Text() != "And 3+3?" {
+			t.Errorf("result[2] = %q, want %q", result[2].Text(), "And 3+3?")
 		}
-		if result[3].Content.Text() != "6" {
-			t.Errorf("result[3] = %q, want %q", result[3].Content.Text(), "6")
+		if result[3].Text() != "6" {
+			t.Errorf("result[3] = %q, want %q", result[3].Text(), "6")
 		}
 	})
 
@@ -498,12 +484,12 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		summarizer := func(_ context.Context, _ []schema.Message) (string, error) {
 			return "Context summary", nil
 		}
-		c := memory.NewSummarizeAndTruncCompressor(summarizer, 1, memory.WithSummaryRole(aimodel.RoleSystem))
+		c := memory.NewSummarizeAndTruncCompressor(summarizer, 1, memory.WithSummaryRole(schema.RoleSystem))
 
 		msgs := []schema.Message{
-			schema.NewUserMessage("old message 1"),
-			schema.NewUserMessage("old message 2"),
-			schema.NewUserMessage("current question"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old message 1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old message 2"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "current question"),
 		}
 
 		result, err := c.Compress(context.Background(), msgs, 0)
@@ -513,8 +499,8 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("summary role = %q, want %q", result[0].Role, aimodel.RoleSystem)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("summary role = %q, want %q", result[0].Role(), schema.RoleSystem)
 		}
 	})
 
@@ -526,8 +512,8 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		}
 		c := memory.NewSummarizeAndTruncCompressor(summarizer, 1)
 		msgs := []schema.Message{
-			schema.NewUserMessage("old"),
-			schema.NewUserMessage("new"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "new"),
 		}
 
 		_, err := c.Compress(context.Background(), msgs, 0)
@@ -546,10 +532,10 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		}
 		c := memory.NewSummarizeAndTruncCompressor(summarizer, 2)
 		msgs := []schema.Message{
-			schema.NewUserMessage("old 1"),
-			schema.NewUserMessage("old 2"),
-			schema.NewUserMessage("recent 1"),
-			schema.NewUserMessage("recent 2"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old 1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "old 2"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "recent 1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "recent 2"),
 		}
 
 		result, err := c.Compress(context.Background(), msgs, 0)
@@ -560,8 +546,8 @@ func TestIntegration_SummarizeAndTrunc_EndToEnd(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "recent 1" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "recent 1")
+		if result[0].Text() != "recent 1" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "recent 1")
 		}
 	})
 }
@@ -579,12 +565,12 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	// Test: system messages always preserved under budget pressure.
 	t.Run("system messages preserved under pressure", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),                             // 1 token, score ~1000
-			schema.NewUserMessage("question 1"),                 // ~2 tokens, score ~50
-			newAssistantMessage(strings.Repeat("verbose ", 20)), // ~35 tokens, score ~10
-			schema.NewUserMessage("question 2"),                 // ~2 tokens, score ~50
-			newAssistantMessage("short"),                        // 1 token, score ~10
-			schema.NewUserMessage("question 3"),                 // ~2 tokens, score ~50
+			newSystemMessage("sys"), // 1 token, score ~1000
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 1"), // ~2 tokens, score ~50
+			newAssistantMessage(strings.Repeat("verbose ", 20)),            // ~35 tokens, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 2"), // ~2 tokens, score ~50
+			newAssistantMessage("short"),                                   // 1 token, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 3"), // ~2 tokens, score ~50
 		}
 
 		// Budget=8 should keep system + all users + short assistant
@@ -596,7 +582,7 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 		// System message must be present
 		hasSystem := false
 		for _, m := range result {
-			if m.Role == aimodel.RoleSystem {
+			if m.Role() == schema.RoleSystem {
 				hasSystem = true
 				break
 			}
@@ -607,7 +593,7 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 		// Verbose assistant message should be dropped
 		for _, m := range result {
-			if strings.Contains(m.Content.Text(), "verbose") {
+			if strings.Contains(m.Text(), "verbose") {
 				t.Error("verbose assistant message should have been dropped")
 			}
 		}
@@ -632,10 +618,10 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 		hasToolCall := false
 		hasToolResult := false
 		for _, m := range result {
-			if m.Role == aimodel.RoleAssistant && len(m.ToolCalls) > 0 {
+			if m.Role() == schema.RoleAssistant && len(m.ToolCalls()) > 0 {
 				hasToolCall = true
 			}
-			if m.Role == aimodel.RoleTool {
+			if m.Role() == schema.RoleTool {
 				hasToolResult = true
 			}
 		}
@@ -649,12 +635,11 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 	// Test: output preserves chronological order.
 	t.Run("output in chronological order", func(t *testing.T) {
-		now := time.Now()
 		msgs := []schema.Message{
-			{Message: aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent("sys")}, Timestamp: now},
-			{Message: aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("q1")}, Timestamp: now.Add(1 * time.Second)},
-			{Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("a1")}, Timestamp: now.Add(2 * time.Second)},
-			{Message: aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent("q2")}, Timestamp: now.Add(3 * time.Second)},
+			schema.NewSystemMessage(schema.ProtocolOpenAIChat, "sys"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "q1"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "a1"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "q2"),
 		}
 
 		result, err := c.Compress(context.Background(), msgs, 4)
@@ -674,10 +659,10 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 	t.Run("custom scorer reverses priority", func(t *testing.T) {
 		// Scorer that prioritizes assistant messages over system
 		reverseScorer := func(messages []schema.Message, index int) float64 {
-			switch messages[index].Role {
-			case aimodel.RoleAssistant:
+			switch messages[index].Role() {
+			case schema.RoleAssistant:
 				return 1000
-			case aimodel.RoleSystem:
+			case schema.RoleSystem:
 				return 1
 			default:
 				return 50
@@ -686,9 +671,9 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 		rc := memory.NewImportanceRankingCompressor(reverseScorer)
 		msgs := []schema.Message{
-			newSystemMessage("sys"),      // 1 token, score=1
-			newAssistantMessage("asst"),  // 1 token, score=1000
-			schema.NewUserMessage("usr"), // 1 token, score=50
+			newSystemMessage("sys"),                                 // 1 token, score=1
+			newAssistantMessage("asst"),                             // 1 token, score=1000
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr"), // 1 token, score=50
 		}
 
 		// Budget=2: should keep assistant and user (higher scores), drop system
@@ -702,7 +687,7 @@ func TestIntegration_ImportanceRanking_RealisticConversation(t *testing.T) {
 
 		// System message should be dropped
 		for _, m := range result {
-			if m.Role == aimodel.RoleSystem {
+			if m.Role() == schema.RoleSystem {
 				t.Error("system message should have been dropped with reverse scorer")
 			}
 		}
@@ -729,9 +714,9 @@ func TestIntegration_ConcurrentSafety(t *testing.T) {
 
 	msgs := []schema.Message{
 		newSystemMessage("system"),
-		schema.NewUserMessage("question 1"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 1"),
 		newAssistantMessage("answer 1"),
-		schema.NewUserMessage("question 2"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "question 2"),
 		newAssistantMessage("answer 2"),
 	}
 
@@ -795,7 +780,7 @@ func TestIntegration_ContextDeadlineExceeded(t *testing.T) {
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
 			defer cancel()
 
-			msgs := []schema.Message{schema.NewUserMessage("test")}
+			msgs := []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}
 			_, err := c.Compress(ctx, msgs, 100)
 			if err == nil {
 				t.Fatal("expected error for expired deadline")
@@ -820,7 +805,7 @@ func TestIntegration_LargeMessageVolume(t *testing.T) {
 	for i := range messageCount {
 		switch i % 4 {
 		case 0:
-			msgs[i] = schema.NewUserMessage(fmt.Sprintf("user message %d with content", i))
+			msgs[i] = schema.NewUserMessage(schema.ProtocolOpenAIChat, fmt.Sprintf("user message %d with content", i))
 		case 1:
 			msgs[i] = newAssistantMessage(fmt.Sprintf("assistant reply %d", i))
 		case 2:
@@ -870,7 +855,7 @@ func TestIntegration_LargeMessageVolume(t *testing.T) {
 		// System messages should be preferentially retained
 		systemCount := 0
 		for _, m := range result {
-			if m.Role == aimodel.RoleSystem {
+			if m.Role() == schema.RoleSystem {
 				systemCount++
 			}
 		}
@@ -891,9 +876,9 @@ func TestIntegration_EdgeCases(t *testing.T) {
 	t.Run("exact token budget fits all windowed messages", func(t *testing.T) {
 		c := memory.NewSlidingWindowCompressor(3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),     // 1 token
-			schema.NewUserMessage("bbbb"),     // 1 token
-			schema.NewUserMessage("cccccccc"), // 2 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccccccc"), // 2 tokens
 		}
 		// Exact budget: 1+1+2=4
 		result, err := c.Compress(context.Background(), msgs, 4)
@@ -909,9 +894,9 @@ func TestIntegration_EdgeCases(t *testing.T) {
 	t.Run("minimum token estimation single char messages", func(t *testing.T) {
 		c := memory.NewTokenBudgetCompressor()
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"), // 1 token (min-of-1 rule)
-			schema.NewUserMessage("b"), // 1 token
-			schema.NewUserMessage("c"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"), // 1 token (min-of-1 rule)
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"), // 1 token
 		}
 		result, err := c.Compress(context.Background(), msgs, 2)
 		if err != nil {
@@ -920,8 +905,8 @@ func TestIntegration_EdgeCases(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "b" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "b")
+		if result[0].Text() != "b" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "b")
 		}
 	})
 
@@ -932,10 +917,10 @@ func TestIntegration_EdgeCases(t *testing.T) {
 		}
 		c := memory.NewImportanceRankingCompressor(constantScorer)
 		msgs := []schema.Message{
-			schema.NewUserMessage("first"),
-			schema.NewUserMessage("second"),
-			schema.NewUserMessage("third"),
-			schema.NewUserMessage("fourth"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "first"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "second"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "third"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "fourth"),
 		}
 		// Budget for 2: stable sort means first 2 by original order selected
 		result, err := c.Compress(context.Background(), msgs, 2)
@@ -946,11 +931,11 @@ func TestIntegration_EdgeCases(t *testing.T) {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
 		// With stable sort and equal scores, first two should be selected
-		if result[0].Content.Text() != "first" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "first")
+		if result[0].Text() != "first" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "first")
 		}
-		if result[1].Content.Text() != "second" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "second")
+		if result[1].Text() != "second" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "second")
 		}
 	})
 
@@ -963,9 +948,9 @@ func TestIntegration_EdgeCases(t *testing.T) {
 		}
 		c := memory.NewSummarizeAndTruncCompressor(summarizer, 3)
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -983,9 +968,9 @@ func TestIntegration_EdgeCases(t *testing.T) {
 	t.Run("empty content messages with TokenBudget", func(t *testing.T) {
 		c := memory.NewTokenBudgetCompressor()
 		msgs := []schema.Message{
-			schema.NewUserMessage(""),     // 0 tokens
-			schema.NewUserMessage(""),     // 0 tokens
-			schema.NewUserMessage("aaaa"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, ""),     // 0 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, ""),     // 0 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token
 		}
 		// Budget=1: all empty messages (0 tokens) + last message (1 token) = 1 token
 		result, err := c.Compress(context.Background(), msgs, 1)
@@ -1059,8 +1044,8 @@ func TestIntegration_SummarizeAndTrunc_ContextPropagation(t *testing.T) {
 
 	c := memory.NewSummarizeAndTruncCompressor(summarizer, 1)
 	msgs := []schema.Message{
-		schema.NewUserMessage("old"),
-		schema.NewUserMessage("new"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "old"),
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "new"),
 	}
 
 	ctx := context.WithValue(context.Background(), ctxKey("test_key"), "test_value")
@@ -1084,11 +1069,11 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 
 	// Create messages of each type with enough tokens to test individual selection
 	msgs := []schema.Message{
-		newSystemMessage("sys"),         // score ~1000
-		newToolMessage("tool"),          // score ~100
-		newAssistantWithToolCalls("tc"), // score ~100
-		schema.NewUserMessage("usr"),    // score ~50
-		newAssistantMessage("plain"),    // score ~10
+		newSystemMessage("sys"),                                 // score ~1000
+		newToolMessage("tool"),                                  // score ~100
+		newAssistantWithToolCalls("tc"),                         // score ~100
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr"), // score ~50
+		newAssistantMessage("plain"),                            // score ~10
 	}
 
 	// Budget=1 should keep system message (highest score)
@@ -1100,8 +1085,8 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 		if len(result) != 1 {
 			t.Fatalf("got %d messages, want 1", len(result))
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("expected system message, got role %q", result[0].Role)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("expected system message, got role %q", result[0].Role())
 		}
 	})
 
@@ -1114,8 +1099,8 @@ func TestIntegration_DefaultMessageScorer_Hierarchy(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("expected system as first, got %q", result[0].Role)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("expected system as first, got %q", result[0].Role())
 		}
 	})
 }

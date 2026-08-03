@@ -35,8 +35,8 @@ func TestRunRunnerWithTimeout_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "hello" {
-		t.Errorf("got %q, want %q", resp.Messages[0].Content.Text(), "hello")
+	if resp.Messages[0].Text() != "hello" {
+		t.Errorf("got %q, want %q", resp.Messages[0].Text(), "hello")
 	}
 }
 
@@ -61,8 +61,8 @@ func TestRunRunnerWithTimeout_ZeroTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Messages[0].Content.Text() != "hello" {
-		t.Errorf("got %q, want %q", resp.Messages[0].Content.Text(), "hello")
+	if resp.Messages[0].Text() != "hello" {
+		t.Errorf("got %q, want %q", resp.Messages[0].Text(), "hello")
 	}
 }
 

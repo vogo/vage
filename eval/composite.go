@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 var _ Evaluator = (*CompositeEvaluator)(nil)
@@ -109,7 +109,7 @@ func (e *CompositeEvaluator) Evaluate(ctx context.Context, c *EvalCase) (*EvalRe
 		allDetails    []EvalDetail
 		weightedScore float64
 		passed        = true
-		usage         *aimodel.Usage
+		usage         *schema.Usage
 		errMessages   []string
 	)
 

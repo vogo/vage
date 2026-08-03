@@ -37,7 +37,6 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
@@ -63,10 +62,10 @@ type Checkpoint struct {
 	StopReason schema.StopReason `json:"stop_reason,omitempty"`
 
 	// Restorable state.
-	Messages        []aimodel.Message `json:"messages"`
-	SessionMsgCount int               `json:"session_msg_count"`
-	Usage           aimodel.Usage     `json:"usage"`
-	Estimated       bool              `json:"estimated,omitempty"`
+	Messages        []schema.Message `json:"messages"`
+	SessionMsgCount int              `json:"session_msg_count"`
+	Usage           schema.Usage     `json:"usage"`
+	Estimated       bool             `json:"estimated,omitempty"`
 
 	// Audit.
 	CreatedAt time.Time `json:"created_at"`
@@ -83,7 +82,7 @@ type CheckpointMeta struct {
 	Final         bool              `json:"final,omitempty"`
 	StopReason    schema.StopReason `json:"stop_reason,omitempty"`
 	MessagesCount int               `json:"messages_count"`
-	Usage         aimodel.Usage     `json:"usage"`
+	Usage         schema.Usage      `json:"usage"`
 	CreatedAt     time.Time         `json:"created_at"`
 }
 
@@ -115,14 +114,14 @@ func generateID() string {
 	return hex.EncodeToString(buf[:])
 }
 
-// cloneMessages copies the top-level slice. aimodel.Message internals
+// cloneMessages copies the top-level slice. schema.Message internals
 // (Content / ToolCalls) are immutable post-creation by TaskAgent
 // convention so a shallow copy is safe.
-func cloneMessages(in []aimodel.Message) []aimodel.Message {
+func cloneMessages(in []schema.Message) []schema.Message {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]aimodel.Message, len(in))
+	out := make([]schema.Message, len(in))
 	copy(out, in)
 	return out
 }

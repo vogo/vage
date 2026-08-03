@@ -24,7 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/schema"
 )
@@ -35,7 +34,7 @@ import (
 type stubSource struct {
 	name      string
 	must      bool
-	messages  []aimodel.Message
+	messages  []schema.Message
 	err       error
 	tokenCost int // when > 0, set FetchReport.Tokens explicitly
 	seenInput *FetchInput
@@ -62,7 +61,7 @@ func (s *stubSource) Fetch(_ context.Context, in FetchInput) (FetchResult, error
 		rep.Tokens = s.tokenCost
 	}
 
-	return FetchResult{Messages: append([]aimodel.Message(nil), s.messages...), Report: rep}, nil
+	return FetchResult{Messages: append([]schema.Message(nil), s.messages...), Report: rep}, nil
 }
 
 // recordingHook captures every dispatched event for later inspection by
@@ -91,16 +90,16 @@ func (h *recordingHook) snapshot() []schema.Event {
 
 // userMsg builds an aimodel user message with the given text. Used to
 // keep test fixtures readable.
-func userMsg(text string) aimodel.Message {
-	return aimodel.Message{Role: aimodel.RoleUser, Content: aimodel.NewTextContent(text)}
+func userMsg(text string) schema.Message {
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, text)
 }
 
 // TestDefaultBuilder_BasicCompose verifies that messages from three sources
 // emerge in declared order and the BuildReport tallies match.
 func TestDefaultBuilder_BasicCompose(t *testing.T) {
-	a := &stubSource{name: "a", must: true, messages: []aimodel.Message{userMsg("aa")}}
-	b := &stubSource{name: "b", messages: []aimodel.Message{userMsg("bb")}}
-	c := &stubSource{name: "c", must: true, messages: []aimodel.Message{userMsg("cc")}}
+	a := &stubSource{name: "a", must: true, messages: []schema.Message{userMsg("aa")}}
+	b := &stubSource{name: "b", messages: []schema.Message{userMsg("bb")}}
+	c := &stubSource{name: "c", must: true, messages: []schema.Message{userMsg("cc")}}
 
 	builder := NewDefaultBuilder(WithSources(a, b, c))
 
@@ -114,9 +113,9 @@ func TestDefaultBuilder_BasicCompose(t *testing.T) {
 	}
 
 	got := []string{
-		res.Messages[0].Content.Text(),
-		res.Messages[1].Content.Text(),
-		res.Messages[2].Content.Text(),
+		res.Messages[0].Text(),
+		res.Messages[1].Text(),
+		res.Messages[2].Text(),
 	}
 	want := []string{"aa", "bb", "cc"}
 	for i := range want {
@@ -140,9 +139,9 @@ func TestDefaultBuilder_BasicCompose(t *testing.T) {
 // returns an error does NOT stop the builder; later sources still run, and
 // the failed source is recorded with Status="error".
 func TestDefaultBuilder_SourceErrorFailOpen(t *testing.T) {
-	a := &stubSource{name: "a", messages: []aimodel.Message{userMsg("ok")}}
+	a := &stubSource{name: "a", messages: []schema.Message{userMsg("ok")}}
 	bad := &stubSource{name: "bad", err: errors.New("boom")}
-	c := &stubSource{name: "c", messages: []aimodel.Message{userMsg("after")}}
+	c := &stubSource{name: "c", messages: []schema.Message{userMsg("after")}}
 
 	builder := NewDefaultBuilder(WithSources(a, bad, c))
 
@@ -188,7 +187,7 @@ func TestDefaultBuilder_MustIncludeFailClosed(t *testing.T) {
 // gives 4 estimated tokens each (memory.EstimateTextTokens uses len/4).
 func TestDefaultBuilder_BudgetTrim(t *testing.T) {
 	// 5 messages × 4 tokens = 20 total; budget 8 should keep the last 2.
-	msgs := make([]aimodel.Message, 5)
+	msgs := make([]schema.Message, 5)
 	for i := range msgs {
 		msgs[i] = userMsg(strings.Repeat("x", 16)) // 16 chars / 4 = 4 tokens
 	}
@@ -221,8 +220,8 @@ func TestDefaultBuilder_BudgetTrim(t *testing.T) {
 // the budget.
 func TestDefaultBuilder_MustIncludeNotTrimmed(t *testing.T) {
 	bigMsg := userMsg(strings.Repeat("x", 64)) // 16 tokens
-	must := &stubSource{name: "must", must: true, messages: []aimodel.Message{bigMsg}}
-	opt := &stubSource{name: "opt", messages: []aimodel.Message{userMsg("yyy")}}
+	must := &stubSource{name: "must", must: true, messages: []schema.Message{bigMsg}}
+	opt := &stubSource{name: "opt", messages: []schema.Message{userMsg("yyy")}}
 
 	builder := NewDefaultBuilder(WithSources(must, opt))
 
@@ -236,7 +235,7 @@ func TestDefaultBuilder_MustIncludeNotTrimmed(t *testing.T) {
 	if len(res.Messages) < 1 {
 		t.Fatalf("must-include message dropped; got %d messages", len(res.Messages))
 	}
-	if res.Messages[0].Content.Text() != bigMsg.Content.Text() {
+	if res.Messages[0].Text() != bigMsg.Text() {
 		t.Errorf("first message != must-include output")
 	}
 }
@@ -246,10 +245,10 @@ func TestDefaultBuilder_MustIncludeNotTrimmed(t *testing.T) {
 func TestDefaultBuilder_MustIncludeAccountedFirst(t *testing.T) {
 	must := &stubSource{
 		name: "must", must: true,
-		messages:  []aimodel.Message{userMsg(strings.Repeat("x", 16))}, // 4 tokens
+		messages:  []schema.Message{userMsg(strings.Repeat("x", 16))}, // 4 tokens
 		tokenCost: 4,
 	}
-	opt := &stubSource{name: "opt", messages: []aimodel.Message{userMsg("aa")}}
+	opt := &stubSource{name: "opt", messages: []schema.Message{userMsg("aa")}}
 
 	builder := NewDefaultBuilder(WithSources(must, opt))
 
@@ -272,7 +271,7 @@ func TestDefaultBuilder_EmitsEvent(t *testing.T) {
 	rec := &recordingHook{}
 	mgr.Register(rec)
 
-	a := &stubSource{name: "a", messages: []aimodel.Message{userMsg("hi")}}
+	a := &stubSource{name: "a", messages: []schema.Message{userMsg("hi")}}
 	builder := NewDefaultBuilder(WithSource(a), WithHookManager(mgr), WithName("test"))
 
 	if _, err := builder.Build(context.Background(), BuildInput{SessionID: "s1", AgentID: "agent"}); err != nil {

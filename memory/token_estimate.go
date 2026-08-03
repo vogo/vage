@@ -50,7 +50,7 @@ func EstimateTextTokens(text string) int {
 // Known limitation: only the text portion of Content is considered. Multimodal
 // content parts (images, etc.) are not accounted for in the estimate.
 func DefaultTokenEstimator(msg schema.Message) int {
-	text := msg.Content.Text()
+	text := msg.Text()
 	if len(text) == 0 {
 		return 0
 	}

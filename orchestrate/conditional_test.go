@@ -150,7 +150,7 @@ func TestExecuteConditional_WithRunner(t *testing.T) {
 	if resp == nil {
 		t.Fatal("expected non-nil response")
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-cond" {
 		t.Errorf("got %q, want %q", got, "start-cond")
 	}
@@ -191,7 +191,7 @@ func TestExecuteConditional_BranchBasedOnUpstream(t *testing.T) {
 					if up["A"] == nil {
 						return false
 					}
-					return strings.Contains(up["A"].Messages[0].Content.Text(), "yes")
+					return strings.Contains(up["A"].Messages[0].Text(), "yes")
 				},
 				TargetID: "happy-path",
 			},
@@ -200,7 +200,7 @@ func TestExecuteConditional_BranchBasedOnUpstream(t *testing.T) {
 	}
 
 	upstream := map[string]*schema.RunResponse{
-		"A": {Messages: []schema.Message{schema.NewUserMessage("yes please")}},
+		"A": {Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "yes please")}},
 	}
 
 	_, targetID, err := ExecuteConditional(context.Background(), cn, makeReq(""), upstream)
@@ -212,7 +212,7 @@ func TestExecuteConditional_BranchBasedOnUpstream(t *testing.T) {
 	}
 
 	// Test with "no" - should go to default.
-	upstream["A"] = &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage("no thanks")}}
+	upstream["A"] = &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "no thanks")}}
 	_, targetID, err = ExecuteConditional(context.Background(), cn, makeReq(""), upstream)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -63,14 +63,11 @@ type testAgent struct {
 func (a *testAgent) Run(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 	text := ""
 	if len(req.Messages) > 0 {
-		text = "echo: " + req.Messages[0].Content.Text()
+		text = "echo: " + req.Messages[0].Text()
 	}
 
 	return &schema.RunResponse{
-		Messages: []schema.Message{schema.NewAssistantMessage(
-			schema.NewUserMessage(text).Message,
-			a.ID(),
-		)},
+		Messages: []schema.Message{schema.NewAssistantTurn(schema.ProtocolOpenAIChat, text, "", nil)},
 	}, nil
 }
 

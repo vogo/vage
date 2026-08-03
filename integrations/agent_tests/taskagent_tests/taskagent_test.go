@@ -41,8 +41,9 @@ import (
 
 func TestTaskAgentIntegration(t *testing.T) {
 	// Create aimodel client. Reads AI_API_KEY / AI_BASE_URL / AI_MODEL from env.
-	client, err := aimodel.NewClient(
-		aimodel.WithDefaultModel(aimodel.GetEnv("OPENAI_MODEL")),
+	client, err := largemodel.NewOpenAIChatCaller(
+		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
+		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Logf("Failed to create aimodel client: %v", err)
@@ -107,7 +108,8 @@ func TestTaskAgentIntegration(t *testing.T) {
 
 	// Build the largemodel with middleware.
 	// MetricsMiddleware dispatches LLM call events to the hook system.
-	model := largemodel.New(client,
+	model := largemodel.New(
+		client,
 		largemodel.WithMiddleware(
 			largemodel.NewMetricsMiddleware(hm.Dispatch),
 			largemodel.NewLogMiddleware(),
@@ -137,11 +139,12 @@ func TestTaskAgentIntegration(t *testing.T) {
 	})
 
 	// Build the LLM agent with guard integration.
-	a := taskagent.New(agent.Config{
-		ID:   "weather-agent",
-		Name: "Weather Assistant",
-	},
-		taskagent.WithChatCompleter(model),
+	a := taskagent.New(
+		agent.Config{
+			ID:   "weather-agent",
+			Name: "Weather Assistant",
+		},
+		taskagent.WithCaller(model),
 		taskagent.WithToolRegistry(reg),
 		taskagent.WithSystemPrompt(prompt.StringPrompt(
 			"You are a helpful assistant. Use tools to answer questions. Be concise.",

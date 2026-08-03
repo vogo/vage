@@ -30,7 +30,7 @@ func TestInMemoryCheckpointStore_SaveLoadClear(t *testing.T) {
 	ctx := context.Background()
 
 	resp := &schema.RunResponse{
-		Messages: []schema.Message{schema.NewUserMessage("result")},
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "result")},
 	}
 
 	// Save.
@@ -46,8 +46,8 @@ func TestInMemoryCheckpointStore_SaveLoadClear(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("expected non-nil loaded response")
 	}
-	if loaded.Messages[0].Content.Text() != "result" {
-		t.Errorf("got %q, want %q", loaded.Messages[0].Content.Text(), "result")
+	if loaded.Messages[0].Text() != "result" {
+		t.Errorf("got %q, want %q", loaded.Messages[0].Text(), "result")
 	}
 
 	// Load non-existent.
@@ -85,8 +85,8 @@ func TestInMemoryCheckpointStore_MultipleDags(t *testing.T) {
 	store := NewInMemoryCheckpointStore()
 	ctx := context.Background()
 
-	resp1 := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage("dag1-result")}}
-	resp2 := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage("dag2-result")}}
+	resp1 := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "dag1-result")}}
+	resp2 := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "dag2-result")}}
 
 	_ = store.Save(ctx, "dag1", "node1", resp1)
 	_ = store.Save(ctx, "dag2", "node1", resp2)
@@ -97,10 +97,10 @@ func TestInMemoryCheckpointStore_MultipleDags(t *testing.T) {
 	if len(all1) != 1 || len(all2) != 1 {
 		t.Error("expected separate DAG storage")
 	}
-	if all1["node1"].Messages[0].Content.Text() != "dag1-result" {
+	if all1["node1"].Messages[0].Text() != "dag1-result" {
 		t.Error("dag1 data mismatch")
 	}
-	if all2["node1"].Messages[0].Content.Text() != "dag2-result" {
+	if all2["node1"].Messages[0].Text() != "dag2-result" {
 		t.Error("dag2 data mismatch")
 	}
 }
@@ -110,14 +110,14 @@ func TestDAG_CheckpointResume(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-populate checkpoint: A is already done.
-	aResp := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage("start-A")}}
+	aResp := &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A")}}
 	_ = store.Save(ctx, "test-session", "A", aResp)
 
 	var aExecuted atomic.Bool
 	nodes := []Node{
 		{ID: "A", Runner: newMockRunner(func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 			aExecuted.Store(true)
-			return &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage("start-A")}}, nil
+			return &schema.RunResponse{Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start-A")}}, nil
 		})},
 		{ID: "B", Runner: appendRunner("-B"), Deps: []string{"A"}},
 	}
@@ -139,7 +139,7 @@ func TestDAG_CheckpointResume(t *testing.T) {
 	if result.NodeStatus["B"] != NodeDone {
 		t.Errorf("B status = %d, want NodeDone", result.NodeStatus["B"])
 	}
-	got := result.FinalOutput.Messages[0].Content.Text()
+	got := result.FinalOutput.Messages[0].Text()
 	if got != "start-A-B" {
 		t.Errorf("got %q, want %q", got, "start-A-B")
 	}
@@ -158,7 +158,7 @@ func TestDAG_CheckpointSave(t *testing.T) {
 		CheckpointStore: store,
 	}
 	req := &schema.RunRequest{
-		Messages:  []schema.Message{schema.NewUserMessage("start")},
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "start")},
 		SessionID: "save-test",
 	}
 	_, err := ExecuteDAG(ctx, cfg, nodes, req)

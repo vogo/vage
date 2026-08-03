@@ -29,8 +29,8 @@ func TestChainCompressor(t *testing.T) {
 	t.Run("empty chain returns input", func(t *testing.T) {
 		c := NewChainCompressor()
 		msgs := []schema.Message{
-			schema.NewUserMessage("hello"),
-			schema.NewUserMessage("world"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "world"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -44,9 +44,9 @@ func TestChainCompressor(t *testing.T) {
 	t.Run("single compressor", func(t *testing.T) {
 		c := NewChainCompressor(NewSlidingWindowCompressor(2))
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -55,8 +55,8 @@ func TestChainCompressor(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "b" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "b")
+		if result[0].Text() != "b" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "b")
 		}
 	})
 
@@ -66,12 +66,12 @@ func TestChainCompressor(t *testing.T) {
 			NewTokenBudgetCompressor(),
 		)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"),                                     // 1 token
-			schema.NewUserMessage("bbbb"),                                     // 1 token
-			schema.NewUserMessage("cccccccccccccccccccc"),                     // 5 tokens
-			schema.NewUserMessage("dddd"),                                     // 1 token
-			schema.NewUserMessage("eeee"),                                     // 1 token
-			schema.NewUserMessage("ffffffffffffffffffffffffffffffffffffffff"), // 10 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"),                                     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"),                                     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccccccccccccccccccc"),                     // 5 tokens
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "dddd"),                                     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "eeee"),                                     // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "ffffffffffffffffffffffffffffffffffffffff"), // 10 tokens
 		}
 		// Window=4: keeps [cccc...(5), dddd(1), eeee(1), ffff...(10)]
 		// Budget=2: from newest, ffff(10) exceeds budget alone → at least 1 guaranteed
@@ -92,7 +92,7 @@ func TestChainCompressor(t *testing.T) {
 			NewSlidingWindowCompressor(5),
 			failing,
 		)
-		msgs := []schema.Message{schema.NewUserMessage("test")}
+		msgs := []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "test")}
 		_, err := c.Compress(context.Background(), msgs, 0)
 		if err == nil {
 			t.Error("expected error from chain")
@@ -106,7 +106,7 @@ func TestChainCompressor(t *testing.T) {
 		)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage("hi")}, 0)
+		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}, 0)
 		if err == nil {
 			t.Error("expected error for cancelled context")
 		}

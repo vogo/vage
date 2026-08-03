@@ -46,7 +46,7 @@ func TestDynamicSpawnNode_Basic(t *testing.T) {
 	if len(resp.Messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(resp.Messages))
 	}
-	texts := []string{resp.Messages[0].Content.Text(), resp.Messages[1].Content.Text()}
+	texts := []string{resp.Messages[0].Text(), resp.Messages[1].Text()}
 	// child-A and child-B sorted alphabetically.
 	if texts[0] != "start-A" || texts[1] != "start-B" {
 		t.Errorf("got %v, want [start-A, start-B]", texts)
@@ -166,7 +166,7 @@ func TestDynamicSpawnNode_EmptySpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-parent" {
 		t.Errorf("got %q, want %q", got, "start-parent")
 	}
@@ -189,7 +189,7 @@ func TestDynamicSpawnNode_CustomAggregator(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// LastResultAggregator picks last by sorted ID -> child-B.
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-B" {
 		t.Errorf("got %q, want %q", got, "start-B")
 	}
@@ -243,7 +243,7 @@ func TestDynamicSpawnNode_NilRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	got := resp.Messages[0].Content.Text()
+	got := resp.Messages[0].Text()
 	if got != "start-A" {
 		t.Errorf("got %q, want %q", got, "start-A")
 	}

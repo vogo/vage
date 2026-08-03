@@ -21,31 +21,20 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 )
 
 func newSystemMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleSystem, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, text)
 }
 
 func newAssistantMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, text)
 }
 
 func newToolMessage(text string) schema.Message {
-	return schema.Message{
-		Message:   aimodel.Message{Role: aimodel.RoleTool, Content: aimodel.NewTextContent(text)},
-		Timestamp: time.Now(),
-	}
+	return schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "call-1", text, false)
 }
 
 func TestImportanceRankingCompressor(t *testing.T) {
@@ -53,10 +42,10 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("mixed roles budget forces drops", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),                      // 1 token, score ~1000
-			schema.NewUserMessage("usr1"),                // 1 token, score ~50
-			newAssistantMessage(strings.Repeat("a", 40)), // 10 tokens, score ~10
-			schema.NewUserMessage("usr2"),                // 1 token, score ~50
+			newSystemMessage("sys"),                                  // 1 token, score ~1000
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr1"), // 1 token, score ~50
+			newAssistantMessage(strings.Repeat("a", 40)),             // 10 tokens, score ~10
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "usr2"), // 1 token, score ~50
 		}
 		// Budget=3: system(1) + usr1(1) + usr2(1) = 3, assistant(10) skipped
 		result, err := c.Compress(context.Background(), msgs, 3)
@@ -66,15 +55,15 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		if len(result) != 3 {
 			t.Fatalf("got %d messages, want 3", len(result))
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("result[0] role = %q, want system", result[0].Role)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("result[0] role = %q, want system", result[0].Role())
 		}
 	})
 
 	t.Run("system always retained first", func(t *testing.T) {
 		msgs := []schema.Message{
-			newSystemMessage("sys"),           // 1 token
-			schema.NewUserMessage("user msg"), // 1 token
+			newSystemMessage("sys"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "user msg"), // 1 token
 		}
 		// Budget=1: system message fits, user doesn't
 		result, err := c.Compress(context.Background(), msgs, 1)
@@ -84,16 +73,16 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		if len(result) != 1 {
 			t.Fatalf("got %d messages, want 1", len(result))
 		}
-		if result[0].Role != aimodel.RoleSystem {
-			t.Errorf("expected system message retained, got role %q", result[0].Role)
+		if result[0].Role() != schema.RoleSystem {
+			t.Errorf("expected system message retained, got role %q", result[0].Role())
 		}
 	})
 
 	t.Run("recency tie breaking", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"), // 1 token, user, index 0
-			schema.NewUserMessage("bbbb"), // 1 token, user, index 1
-			schema.NewUserMessage("cccc"), // 1 token, user, index 2
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token, user, index 0
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"), // 1 token, user, index 1
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"), // 1 token, user, index 2
 		}
 		// Budget=2: last 2 user msgs should be kept (higher recency bonus)
 		result, err := c.Compress(context.Background(), msgs, 2)
@@ -103,11 +92,11 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "bbbb" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "bbbb")
+		if result[0].Text() != "bbbb" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "bbbb")
 		}
-		if result[1].Content.Text() != "cccc" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "cccc")
+		if result[1].Text() != "cccc" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "cccc")
 		}
 	})
 
@@ -125,7 +114,7 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage("hi")}, 100)
+		_, err := c.Compress(ctx, []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")}, 100)
 		if err == nil {
 			t.Error("expected error for cancelled context")
 		}
@@ -133,11 +122,11 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("unlimited maxTokens=0", func(t *testing.T) {
 		msgs := []schema.Message{
-			schema.NewUserMessage("a"),
-			schema.NewUserMessage("b"),
-			schema.NewUserMessage("c"),
-			schema.NewUserMessage("d"),
-			schema.NewUserMessage("e"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "b"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "c"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "d"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "e"),
 		}
 		result, err := c.Compress(context.Background(), msgs, 0)
 		if err != nil {
@@ -150,11 +139,11 @@ func TestImportanceRankingCompressor(t *testing.T) {
 
 	t.Run("chronological order preserved", func(t *testing.T) {
 		msgs := []schema.Message{
-			newAssistantMessage("early"),  // low score
-			newSystemMessage("sys"),       // high score
-			schema.NewUserMessage("mid"),  // medium score
-			newToolMessage("tool"),        // medium-high score
-			newAssistantMessage("recent"), // low score
+			newAssistantMessage("early"),                            // low score
+			newSystemMessage("sys"),                                 // high score
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "mid"), // medium score
+			newToolMessage("tool"),                                  // medium-high score
+			newAssistantMessage("recent"),                           // low score
 		}
 		// Budget enough for system + tool + user (3 tokens)
 		result, err := c.Compress(context.Background(), msgs, 3)
@@ -172,7 +161,7 @@ func TestImportanceRankingCompressor(t *testing.T) {
 	t.Run("default constructor", func(t *testing.T) {
 		dc := NewImportanceRankingCompressorWithDefaults()
 		msgs := []schema.Message{
-			schema.NewUserMessage("test"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "test"),
 		}
 		result, err := dc.Compress(context.Background(), msgs, 100)
 		if err != nil {
@@ -190,9 +179,9 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		}
 		cc := NewImportanceRankingCompressor(constantScorer)
 		msgs := []schema.Message{
-			schema.NewUserMessage("aaaa"), // 1 token
-			schema.NewUserMessage("bbbb"), // 1 token
-			schema.NewUserMessage("cccc"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "aaaa"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "bbbb"), // 1 token
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "cccc"), // 1 token
 		}
 		// Budget=2: stable sort preserves original order, so first 2 should be selected
 		result, err := cc.Compress(context.Background(), msgs, 2)
@@ -202,11 +191,11 @@ func TestImportanceRankingCompressor(t *testing.T) {
 		if len(result) != 2 {
 			t.Fatalf("got %d messages, want 2", len(result))
 		}
-		if result[0].Content.Text() != "aaaa" {
-			t.Errorf("result[0] = %q, want %q", result[0].Content.Text(), "aaaa")
+		if result[0].Text() != "aaaa" {
+			t.Errorf("result[0] = %q, want %q", result[0].Text(), "aaaa")
 		}
-		if result[1].Content.Text() != "bbbb" {
-			t.Errorf("result[1] = %q, want %q", result[1].Content.Text(), "bbbb")
+		if result[1].Text() != "bbbb" {
+			t.Errorf("result[1] = %q, want %q", result[1].Text(), "bbbb")
 		}
 	})
 

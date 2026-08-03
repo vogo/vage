@@ -22,8 +22,6 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/vogo/aimodel"
 )
 
 // ErrCircuitOpen is returned when the circuit breaker is in the open state.
@@ -52,7 +50,7 @@ const (
 // Note: for streaming calls, only the stream creation error is observed.
 // Mid-stream failures (e.g. server dropping the connection after the stream
 // opens successfully) are not visible to the circuit breaker because
-// *aimodel.Stream is a concrete type that cannot be wrapped.
+// *Stream is a concrete type that cannot be wrapped.
 type CircuitBreakerMiddleware struct {
 	mu               sync.Mutex
 	state            circuitState
@@ -161,26 +159,27 @@ func (m *CircuitBreakerMiddleware) recordResult(err error) {
 	}
 }
 
-// Wrap implements Middleware. It gates both ChatCompletion and
-// ChatCompletionStream calls through the circuit breaker.
-func (m *CircuitBreakerMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+// Wrap implements Middleware. It gates both Call and CallStream through the
+// circuit breaker.
+func (m *CircuitBreakerMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			if err := m.allow(); err != nil {
 				return nil, err
 			}
 
-			resp, err := next.ChatCompletion(ctx, req)
+			resp, err := next.Call(ctx, req)
 			m.recordResult(err)
 
 			return resp, err
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			if err := m.allow(); err != nil {
 				return nil, err
 			}
 
-			s, err := next.ChatCompletionStream(ctx, req)
+			s, err := next.CallStream(ctx, req)
 			m.recordResult(err)
 
 			return s, err

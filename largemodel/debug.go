@@ -23,11 +23,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/schema"
 )
 
 // DebugSink receives debug events from the DebugMiddleware. Implementations
@@ -71,21 +70,22 @@ func NewDebugMiddleware(sink DebugSink) *DebugMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *DebugMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat:   m.chatCompletion(next),
-		stream: m.chatCompletionStream(next),
+func (m *DebugMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto:      next.Protocol(),
+		Chat:       m.call(next),
+		ChatStream: m.callStream(next),
 	}
 }
 
-func (m *DebugMiddleware) chatCompletion(next aimodel.ChatCompleter) func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
-	return func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *DebugMiddleware) call(next Caller) func(ctx context.Context, req *Request) (*Response, error) {
+	return func(ctx context.Context, req *Request) (*Response, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
 
 		m.sink.Emit(ctx, KindLLMRequest, corr, requestFields(req, false))
 
-		resp, err := next.ChatCompletion(ctx, req)
+		resp, err := next.Call(ctx, req)
 		dur := time.Since(start)
 
 		if err != nil {
@@ -103,14 +103,14 @@ func (m *DebugMiddleware) chatCompletion(next aimodel.ChatCompleter) func(ctx co
 	}
 }
 
-func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
-	return func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (m *DebugMiddleware) callStream(next Caller) func(ctx context.Context, req *Request) (*Stream, error) {
+	return func(ctx context.Context, req *Request) (*Stream, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
 
 		m.sink.Emit(ctx, KindLLMRequest, corr, requestFields(req, true))
 
-		s, err := next.ChatCompletionStream(ctx, req)
+		s, err := next.CallStream(ctx, req)
 		if err != nil {
 			m.sink.Emit(ctx, KindLLMError, corr, map[string]any{
 				"duration": time.Since(start),
@@ -125,14 +125,12 @@ func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(
 		// early termination). Stream guarantees only that Recv and Close are
 		// safe to call concurrently, so we must guard the accumulator.
 		var (
-			mu         sync.Mutex
-			contentBuf strings.Builder
-			toolCalls  []aimodel.ToolCall
-			finish     string
-			lastUsage  *aimodel.Usage
+			mu        sync.Mutex
+			acc       StreamAccumulator
+			lastUsage *schema.Usage
 		)
 
-		onChunk := func(chunk *aimodel.StreamChunk) {
+		onChunk := func(chunk *Chunk) {
 			mu.Lock()
 			defer mu.Unlock()
 
@@ -140,22 +138,7 @@ func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(
 				lastUsage = chunk.Usage
 			}
 
-			for _, ch := range chunk.Choices {
-				delta := ch.Delta
-				contentBuf.WriteString(delta.Content.Text())
-
-				for _, dtc := range delta.ToolCalls {
-					idx := dtc.Index
-					for idx >= len(toolCalls) {
-						toolCalls = append(toolCalls, aimodel.ToolCall{Index: len(toolCalls)})
-					}
-					toolCalls[idx].Merge(&dtc)
-				}
-
-				if ch.FinishReason != nil && *ch.FinishReason != "" {
-					finish = *ch.FinishReason
-				}
-			}
+			acc.Add(chunk)
 		}
 
 		onDone := func(streamErr error) {
@@ -163,9 +146,9 @@ func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(
 			fields := map[string]any{
 				"duration":      time.Since(start),
 				"streamed":      true,
-				"content":       contentBuf.String(),
-				"tool_calls":    toolCalls,
-				"finish_reason": finish,
+				"content":       acc.Text(),
+				"tool_calls":    acc.ToolCalls(),
+				"finish_reason": string(acc.FinishReason()),
 				"usage":         lastUsage,
 			}
 			mu.Unlock()
@@ -177,31 +160,28 @@ func (m *DebugMiddleware) chatCompletionStream(next aimodel.ChatCompleter) func(
 			m.sink.Emit(ctx, KindLLMResponse, corr, fields)
 		}
 
-		return aimodel.InterceptStream(s, onChunk, onDone), nil
+		return InterceptStream(s, onChunk, onDone), nil
 	}
 }
 
-func requestFields(req *aimodel.ChatRequest, streamed bool) map[string]any {
+func requestFields(req *Request, streamed bool) map[string]any {
 	if req == nil {
 		return map[string]any{}
 	}
 
 	return map[string]any{
-		"model":                 req.Model,
-		"messages":              req.Messages,
-		"tools":                 req.Tools,
-		"temperature":           req.Temperature,
-		"max_completion_tokens": req.MaxCompletionTokens,
-		"top_p":                 req.TopP,
-		"stream":                streamed || req.Stream,
-		"tool_choice":           req.ToolChoice,
-		"reasoning":             req.ReasoningEffort,
-		"response_fmt":          req.ResponseFormat,
-		"stop":                  req.Stop,
+		"model":          req.Model,
+		"messages":       req.Messages,
+		"tools":          req.Tools,
+		"temperature":    req.Temperature,
+		"max_tokens":     req.MaxTokens,
+		"stream":         streamed,
+		"prompt_caching": req.PromptCaching,
+		"stop":           req.Stop,
 	}
 }
 
-func responseFields(resp *aimodel.ChatResponse, dur time.Duration, streamed bool) map[string]any {
+func responseFields(resp *Response, dur time.Duration, streamed bool) map[string]any {
 	fields := map[string]any{
 		"duration": dur,
 		"streamed": streamed,
@@ -213,13 +193,9 @@ func responseFields(resp *aimodel.ChatResponse, dur time.Duration, streamed bool
 
 	fields["model"] = resp.Model
 	fields["usage"] = resp.Usage
-
-	if len(resp.Choices) > 0 {
-		ch := resp.Choices[0]
-		fields["content"] = ch.Message.Content.Text()
-		fields["tool_calls"] = ch.Message.ToolCalls
-		fields["finish_reason"] = string(ch.FinishReason)
-	}
+	fields["content"] = resp.Message.Text()
+	fields["tool_calls"] = resp.Message.ToolCalls()
+	fields["finish_reason"] = string(resp.FinishReason)
 
 	return fields
 }

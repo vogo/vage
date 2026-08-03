@@ -58,27 +58,27 @@ func TestEstimateTokens(t *testing.T) {
 	}{
 		{
 			name:     "empty content",
-			msg:      schema.NewUserMessage(""),
+			msg:      schema.NewUserMessage(schema.ProtocolOpenAIChat, ""),
 			expected: 0,
 		},
 		{
 			name:     "single char",
-			msg:      schema.NewUserMessage("a"),
+			msg:      schema.NewUserMessage(schema.ProtocolOpenAIChat, "a"),
 			expected: 1,
 		},
 		{
 			name:     "short text 5 chars",
-			msg:      schema.NewUserMessage("hello"),
+			msg:      schema.NewUserMessage(schema.ProtocolOpenAIChat, "hello"),
 			expected: 1,
 		},
 		{
 			name:     "8 char text",
-			msg:      schema.NewUserMessage("abcdefgh"),
+			msg:      schema.NewUserMessage(schema.ProtocolOpenAIChat, "abcdefgh"),
 			expected: 2,
 		},
 		{
 			name:     "40 char text",
-			msg:      schema.NewUserMessage(strings.Repeat("a", 40)),
+			msg:      schema.NewUserMessage(schema.ProtocolOpenAIChat, strings.Repeat("a", 40)),
 			expected: 10,
 		},
 	}

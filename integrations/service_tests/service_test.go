@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/service"
@@ -37,6 +36,13 @@ import (
 
 // newTestService creates a Service with mock agents and tools registered,
 // and returns an httptest.Server for testing.
+// withAgent stamps the producing agent onto a message.
+func withAgent(msg schema.Message, agentID string) schema.Message {
+	msg.AgentID = agentID
+
+	return msg
+}
+
 func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 	t.Helper()
 
@@ -60,14 +66,11 @@ func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 	}, func(_ context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 		var text string
 		if len(req.Messages) > 0 {
-			text = req.Messages[0].Content.Text()
+			text = req.Messages[0].Text()
 		}
 
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewAssistantMessage(
-				aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("echo: " + text)},
-				"echo",
-			)},
+			Messages:  []schema.Message{withAgent(schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "echo: "+text), "echo")},
 			SessionID: req.SessionID,
 		}, nil
 	})
@@ -87,10 +90,7 @@ func newTestService(t *testing.T) (*service.Service, *httptest.Server) {
 		}
 
 		return &schema.RunResponse{
-			Messages: []schema.Message{schema.NewAssistantMessage(
-				aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("done")},
-				"slow",
-			)},
+			Messages: []schema.Message{withAgent(schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "done"), "slow")},
 		}, nil
 	})
 
@@ -233,7 +233,7 @@ func TestRunEndpoint(t *testing.T) {
 		t.Fatal("expected at least one message in response")
 	}
 
-	text := runResp.Messages[0].Content.Text()
+	text := runResp.Messages[0].Text()
 	if !strings.Contains(text, "echo:") {
 		t.Fatalf("expected echo response, got %q", text)
 	}

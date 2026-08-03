@@ -25,22 +25,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/schema"
 )
 
 var _ Evaluator = (*LLMJudgeEval)(nil)
 
 // LLMJudgeEval uses an LLM as a judge to evaluate agent output quality.
 type LLMJudgeEval struct {
-	completer aimodel.ChatCompleter
-	model     string
+	caller largemodel.Caller
+	model  string
 }
 
-// NewLLMJudgeEval creates a new LLMJudgeEval with the given ChatCompleter and model.
-// Returns an error if completer is nil or model is empty.
-func NewLLMJudgeEval(completer aimodel.ChatCompleter, model string) (*LLMJudgeEval, error) {
-	if completer == nil {
-		return nil, errors.New("LLMJudgeEval requires a non-nil ChatCompleter")
+// NewLLMJudgeEval creates a new LLMJudgeEval with the given model caller and
+// model name. Returns an error if caller is nil or model is empty.
+func NewLLMJudgeEval(caller largemodel.Caller, model string) (*LLMJudgeEval, error) {
+	if caller == nil {
+		return nil, errors.New("LLMJudgeEval requires a non-nil Caller")
 	}
 
 	if model == "" {
@@ -48,8 +49,8 @@ func NewLLMJudgeEval(completer aimodel.ChatCompleter, model string) (*LLMJudgeEv
 	}
 
 	return &LLMJudgeEval{
-		completer: completer,
-		model:     model,
+		caller: caller,
+		model:  model,
 	}, nil
 }
 
@@ -63,25 +64,19 @@ func (e *LLMJudgeEval) Evaluate(ctx context.Context, c *EvalCase) (*EvalResult, 
 
 	prompt := e.buildJudgePrompt(c)
 
-	req := &aimodel.ChatRequest{
+	req := &largemodel.Request{
 		Model: e.model,
-		Messages: []aimodel.Message{
-			{
-				Role:    aimodel.RoleUser,
-				Content: aimodel.NewTextContent(prompt),
-			},
+		Messages: []schema.Message{
+			schema.NewUserMessage(e.caller.Protocol(), prompt),
 		},
 	}
 
-	resp, err := e.completer.ChatCompletion(ctx, req)
+	resp, err := e.caller.Call(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("LLM judge call failed: %w", err)
 	}
 
-	var responseText string
-	if len(resp.Choices) > 0 {
-		responseText = resp.Choices[0].Message.Content.Text()
-	}
+	responseText := resp.Message.Text()
 
 	score, passed, reasoning, parseErr := parseJudgeResponse(responseText)
 
@@ -132,7 +127,7 @@ func (e *LLMJudgeEval) buildJudgePrompt(c *EvalCase) string {
 	inputText := ""
 	if c.Input != nil && len(c.Input.Messages) > 0 {
 		last := c.Input.Messages[len(c.Input.Messages)-1]
-		inputText = last.Content.Text()
+		inputText = last.Text()
 	}
 
 	fmt.Fprintf(&b, "Input: %s\n", inputText)

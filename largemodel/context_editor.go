@@ -26,7 +26,6 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -74,10 +73,10 @@ type ArtifactWriter interface {
 }
 
 // SessionIDFunc extracts the session ID associated with an outgoing
-// ChatRequest. The middleware needs the ID only to namespace artifact
+// Request. The middleware needs the ID only to namespace artifact
 // names; callers that operate without sessions can leave the option
 // unset, in which case the elision pass falls back to the inline form.
-type SessionIDFunc func(req *aimodel.ChatRequest) string
+type SessionIDFunc func(req *Request) string
 
 // DefaultContextEditPlaceholderV2 is the V2 default. It surfaces the
 // editor's reason inline so a human reading the prompt can immediately
@@ -96,13 +95,13 @@ func DefaultContextEditPlaceholderV2(toolCallID string, originalBytes int, reaso
 }
 
 // ContextEditorMiddleware folds older tool_result messages into short
-// placeholders before the request reaches the underlying ChatCompleter,
-// so multi-iteration ReAct loops do not pay for the full tool_result
+// placeholders before the request reaches the underlying Caller, so
+// multi-iteration ReAct loops do not pay for the full tool_result
 // payload on every turn.
 //
-// Editing is applied to a SHALLOW COPY of *aimodel.ChatRequest. The
+// Editing is applied to a SHALLOW COPY of *Request. The
 // caller's request and its Messages slice are never mutated; modified
-// messages are constructed as new aimodel.Message values placed in a
+// messages are constructed as new schema.Message values placed in a
 // fresh slice.
 //
 // The middleware is stateless: each Chat / Stream call is judged
@@ -193,7 +192,7 @@ func WithArtifactWriter(w ArtifactWriter) ContextEditorOption {
 }
 
 // WithSessionIDFunc tells the editor how to derive the session ID
-// from an outgoing ChatRequest. Required for artifact externalisation
+// from an outgoing Request. Required for artifact externalisation
 // (without a session id the editor cannot namespace the artifact);
 // safely no-op for callers who never enable single-message elision.
 func WithSessionIDFunc(fn SessionIDFunc) ContextEditorOption {
@@ -216,15 +215,16 @@ func NewContextEditorMiddleware(opts ...ContextEditorOption) *ContextEditorMiddl
 }
 
 // Wrap implements Middleware.
-func (m *ContextEditorMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatCompleter {
-	return &completerFunc{
-		chat: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (m *ContextEditorMiddleware) Wrap(next Caller) Caller {
+	return &CallerFunc{
+		Proto: next.Protocol(),
+		Chat: func(ctx context.Context, req *Request) (*Response, error) {
 			edReq := m.edit(ctx, req)
-			return next.ChatCompletion(ctx, edReq)
+			return next.Call(ctx, edReq)
 		},
-		stream: func(ctx context.Context, req *aimodel.ChatRequest) (*aimodel.Stream, error) {
+		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			edReq := m.edit(ctx, req)
-			return next.ChatCompletionStream(ctx, edReq)
+			return next.CallStream(ctx, edReq)
 		},
 	}
 }
@@ -236,7 +236,7 @@ func (m *ContextEditorMiddleware) Wrap(next aimodel.ChatCompleter) aimodel.ChatC
 // (opt-in via WithStaleResourceTracker), and keep_last_k (always on,
 // controlled by keepLast). Side-effect: emits an event when any
 // elision happened and a dispatch is configured.
-func (m *ContextEditorMiddleware) edit(ctx context.Context, req *aimodel.ChatRequest) *aimodel.ChatRequest {
+func (m *ContextEditorMiddleware) edit(ctx context.Context, req *Request) *Request {
 	if req == nil || len(req.Messages) == 0 {
 		return req
 	}
@@ -268,7 +268,7 @@ func (m *ContextEditorMiddleware) edit(ctx context.Context, req *aimodel.ChatReq
 
 	totalElidedBytes := 0
 	for _, idx := range allIdx {
-		totalElidedBytes += len(req.Messages[idx].Content.Text())
+		totalElidedBytes += len(req.Messages[idx].Text())
 	}
 
 	if m.minElidedBytes > 0 && totalElidedBytes < m.minElidedBytes {
@@ -301,10 +301,10 @@ func (m *ContextEditorMiddleware) edit(ctx context.Context, req *aimodel.ChatReq
 // last keepLast) plus the total count of tool_result messages. The
 // indices are ascending so callers can union with other strategies via
 // mergeElideIndices.
-func (m *ContextEditorMiddleware) scanByKeepLastK(msgs []aimodel.Message) ([]int, int) {
+func (m *ContextEditorMiddleware) scanByKeepLastK(msgs []schema.Message) ([]int, int) {
 	var toolIdx []int
 	for i := range msgs {
-		if msgs[i].Role == aimodel.RoleTool {
+		if msgs[i].Role() == schema.RoleTool {
 			toolIdx = append(toolIdx, i)
 		}
 	}
@@ -325,7 +325,7 @@ func (m *ContextEditorMiddleware) scanByKeepLastK(msgs []aimodel.Message) ([]int
 // detail (e.g. "file /a/b modified by call_3") suitable for inclusion
 // in the placeholder. Returns nil when stale detection is disabled,
 // when no writes are observed, or when no read is shadowed.
-func (m *ContextEditorMiddleware) scanByStale(msgs []aimodel.Message) map[int]string {
+func (m *ContextEditorMiddleware) scanByStale(msgs []schema.Message) map[int]string {
 	if m.resourceLookup == nil {
 		return nil
 	}
@@ -349,18 +349,18 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []aimodel.Message) map[int]st
 	// failing the whole request.
 	for i := range msgs {
 		msg := &msgs[i]
-		if msg.Role != aimodel.RoleAssistant || len(msg.ToolCalls) == 0 {
+		if msg.Role() != schema.RoleAssistant || len(msg.ToolCalls()) == 0 {
 			continue
 		}
-		for _, tc := range msg.ToolCalls {
-			args := parseToolArgs(tc.Function.Arguments)
+		for _, tc := range msg.ToolCalls() {
+			args := parseToolArgs(tc.Arguments)
 			callInfo[tc.ID] = callDesc{
-				toolName:     tc.Function.Name,
+				toolName:     tc.Name,
 				args:         args,
 				assistantIdx: i,
 			}
 
-			tracker := m.resourceLookup(tc.Function.Name)
+			tracker := m.resourceLookup(tc.Name)
 			if tracker == nil || args == nil {
 				continue
 			}
@@ -386,10 +386,10 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []aimodel.Message) map[int]st
 	staleByIdx := make(map[int]string)
 	for i := range msgs {
 		msg := &msgs[i]
-		if msg.Role != aimodel.RoleTool {
+		if msg.Role() != schema.RoleTool {
 			continue
 		}
-		info, ok := callInfo[msg.ToolCallID]
+		info, ok := callInfo[msg.ToolCallID()]
 		if !ok || info.args == nil {
 			continue
 		}
@@ -486,16 +486,16 @@ func dominantStrategyRank(strategy string) int {
 	}
 }
 
-// applyElision builds a new []aimodel.Message of the same length as
+// applyElision builds a new []schema.Message of the same length as
 // msgs. Indices in elideIdx (ascending) are replaced with placeholder
 // messages; all others are copied through verbatim. The per-index
 // reason/detail come from the shared strategyResolver.
 func (m *ContextEditorMiddleware) applyElision(
-	msgs []aimodel.Message,
+	msgs []schema.Message,
 	elideIdx []int,
 	resolver strategyResolver,
-) ([]aimodel.Message, int) {
-	out := make([]aimodel.Message, len(msgs))
+) ([]schema.Message, int) {
+	out := make([]schema.Message, len(msgs))
 	placeholderBytes := 0
 	cursor := 0
 
@@ -507,19 +507,16 @@ func (m *ContextEditorMiddleware) applyElision(
 		cursor++
 
 		original := msgs[i]
-		originalBytes := len(original.Content.Text())
+		originalBytes := len(original.Text())
 
 		reason, detail := resolver.strategyForIndex(i)
 
-		placeholder := m.renderPlaceholder(original.ToolCallID, originalBytes, reason, detail)
+		placeholder := m.renderPlaceholder(original.ToolCallID(), originalBytes, reason, detail)
 		placeholderBytes += len(placeholder)
 
-		out[i] = aimodel.Message{
-			Role:            aimodel.RoleTool,
-			Content:         aimodel.NewTextContent(placeholder),
-			ToolCallID:      original.ToolCallID,
-			CacheBreakpoint: original.CacheBreakpoint,
-		}
+		out[i] = schema.NewToolResultMessage(
+			original.Protocol, original.ToolCallID(), placeholder, false,
+		)
 	}
 
 	return out, placeholderBytes
@@ -531,7 +528,7 @@ func (m *ContextEditorMiddleware) applyElision(
 // or no message tripped the threshold. The pass writes to the artifact
 // store synchronously — write failures degrade to elide_inline rather
 // than aborting the request.
-func (m *ContextEditorMiddleware) scanByElide(ctx context.Context, req *aimodel.ChatRequest) map[int]elideOutcome {
+func (m *ContextEditorMiddleware) scanByElide(ctx context.Context, req *Request) map[int]elideOutcome {
 	if m.maxBytesPerMessage <= 0 {
 		return nil
 	}
@@ -544,10 +541,10 @@ func (m *ContextEditorMiddleware) scanByElide(ctx context.Context, req *aimodel.
 
 	for i := range req.Messages {
 		msg := &req.Messages[i]
-		if msg.Role != aimodel.RoleTool {
+		if msg.Role() != schema.RoleTool {
 			continue
 		}
-		body := msg.Content.Text()
+		body := msg.Text()
 		if len(body) <= m.maxBytesPerMessage {
 			continue
 		}

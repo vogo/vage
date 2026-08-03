@@ -29,8 +29,8 @@ func TestRequestMessagesSource_Pass(t *testing.T) {
 	src := &RequestMessagesSource{}
 	req := &schema.RunRequest{
 		Messages: []schema.Message{
-			schema.NewUserMessage("hi"),
-			schema.NewUserMessage("again"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi"),
+			schema.NewUserMessage(schema.ProtocolOpenAIChat, "again"),
 		},
 	}
 

@@ -23,34 +23,35 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/aimodel"
+	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
 
-// stubChatCompleter is a minimal ChatCompleter that records the incoming
-// request and returns a hard-coded response. The tests do not exercise the
-// streaming path; ChatCompletionStream returns ErrNotImplemented to make
-// any accidental use noisy.
-type stubChatCompleter struct {
-	gotReq      *aimodel.ChatRequest
+// stubCaller is a minimal Caller that records the incoming request and
+// returns a hard-coded response. The tests do not exercise the streaming
+// path; CallStream returns an error to make any accidental use noisy.
+type stubCaller struct {
+	gotReq      *largemodel.Request
 	respText    string
 	respErr     error
 	streamCalls int
 }
 
-func (s *stubChatCompleter) ChatCompletion(_ context.Context, req *aimodel.ChatRequest) (*aimodel.ChatResponse, error) {
+func (s *stubCaller) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+
+func (s *stubCaller) Call(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	s.gotReq = req
 	if s.respErr != nil {
 		return nil, s.respErr
 	}
-	return &aimodel.ChatResponse{Choices: []aimodel.Choice{{
-		Message: aimodel.Message{Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent(s.respText)},
-	}}}, nil
+
+	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, s.respText, schema.Usage{}), nil
 }
 
-func (s *stubChatCompleter) ChatCompletionStream(_ context.Context, _ *aimodel.ChatRequest) (*aimodel.Stream, error) {
+func (s *stubCaller) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	s.streamCalls++
+
 	return nil, errors.New("not implemented")
 }
 
@@ -72,7 +73,7 @@ func TestNoopPromoter(t *testing.T) {
 }
 
 func TestLLMPromoter_HappyPath(t *testing.T) {
-	cli := &stubChatCompleter{respText: "  rolled-up paragraph  "}
+	cli := &stubCaller{respText: "  rolled-up paragraph  "}
 	p := &LLMPromoter{Client: cli, Model: "test-model"}
 	parent := &TreeNode{Title: "Build OAuth", Summary: "wiring deps", Status: StatusActive}
 	children := []*TreeNode{
@@ -93,17 +94,17 @@ func TestLLMPromoter_HappyPath(t *testing.T) {
 	if len(cli.gotReq.Messages) != 2 {
 		t.Fatalf("messages=%d want 2", len(cli.gotReq.Messages))
 	}
-	userBody := cli.gotReq.Messages[1].Content.Text()
+	userBody := cli.gotReq.Messages[1].Text()
 	if !strings.Contains(userBody, "Build OAuth") || !strings.Contains(userBody, "design schema") {
 		t.Errorf("user body missing parent/child: %q", userBody)
 	}
-	if cli.gotReq.MaxCompletionTokens == nil || *cli.gotReq.MaxCompletionTokens != defaultLLMPromoterMaxTokens {
-		t.Errorf("MaxCompletionTokens not set to default: %v", cli.gotReq.MaxCompletionTokens)
+	if cli.gotReq.MaxTokens == nil || *cli.gotReq.MaxTokens != defaultLLMPromoterMaxTokens {
+		t.Errorf("MaxCompletionTokens not set to default: %v", cli.gotReq.MaxTokens)
 	}
 }
 
 func TestLLMPromoter_NoChildren(t *testing.T) {
-	cli := &stubChatCompleter{respText: "should not be called"}
+	cli := &stubCaller{respText: "should not be called"}
 	p := &LLMPromoter{Client: cli}
 	parent := &TreeNode{Summary: "current"}
 	out, err := p.Summarize(context.Background(), parent, nil)
@@ -125,7 +126,7 @@ func TestLLMPromoter_NilClient(t *testing.T) {
 
 func TestLLMPromoter_ChatError(t *testing.T) {
 	wantErr := errors.New("network down")
-	cli := &stubChatCompleter{respErr: wantErr}
+	cli := &stubCaller{respErr: wantErr}
 	p := &LLMPromoter{Client: cli}
 	_, err := p.Summarize(context.Background(), &TreeNode{Title: "P"}, []*TreeNode{{Title: "C"}})
 	if !errors.Is(err, wantErr) {
@@ -147,9 +148,7 @@ func (f *fakeCompressor) Compress(_ context.Context, msgs []schema.Message, maxT
 	if f.respErr != nil {
 		return nil, f.respErr
 	}
-	out := []schema.Message{{Message: aimodel.Message{
-		Role: aimodel.RoleAssistant, Content: aimodel.NewTextContent("compressed:" + msgs[0].Content.Text()),
-	}}}
+	out := []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "compressed:"+msgs[0].Text())}
 	return out, nil
 }
 
