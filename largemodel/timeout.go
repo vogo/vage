@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// TimeoutMiddleware adds a per-call context deadline to ChatCompletion calls.
+// TimeoutMiddleware adds a per-call context deadline to Call.
 // Stream calls pass the caller's context through unchanged so that the timeout
 // does not cancel an in-progress stream after the first chunk arrives.
 type TimeoutMiddleware struct {
@@ -47,7 +47,7 @@ func (m *TimeoutMiddleware) Wrap(next Caller) Caller {
 		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
 			// Pass the caller's context directly. Applying a timeout here would
 			// cancel the derived context via defer cancel() as soon as
-			// ChatCompletionStream returns, killing the stream before the caller
+			// CallStream returns, killing the stream before the caller
 			// has consumed any chunks.
 			return next.CallStream(ctx, req)
 		},

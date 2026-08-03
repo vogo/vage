@@ -35,11 +35,11 @@ const (
 
 // retryableStatusCodes are HTTP status codes that indicate a transient error.
 var retryableStatusCodes = map[int]bool{
-	429:               true, // Too Many Requests
-	500:               true, // Internal Server Error
-	502:               true, // Bad Gateway
-	503:               true, // Service Unavailable
-	statusOverloaded:  true, // 529 Overloaded (Anthropic)
+	429:              true, // Too Many Requests
+	500:              true, // Internal Server Error
+	502:              true, // Bad Gateway
+	503:              true, // Service Unavailable
+	statusOverloaded: true, // 529 Overloaded (Anthropic)
 }
 
 // BackoffStrategy computes the delay before a retry attempt.
@@ -71,8 +71,8 @@ func (b *ExponentialBackoff) Delay(attempt int) time.Duration {
 	return delay + jitter
 }
 
-// RetryMiddleware retries failed ChatCompletion and ChatCompletionStream calls
-// with exponential backoff.
+// RetryMiddleware retries failed Call and CallStream requests with
+// exponential backoff.
 type RetryMiddleware struct {
 	maxRetries      int
 	baseDelay       time.Duration

@@ -33,20 +33,20 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// mockChatCompleter is a scripted largemodel.Caller for integration tests.
+// mockCaller is a scripted largemodel.Caller for integration tests.
 // It returns pre-configured responses with known usage data.
-type mockChatCompleter struct {
+type mockCaller struct {
 	*largemodel.FakeCaller
 }
 
 // testProtocol is the wire form these integration tests script against.
 const testProtocol = schema.ProtocolOpenAIChat
 
-func newMock(responses ...*largemodel.Response) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+func newMock(responses ...*largemodel.Response) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
-func (m *mockChatCompleter) getCalls() int { return m.Calls() }
+func (m *mockCaller) getCalls() int { return m.Calls() }
 
 // makeStopResponse creates a stop response with the given text and total token usage.
 func makeStopResponse(text string, totalTokens int) *largemodel.Response {
@@ -120,7 +120,7 @@ func collectEvents(hm *hook.Manager) *[]schema.Event {
 
 // Test 1: Budget exhaustion returns partial results (Run).
 //
-// Configures an TaskAgent with a mock ChatCompleter that returns responses with
+// Configures an TaskAgent with a mock Caller that returns responses with
 // known usage (100 tokens per call). Sets budget to 200 to allow exactly 2 LLM
 // calls. Verifies:
 //   - The third call is prevented by the pre-call budget check.
@@ -185,7 +185,7 @@ func TestBudgetExhaustion_Run_PartialResults(t *testing.T) {
 
 // Test 2: Budget exhaustion emits correct events (Run path with hooks).
 //
-// Configures an TaskAgent with a mock ChatCompleter and a hook manager.
+// Configures an TaskAgent with a mock Caller and a hook manager.
 // Sets a small budget that exhausts after the first LLM call. Verifies:
 //   - EventTokenBudgetExhausted appears in the event sequence.
 //   - It appears before EventAgentEnd.

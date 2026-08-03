@@ -31,7 +31,7 @@ import (
 )
 
 // preflightRun performs the pre-context preparation shared by Run and
-// RunStream: it validates the ChatCompleter, runs input guards (which may
+// RunStream: it validates the Caller, runs input guards (which may
 // rewrite the request in place), and resolves the effective run parameters.
 //
 // It deliberately stops before building the context so callers can place
@@ -72,7 +72,7 @@ func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p ru
 
 // reactMode captures the sync/stream differences the shared ReAct loop
 // funnels through. Everything else — iteration counting, pre/post budget
-// checks, ChatRequest assembly, checkpoint writes, stop-reason detection and
+// checks, Request assembly, checkpoint writes, stop-reason detection and
 // the tool batch choke point — lives in runReactLoop so the two execution
 // modes cannot drift.
 type reactMode interface {
@@ -170,7 +170,7 @@ func (a *Agent) runReactLoop(
 	return schema.StopReasonMaxIterations, nil
 }
 
-// syncMode is the non-streaming reactMode. It calls ChatCompletion, reads the
+// syncMode is the non-streaming reactMode. It calls Caller.Call, reads the
 // authoritative Usage from the response, emits no IterationStart / TextDelta /
 // ToolResult events, and routes tool events through hook dispatch only.
 type syncMode struct {
@@ -199,7 +199,7 @@ func (m *syncMode) toolBatchSink() (bool, func(schema.Event) error) {
 	}
 }
 
-// streamMode is the streaming reactMode. It calls ChatCompletionStream,
+// streamMode is the streaming reactMode. It calls Caller.CallStream,
 // accumulates the assistant message chunk by chunk while emitting TextDelta,
 // sends an IterationStart per iteration, prefers the stream Usage (falling
 // back to byte-based token estimation when absent), and forwards tool results

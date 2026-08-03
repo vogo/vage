@@ -75,20 +75,20 @@ func routeNil(_ context.Context, _ *schema.RunRequest, _ []routeragent.Route) (*
 	return nil, nil
 }
 
-// --- mockChatCompleter for LLM integration tests ---
+// --- mockCaller for LLM integration tests ---
 
-type mockChatCompleter struct {
+type mockCaller struct {
 	*largemodel.FakeCaller
 }
 
-func newMock(resp *largemodel.Response) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{
+func newMock(resp *largemodel.Response) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{
 		Responses: []*largemodel.Response{resp},
 	}}
 }
 
 // captured returns the request the router sent, or nil if it sent none.
-func (m *mockChatCompleter) captured() *largemodel.Request {
+func (m *mockCaller) captured() *largemodel.Request {
 	reqs := m.Requests()
 	if len(reqs) == 0 {
 		return nil
@@ -97,8 +97,8 @@ func (m *mockChatCompleter) captured() *largemodel.Request {
 	return reqs[0]
 }
 
-func newMockErr(err error) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Err: err}}
+func newMockErr(err error) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Err: err}}
 }
 
 func llmResponse(text string, prompt, completion, total int) *largemodel.Response {

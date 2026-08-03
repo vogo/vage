@@ -240,10 +240,7 @@ func (a *StreamAccumulator) Add(chunk *Chunk) {
 // addToolCallDelta merges a tool-call fragment into the call at its index,
 // growing the slice with placeholders when fragments arrive out of order.
 func (a *StreamAccumulator) addToolCallDelta(d *ToolCallDelta) {
-	idx := d.Index
-	if idx < 0 {
-		idx = 0
-	}
+	idx := max(d.Index, 0)
 
 	for idx >= len(a.calls) {
 		a.calls = append(a.calls, accumulatedCall{})

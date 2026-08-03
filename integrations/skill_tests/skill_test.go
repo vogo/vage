@@ -106,24 +106,24 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// capturingChatCompleter records ChatRequests sent to it so tests can inspect
+// capturingCaller records requests sent to it so tests can inspect
 // the system prompt and tools list.
-type capturingChatCompleter struct {
+type capturingCaller struct {
 	*largemodel.FakeCaller
 }
 
 // newCapturing returns a mock that answers every call with a terminal reply,
 // so the ReAct loop stops after one iteration and the test can inspect the
 // request it produced.
-func newCapturing() *capturingChatCompleter {
-	return &capturingChatCompleter{FakeCaller: &largemodel.FakeCaller{
+func newCapturing() *capturingCaller {
+	return &capturingCaller{FakeCaller: &largemodel.FakeCaller{
 		Responses: []*largemodel.Response{
 			largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, "ok", schema.Usage{}),
 		},
 	}}
 }
 
-func (c *capturingChatCompleter) getRequests() []*largemodel.Request { return c.Requests() }
+func (c *capturingCaller) getRequests() []*largemodel.Request { return c.Requests() }
 
 // ---------------------------------------------------------------------------
 // Test 1: Full Lifecycle (no LLM required)
@@ -274,7 +274,7 @@ func TestSkillFullLifecycle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: TaskAgent with Skills (mock ChatCompleter)
+// Test 2: TaskAgent with Skills (mock Caller)
 //
 // Verifies TaskAgent integration:
 //   - Skill instructions are injected into the system prompt
@@ -336,7 +336,7 @@ func TestSkillTaskAgentIntegration(t *testing.T) {
 	// Verify the system prompt contains skill instructions.
 	reqs := cc.getRequests()
 	if len(reqs) == 0 {
-		t.Fatal("no ChatRequests captured")
+		t.Fatal("no requests captured")
 	}
 
 	sysPrompt := ""

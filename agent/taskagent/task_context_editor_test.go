@@ -145,7 +145,7 @@ func TestAgent_WithoutContextEditor_NoChange(t *testing.T) {
 }
 
 // TestAgent_WithContextEditor_NilOption keeps the chain untouched —
-// guards against accidentally wrapping ChatCompleter with a nil mw.
+// guards against accidentally wrapping the caller with a nil mw.
 func TestAgent_WithContextEditor_NilOption(t *testing.T) {
 	mock := newMock(stopResponse("ok"))
 

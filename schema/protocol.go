@@ -33,10 +33,15 @@ import (
 // protocol that recorded it.
 type Protocol string
 
-// The protocols vage speaks. Each maps to one native aimodel client:
-// ProtocolOpenAIChat to openai.Client.ChatCompletions, ProtocolOpenAIResponses
-// to openai.Client.Responses, and ProtocolAnthropicMessages to
-// anthropic.Client.Messages.
+// The protocols vage speaks. Each implemented one maps to a native aimodel
+// client: ProtocolOpenAIChat to openai.Client.ChatCompletions and
+// ProtocolAnthropicMessages to anthropic.Client.Messages.
+//
+// ProtocolOpenAIResponses names OpenAI's Responses API, which vage does not
+// implement yet: largemodel ships no Caller for it, so Valid rejects it rather
+// than letting a configuration pass validation and then find no caller to run
+// on. The constant is kept so the wire form is already named when the caller
+// lands.
 const (
 	ProtocolOpenAIChat        Protocol = "openai-chat"
 	ProtocolOpenAIResponses   Protocol = "openai-responses"
@@ -53,10 +58,12 @@ var ErrUnknownProtocol = errors.New("vage: unknown model protocol")
 // another.
 var ErrProtocolMismatch = errors.New("vage: message protocol mismatch")
 
-// Valid reports whether p is a protocol vage implements.
+// Valid reports whether p is a protocol vage implements — that is, one a
+// largemodel Caller can actually speak. A protocol that is merely named, such
+// as ProtocolOpenAIResponses, is not valid until its caller exists.
 func (p Protocol) Valid() bool {
 	switch p {
-	case ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropicMessages:
+	case ProtocolOpenAIChat, ProtocolAnthropicMessages:
 		return true
 	default:
 		return false

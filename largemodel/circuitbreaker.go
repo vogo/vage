@@ -159,8 +159,8 @@ func (m *CircuitBreakerMiddleware) recordResult(err error) {
 	}
 }
 
-// Wrap implements Middleware. It gates both ChatCompletion and
-// ChatCompletionStream calls through the circuit breaker.
+// Wrap implements Middleware. It gates both Call and CallStream through the
+// circuit breaker.
 func (m *CircuitBreakerMiddleware) Wrap(next Caller) Caller {
 	return &CallerFunc{
 		Proto: next.Protocol(),

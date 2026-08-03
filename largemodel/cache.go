@@ -36,7 +36,7 @@ type Cache interface {
 	Set(ctx context.Context, key string, resp *Response, ttl time.Duration)
 }
 
-// CacheMiddleware caches ChatCompletion responses.
+// CacheMiddleware caches Call responses.
 // Stream calls are passed through without caching.
 type CacheMiddleware struct {
 	cache Cache

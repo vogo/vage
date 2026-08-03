@@ -73,7 +73,7 @@ type ArtifactWriter interface {
 }
 
 // SessionIDFunc extracts the session ID associated with an outgoing
-// ChatRequest. The middleware needs the ID only to namespace artifact
+// Request. The middleware needs the ID only to namespace artifact
 // names; callers that operate without sessions can leave the option
 // unset, in which case the elision pass falls back to the inline form.
 type SessionIDFunc func(req *Request) string
@@ -192,7 +192,7 @@ func WithArtifactWriter(w ArtifactWriter) ContextEditorOption {
 }
 
 // WithSessionIDFunc tells the editor how to derive the session ID
-// from an outgoing ChatRequest. Required for artifact externalisation
+// from an outgoing Request. Required for artifact externalisation
 // (without a session id the editor cannot namespace the artifact);
 // safely no-op for callers who never enable single-message elision.
 func WithSessionIDFunc(fn SessionIDFunc) ContextEditorOption {

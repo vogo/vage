@@ -41,7 +41,8 @@ func ExampleNewOpenAIChatCaller() {
 
 	// Wrap the caller in the governance middlewares. Ordering is meaningful:
 	// the first listed is outermost.
-	model := largemodel.New(caller,
+	model := largemodel.New(
+		caller,
 		largemodel.WithMiddleware(
 			largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
 			largemodel.NewTimeoutMiddleware(30*time.Second),
@@ -58,14 +59,16 @@ func ExampleNewOpenAIChatCaller() {
 func ExampleNewAnthropicMessagesCaller() {
 	// An empty base URL uses https://api.anthropic.com. Vendor headers are
 	// set through the provider's own client options.
-	caller, err := largemodel.NewAnthropicMessagesCaller("sk-ant-your-key", "",
+	caller, err := largemodel.NewAnthropicMessagesCaller(
+		"sk-ant-your-key", "",
 		anthropic.WithBeta("context-1m-2025-08-07"),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	model := largemodel.New(caller,
+	model := largemodel.New(
+		caller,
 		largemodel.WithMiddleware(
 			largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
 		),

@@ -28,19 +28,19 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// stubChatCompleter is a minimal Caller that records the incoming request and
+// stubCaller is a minimal Caller that records the incoming request and
 // returns a hard-coded response. The tests do not exercise the streaming
 // path; CallStream returns an error to make any accidental use noisy.
-type stubChatCompleter struct {
+type stubCaller struct {
 	gotReq      *largemodel.Request
 	respText    string
 	respErr     error
 	streamCalls int
 }
 
-func (s *stubChatCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
+func (s *stubCaller) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
 
-func (s *stubChatCompleter) Call(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+func (s *stubCaller) Call(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	s.gotReq = req
 	if s.respErr != nil {
 		return nil, s.respErr
@@ -49,7 +49,7 @@ func (s *stubChatCompleter) Call(_ context.Context, req *largemodel.Request) (*l
 	return largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, s.respText, schema.Usage{}), nil
 }
 
-func (s *stubChatCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
+func (s *stubCaller) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	s.streamCalls++
 
 	return nil, errors.New("not implemented")
@@ -73,7 +73,7 @@ func TestNoopPromoter(t *testing.T) {
 }
 
 func TestLLMPromoter_HappyPath(t *testing.T) {
-	cli := &stubChatCompleter{respText: "  rolled-up paragraph  "}
+	cli := &stubCaller{respText: "  rolled-up paragraph  "}
 	p := &LLMPromoter{Client: cli, Model: "test-model"}
 	parent := &TreeNode{Title: "Build OAuth", Summary: "wiring deps", Status: StatusActive}
 	children := []*TreeNode{
@@ -104,7 +104,7 @@ func TestLLMPromoter_HappyPath(t *testing.T) {
 }
 
 func TestLLMPromoter_NoChildren(t *testing.T) {
-	cli := &stubChatCompleter{respText: "should not be called"}
+	cli := &stubCaller{respText: "should not be called"}
 	p := &LLMPromoter{Client: cli}
 	parent := &TreeNode{Summary: "current"}
 	out, err := p.Summarize(context.Background(), parent, nil)
@@ -126,7 +126,7 @@ func TestLLMPromoter_NilClient(t *testing.T) {
 
 func TestLLMPromoter_ChatError(t *testing.T) {
 	wantErr := errors.New("network down")
-	cli := &stubChatCompleter{respErr: wantErr}
+	cli := &stubCaller{respErr: wantErr}
 	p := &LLMPromoter{Client: cli}
 	_, err := p.Summarize(context.Background(), &TreeNode{Title: "P"}, []*TreeNode{{Title: "C"}})
 	if !errors.Is(err, wantErr) {

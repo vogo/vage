@@ -37,7 +37,7 @@ import (
 
 // cachingTestAgent builds an agent with one tool and a system prompt, the two
 // surfaces prompt caching applies to.
-func cachingTestAgent(t *testing.T, mock *mockChatCompleter, opts ...Option) *Agent {
+func cachingTestAgent(t *testing.T, mock *mockCaller, opts ...Option) *Agent {
 	t.Helper()
 
 	reg := tool.NewRegistry()
@@ -60,7 +60,7 @@ func cachingTestAgent(t *testing.T, mock *mockChatCompleter, opts ...Option) *Ag
 }
 
 // runCachingAgent runs one turn and returns the request the agent produced.
-func runCachingAgent(t *testing.T, a *Agent, mock *mockChatCompleter) *largemodel.Request {
+func runCachingAgent(t *testing.T, a *Agent, mock *mockCaller) *largemodel.Request {
 	t.Helper()
 
 	if _, err := a.Run(context.Background(), &schema.RunRequest{

@@ -39,19 +39,19 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// mockChatCompleter scripts model responses for the ReAct loop. It wraps
+// mockCaller scripts model responses for the ReAct loop. It wraps
 // largemodel.FakeCaller so tests keep their terse constructor style while the
 // dual-track envelope handling lives in one shared place.
-type mockChatCompleter struct {
+type mockCaller struct {
 	*largemodel.FakeCaller
 }
 
-func newMock(responses ...*largemodel.Response) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+func newMock(responses ...*largemodel.Response) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
-func newMockErr(err error) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Err: err}}
+func newMockErr(err error) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Err: err}}
 }
 
 // testProtocol is the wire form the taskagent unit tests script against.
@@ -124,7 +124,7 @@ func TestNew_WithOptions(t *testing.T) {
 	}
 }
 
-func TestAgent_Run_NoChatCompleter(t *testing.T) {
+func TestAgent_Run_NoCaller(t *testing.T) {
 	a := New(agent.Config{})
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
@@ -821,7 +821,7 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 	}
 }
 
-func TestAgent_RunStream_NoChatCompleter(t *testing.T) {
+func TestAgent_RunStream_NoCaller(t *testing.T) {
 	a := New(agent.Config{})
 	_, err := a.RunStream(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},

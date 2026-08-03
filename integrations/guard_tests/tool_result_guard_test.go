@@ -42,21 +42,21 @@ import (
 )
 
 // =============================================================================
-// Mock ChatCompleter and helpers (copied from taskagent/task_test.go because
+// Mock Caller and helpers (copied from taskagent/task_test.go because
 // those symbols are unexported and this integration test lives in a separate
 // package).
 // =============================================================================
 
-// mockChatCompleter is a scripted largemodel.Caller for non-streaming tests.
-type mockChatCompleter struct {
+// mockCaller is a scripted largemodel.Caller for non-streaming tests.
+type mockCaller struct {
 	*largemodel.FakeCaller
 }
 
 // testProtocol is the wire form these guard tests script against.
 const testProtocol = schema.ProtocolOpenAIChat
 
-func newMock(responses ...*largemodel.Response) *mockChatCompleter {
-	return &mockChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+func newMock(responses ...*largemodel.Response) *mockCaller {
+	return &mockCaller{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
 // toolCallResponseTR builds a ChatResponse that triggers a single tool call.

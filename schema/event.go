@@ -95,7 +95,7 @@ const (
 	EventCheckpointWritten = "checkpoint_written"
 
 	// Context editing event (emitted by largemodel.ContextEditorMiddleware
-	// when at least one tool_result in an outgoing ChatRequest is folded
+	// when at least one tool_result in an outgoing Request is folded
 	// into a placeholder). Payload is ContextEditedData. Silent passes
 	// (nothing eligible / under threshold) emit no event.
 	EventContextEdited = "context_edited"
@@ -499,7 +499,7 @@ func (CheckpointWrittenData) eventData() {}
 
 // ContextEditedData is the payload for EventContextEdited. It is
 // emitted by largemodel.ContextEditorMiddleware after a successful
-// edit pass on a single outgoing ChatRequest. Edited is always >= 1
+// edit pass on a single outgoing Request. Edited is always >= 1
 // (silent passes emit no event).
 type ContextEditedData struct {
 	Edited        int    `json:"edited"`                      // count of tool_result messages elided this pass

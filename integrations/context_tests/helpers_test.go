@@ -33,19 +33,19 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// fakeChatCompleter is a minimal largemodel.Caller used to capture the
+// fakeCaller is a minimal largemodel.Caller used to capture the
 // message list TaskAgent forwards to the LLM. Each invocation pops one
 // pre-configured response and stores the request that produced it so tests
 // can assert on the exact prompt assembly.
-type fakeChatCompleter struct {
+type fakeCaller struct {
 	*largemodel.FakeCaller
 }
 
-func newFake(responses ...*largemodel.Response) *fakeChatCompleter {
-	return &fakeChatCompleter{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
+func newFake(responses ...*largemodel.Response) *fakeCaller {
+	return &fakeCaller{FakeCaller: &largemodel.FakeCaller{Responses: responses}}
 }
 
-func (m *fakeChatCompleter) firstRequest(t *testing.T) *largemodel.Request {
+func (m *fakeCaller) firstRequest(t *testing.T) *largemodel.Request {
 	t.Helper()
 
 	reqs := m.Requests()

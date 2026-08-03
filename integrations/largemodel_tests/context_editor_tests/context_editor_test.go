@@ -42,7 +42,7 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// recordingCompleter records every ChatRequest the upstream middleware
+// recordingCompleter records every Request the upstream middleware
 // chain passes down. It implements largemodel.Caller so it can sit
 // directly under the ContextEditorMiddleware in the wrap chain — every
 // request the editor forwards is captured here for inspection.
@@ -557,7 +557,7 @@ func TestIntegration_TaskAgent_NoContextEditor_NoElision(t *testing.T) {
 // TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant asserts
 // that after a multi-iteration Run, the caller-supplied RunRequest.Messages
 // stay byte-for-byte unchanged AND every internal tool_result the agent
-// appended carries the FULL original payload (only the OUTBOUND ChatRequest
+// appended carries the FULL original payload (only the OUTBOUND Request
 // gets edited; the agent's own accumulator must remain intact).
 //
 // Strategy: snapshot the user RunRequest before Run; after Run, compare.

@@ -291,7 +291,7 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 	// here keeps a caller/config mismatch from building every message in the
 	// wrong wire form and failing only at the first real call.
 	if a.caller != nil {
-		a.Base.AgentProtocol = a.caller.Protocol()
+		a.AgentProtocol = a.caller.Protocol()
 	}
 
 	// WithContextEditor is order-insensitive: wrap the caller at the

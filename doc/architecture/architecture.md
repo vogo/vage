@@ -70,7 +70,7 @@ sequenceDiagram
     Task->>Ctx: 装配提示(系统提示+会话记忆+extras+请求消息)
     Task->>Guard: 校验输入
     loop ReAct 迭代(≤maxIter, 受token预算)
-        Task->>LLM: ChatCompletion(经中间件链+上下文编辑)
+        Task->>LLM: Call(经中间件链+上下文编辑)
         alt 有工具调用
             Task->>Tool: 并行执行工具批
             Tool-->>Task: ToolResult(经工具结果护栏)

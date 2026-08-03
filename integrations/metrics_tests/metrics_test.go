@@ -31,7 +31,7 @@ import (
 )
 
 // Test 2a: MetricsMiddleware propagates CacheReadTokens in sync path.
-// Creates a MetricsMiddleware wrapping a mock ChatCompleter returning fixed
+// Creates a MetricsMiddleware wrapping a mock Caller returning fixed
 // usage with CacheReadTokens, and verifies dispatched LLMCallEndData includes it.
 func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	// Set up mock server returning usage with cache tokens via OpenAI protocol.
