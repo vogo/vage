@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/vogo/aimodel/composes"
+	"github.com/vogo/aimodel/composes/anthropics"
 	"github.com/vogo/aimodel/provider/anthropic"
 	"github.com/vogo/vage/schema"
 )
@@ -35,51 +37,53 @@ import (
 // rather than merely convenient.
 const defaultAnthropicMaxTokens = 4096
 
-// anthropicBlockToolUse is the content-block type carrying a tool call.
-// Anthropic expresses tool calls as content blocks rather than as a dedicated
-// message field.
-const anthropicBlockToolUse = "tool_use"
+// AnthropicMessagesBackend is the method set an Anthropic Messages backend
+// must provide. It is exactly what *anthropic.Client offers and exactly what
+// aimodel's anthropics.ComposeClient offers, so a single-endpoint client and a
+// multi-endpoint pool are interchangeable behind the same Caller.
+type AnthropicMessagesBackend interface {
+	Messages(ctx context.Context, request *anthropic.MessagesRequest) (*anthropic.MessagesResponse, error)
+	MessagesStream(ctx context.Context, request *anthropic.MessagesRequest) (*anthropic.MessageStream, error)
+}
 
-// Anthropic stream event names.
-const (
-	anthropicEventContentBlockStart = "content_block_start"
-	anthropicEventContentBlockDelta = "content_block_delta"
-	anthropicEventMessageDelta      = "message_delta"
-	anthropicEventMessageStart      = "message_start"
-	anthropicEventError             = "error"
-)
-
-// Anthropic stop reasons that map onto vage's cross-vendor finish reasons.
-// Values outside this set (refusal, pause_turn, …) pass through verbatim.
-const (
-	anthropicStopEndTurn   = "end_turn"
-	anthropicStopMaxTokens = "max_tokens"
-	anthropicStopToolUse   = "tool_use"
-	anthropicStopSequence  = "stop_sequence"
-)
-
-// anthropicMessagesCaller calls Anthropic's Messages API through the native
-// aimodel client. Anthropic differs structurally from OpenAI in three ways
-// this type absorbs: system text belongs to a request field rather than a
-// message, tool calls and results are content blocks rather than message
-// fields, and max_tokens is mandatory.
+// anthropicMessagesCaller calls Anthropic's Messages API through an aimodel
+// backend. Anthropic differs structurally from OpenAI in three ways this type
+// absorbs: system text belongs to a request field rather than a message, tool
+// calls and results are content blocks rather than message fields, and
+// max_tokens is mandatory.
 type anthropicMessagesCaller struct {
-	client *anthropic.Client
+	client AnthropicMessagesBackend
 }
 
 // NewAnthropicMessagesCaller builds a Caller over Anthropic's Messages API.
 // baseURL may be empty to use Anthropic's own endpoint. The API key is
 // required and validated here so misconfiguration surfaces before any call.
-func NewAnthropicMessagesCaller(apiKey, baseURL string, opts ...anthropic.ClientOption) (Caller, error) {
+//
+// As with the OpenAI caller, the endpoint is reached through an aimodel pool
+// of one, so retries and the dead/recover window apply to a single endpoint
+// too. Vendor headers and other provider client options go through
+// [WithAnthropicClientOptions]; use [NewAnthropicMessagesCallerFromBackend] to
+// bypass routing.
+func NewAnthropicMessagesCaller(
+	apiKey, baseURL string, opts ...ComposeOption,
+) (*AnthropicMessagesComposeCaller, error) {
 	if apiKey == "" {
 		return nil, ErrNoAPIKey
 	}
 
+	cfg := newComposeConfig(opts...)
+
+	clientOpts := cfg.anthropicClientOpts
 	if baseURL != "" {
-		opts = append([]anthropic.ClientOption{anthropic.WithBaseURL(baseURL)}, opts...)
+		clientOpts = append([]anthropic.ClientOption{anthropic.WithBaseURL(baseURL)}, clientOpts...)
 	}
 
-	return &anthropicMessagesCaller{client: anthropic.NewClient(apiKey, opts...)}, nil
+	client := anthropic.NewClient(apiKey, clientOpts...)
+	entries := []anthropics.ModelEntry{{Client: client, Alias: defaultEndpointAlias}}
+
+	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
+		return anthropics.NewComposeClient(composes.StrategyFailover, entries, cfg.routerOpts...)
+	}, cfg)
 }
 
 // Protocol implements Caller.
@@ -226,12 +230,14 @@ func (c *anthropicMessagesCaller) buildTools(req *Request, wire *anthropic.Messa
 		})
 
 		if def.ForceUse && wire.ToolChoice == nil {
-			wire.ToolChoice = &anthropic.ToolChoice{Type: "tool", Name: def.Name}
+			wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeTool, Name: def.Name}
 		}
 	}
 
 	if req.PromptCaching && len(wire.Tools) > 0 {
-		wire.Tools[len(wire.Tools)-1].CacheControl = &anthropic.CacheControl{Type: "ephemeral"}
+		wire.Tools[len(wire.Tools)-1].CacheControl = &anthropic.CacheControl{
+			Type: anthropic.CacheControlTypeEphemeral,
+		}
 	}
 
 	return nil
@@ -251,9 +257,9 @@ func anthropicSystemField(text string, promptCaching bool) (json.RawMessage, err
 	}
 
 	raw, err := json.Marshal([]anthropic.ContentBlock{{
-		Type:         "text",
+		Type:         anthropic.ContentBlockTypeText,
 		Text:         text,
-		CacheControl: &anthropic.CacheControl{Type: "ephemeral"},
+		CacheControl: &anthropic.CacheControl{Type: anthropic.CacheControlTypeEphemeral},
 	}})
 	if err != nil {
 		return nil, fmt.Errorf("vage: encode anthropic system prompt: %w", err)
@@ -267,11 +273,11 @@ func anthropicSystemField(text string, promptCaching bool) (json.RawMessage, err
 // through verbatim so callers can recognize them.
 func anthropicFinishReason(reason string) FinishReason {
 	switch reason {
-	case anthropicStopEndTurn, anthropicStopSequence:
+	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
 		return FinishReasonStop
-	case anthropicStopMaxTokens:
+	case anthropic.StopReasonMaxTokens:
 		return FinishReasonLength
-	case anthropicStopToolUse:
+	case anthropic.StopReasonToolUse:
 		return FinishReasonToolCalls
 	case "":
 		return ""
@@ -322,12 +328,6 @@ type anthropicStreamDecoder struct {
 	// toolCount is the number of tool_use blocks opened so far, and thus the
 	// ordinal assigned to the next one.
 	toolCount int
-
-	// startUsage retains the input and cache counts from message_start.
-	// Anthropic splits usage across the stream: message_start reports the
-	// prompt side, and the terminal message_delta typically reports only
-	// output_tokens. The two are merged so the final usage is complete.
-	startUsage anthropic.MessagesUsage
 }
 
 // next returns the next chunk, skipping events that carry no information for
@@ -347,7 +347,7 @@ func (d *anthropicStreamDecoder) next() (*Chunk, error) {
 		// transport error, so the stream has to be failed here. Skipping it
 		// would let a truncated turn pass for a complete one, and the
 		// governance middlewares would never see the failure.
-		if event.Type == anthropicEventError {
+		if event.Type == anthropic.StreamEventTypeError {
 			return nil, anthropicStreamError(event.Error)
 		}
 
@@ -364,14 +364,12 @@ func (d *anthropicStreamDecoder) next() (*Chunk, error) {
 // carries nothing the caller needs.
 func (d *anthropicStreamDecoder) translate(event *anthropic.StreamEvent) (*Chunk, bool) {
 	switch event.Type {
-	case anthropicEventContentBlockStart:
+	case anthropic.StreamEventTypeContentBlockStart:
 		return d.translateBlockStart(event)
-	case anthropicEventContentBlockDelta:
+	case anthropic.StreamEventTypeContentBlockDelta:
 		return d.translateBlockDelta(event)
-	case anthropicEventMessageDelta:
+	case anthropic.StreamEventTypeMessageDelta:
 		return d.translateMessageDelta(event)
-	case anthropicEventMessageStart:
-		return d.translateMessageStart(event)
 	default:
 		return nil, false
 	}
@@ -428,7 +426,7 @@ func anthropicErrorStatus(errType string) int {
 // tool call, carrying its id and name; other block types start no chunk.
 func (d *anthropicStreamDecoder) translateBlockStart(event *anthropic.StreamEvent) (*Chunk, bool) {
 	start := event.ContentBlockStart
-	if start == nil || start.ContentBlock.Type != anthropicBlockToolUse {
+	if start == nil || start.ContentBlock.Type != anthropic.ContentBlockTypeToolUse {
 		return nil, false
 	}
 
@@ -488,12 +486,15 @@ func (d *anthropicStreamDecoder) translateMessageDelta(event *anthropic.StreamEv
 
 	chunk := &Chunk{FinishReason: anthropicFinishReason(md.Delta.StopReason)}
 
+	// The stream folds message_start's prompt-side counts together with this
+	// event's output counts as it decodes, so its snapshot is already the
+	// complete accounting for the turn. Reporting it only here, on the
+	// terminal event, is what keeps the prompt tokens from being billed twice.
 	if md.Usage != nil {
-		merged := d.startUsage
-		mergeAnthropicUsage(&merged, md.Usage)
-
-		usage := anthropicUsage(&merged)
-		chunk.Usage = &usage
+		if merged := d.stream.Usage(); merged != nil {
+			usage := anthropicUsage(merged)
+			chunk.Usage = &usage
+		}
 	}
 
 	if chunk.FinishReason == "" && chunk.Usage == nil {
@@ -501,48 +502,6 @@ func (d *anthropicStreamDecoder) translateMessageDelta(event *anthropic.StreamEv
 	}
 
 	return chunk, true
-}
-
-// translateMessageStart records the prompt-side usage for later merging. It
-// starts no chunk of its own: reporting usage here as well as on the terminal
-// event would bill the prompt tokens twice.
-func (d *anthropicStreamDecoder) translateMessageStart(event *anthropic.StreamEvent) (*Chunk, bool) {
-	if event.MessageStart == nil {
-		return nil, false
-	}
-
-	d.startUsage = event.MessageStart.Message.Usage
-
-	return nil, false
-}
-
-// mergeAnthropicUsage overlays the counts a later event reports onto the
-// baseline from message_start. Only non-zero fields overwrite, because the
-// terminal event omits the prompt-side counts rather than zeroing them.
-func mergeAnthropicUsage(base, next *anthropic.MessagesUsage) {
-	if next.InputTokens != 0 {
-		base.InputTokens = next.InputTokens
-	}
-
-	if next.OutputTokens != 0 {
-		base.OutputTokens = next.OutputTokens
-	}
-
-	if next.CacheCreationInputTokens != 0 {
-		base.CacheCreationInputTokens = next.CacheCreationInputTokens
-	}
-
-	if next.CacheReadInputTokens != 0 {
-		base.CacheReadInputTokens = next.CacheReadInputTokens
-	}
-
-	if next.OutputTokensDetails != nil {
-		base.OutputTokensDetails = next.OutputTokensDetails
-	}
-
-	if next.ServiceTier != "" {
-		base.ServiceTier = next.ServiceTier
-	}
 }
 
 // normalizeAnthropicError converts a native Anthropic failure into vage's
@@ -554,7 +513,7 @@ func normalizeAnthropicError(err error) error {
 	}
 
 	return &APIError{
-		StatusCode: httpErr.StatusCode,
+		StatusCode: httpErr.Status,
 		Type:       httpErr.Type,
 		Message:    httpErr.Message,
 		Err:        err,

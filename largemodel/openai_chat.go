@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/vogo/aimodel/composes"
+	"github.com/vogo/aimodel/composes/openais"
 	"github.com/vogo/aimodel/provider/openai"
 	"github.com/vogo/vage/schema"
 )
@@ -31,28 +33,55 @@ import (
 // choices, leaving nothing for the agent to act on.
 var ErrEmptyResponse = errors.New("vage: empty response from model")
 
-// openAIChatCaller calls OpenAI's Chat Completions API through the native
-// aimodel client, translating between vage's envelopes and OpenAI's wire
-// types. It also serves OpenAI-compatible endpoints, which speak the same
-// protocol at a different base URL.
+// OpenAIChatBackend is the method set an OpenAI Chat Completions backend must
+// provide. It is exactly what *openai.Client offers and exactly what
+// aimodel's openais.ComposeClient offers, so a single-endpoint client and a
+// multi-endpoint pool are interchangeable behind the same Caller.
+type OpenAIChatBackend interface {
+	ChatCompletions(ctx context.Context, request *openai.ChatCompletionRequest) (*openai.ChatCompletionResponse, error)
+	ChatCompletionsStream(ctx context.Context, request *openai.ChatCompletionRequest) (*openai.ChatCompletionStream, error)
+}
+
+// openAIChatCaller calls OpenAI's Chat Completions API through an aimodel
+// backend, translating between vage's envelopes and OpenAI's wire types. It
+// also serves OpenAI-compatible endpoints, which speak the same protocol at a
+// different base URL.
 type openAIChatCaller struct {
-	client *openai.Client
+	client OpenAIChatBackend
 }
 
 // NewOpenAIChatCaller builds a Caller over OpenAI's Chat Completions API.
 // baseURL may be empty to use OpenAI's own endpoint, or point at any
 // OpenAI-compatible endpoint. The API key is required and validated here so
 // misconfiguration surfaces before any call is attempted.
-func NewOpenAIChatCaller(apiKey, baseURL string, opts ...openai.ClientOption) (Caller, error) {
+//
+// The endpoint is reached through an aimodel pool of one, so a single endpoint
+// gets the same in-call retries and the same dead/recover window as a pool of
+// several — see [OpenAIChatComposeCaller] for what that means, and
+// [WithComposeRouterOptions] to tune it. Provider client options go through
+// [WithOpenAIClientOptions]. Pass [NewOpenAIChatCallerFromBackend] a client
+// instead to bypass routing altogether.
+func NewOpenAIChatCaller(apiKey, baseURL string, opts ...ComposeOption) (*OpenAIChatComposeCaller, error) {
 	if apiKey == "" {
 		return nil, ErrNoAPIKey
 	}
 
+	cfg := newComposeConfig(opts...)
+
+	clientOpts := cfg.openAIClientOpts
 	if baseURL != "" {
-		opts = append([]openai.ClientOption{openai.WithBaseURL(baseURL)}, opts...)
+		clientOpts = append([]openai.ClientOption{openai.WithBaseURL(baseURL)}, clientOpts...)
 	}
 
-	return &openAIChatCaller{client: openai.NewClient(apiKey, opts...)}, nil
+	// The client carries no mutable state, so every pool in the set shares this
+	// one — what a pool owns is the routing and health of its endpoints, not
+	// the transport. Leaving Name empty keeps the model the request asked for.
+	client := openai.NewClient(apiKey, clientOpts...)
+	entries := []openais.ModelEntry{{Client: client, Alias: defaultEndpointAlias}}
+
+	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
+		return openais.NewComposeClient(composes.StrategyFailover, entries, cfg.routerOpts...)
+	}, cfg)
 }
 
 // Protocol implements Caller.
@@ -145,7 +174,7 @@ func (c *openAIChatCaller) buildRequest(req *Request) (*openai.ChatCompletionReq
 
 	for _, def := range req.Tools {
 		wire.Tools = append(wire.Tools, openai.ChatCompletionTool{
-			Type: "function",
+			Type: openai.ToolTypeFunction,
 			Function: openai.ChatCompletionFunction{
 				Name:        def.Name,
 				Description: def.Description,
@@ -167,7 +196,7 @@ func forcedToolChoice(defs []schema.ToolDef) any {
 	for _, def := range defs {
 		if def.ForceUse {
 			return map[string]any{
-				"type":     "function",
+				"type":     openai.ToolTypeFunction,
 				"function": map[string]any{"name": def.Name},
 			}
 		}
@@ -246,7 +275,7 @@ func normalizeOpenAIError(err error) error {
 	}
 
 	return &APIError{
-		StatusCode: httpErr.StatusCode,
+		StatusCode: httpErr.Status,
 		Code:       httpErr.Code,
 		Type:       httpErr.Type,
 		Message:    httpErr.Message,

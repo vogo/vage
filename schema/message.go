@@ -229,7 +229,7 @@ func NewAssistantTurn(proto Protocol, text, thinking string, calls []ToolCall) M
 		wire.ToolCalls = append(wire.ToolCalls, openai.ChatCompletionToolCall{
 			Index: i,
 			ID:    call.ID,
-			Type:  "function",
+			Type:  openai.ToolTypeFunction,
 			Function: openai.ChatCompletionFunctionCall{
 				Name:      call.Name,
 				Arguments: call.Arguments,

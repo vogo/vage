@@ -27,11 +27,11 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/integrations/internal/testenv"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
@@ -42,8 +42,8 @@ import (
 func TestTaskAgentIntegration(t *testing.T) {
 	// Create aimodel client. Reads AI_API_KEY / AI_BASE_URL / AI_MODEL from env.
 	client, err := largemodel.NewOpenAIChatCaller(
-		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
-		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
+		testenv.First("AI_API_KEY", "OPENAI_API_KEY"),
+		testenv.First("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Logf("Failed to create aimodel client: %v", err)
@@ -106,14 +106,14 @@ func TestTaskAgentIntegration(t *testing.T) {
 		memory.WithCompressor(memory.NewSlidingWindowCompressor(20)),
 	)
 
-	// Build the largemodel with middleware.
+	// Build the largemodel with middleware. Retries live inside the caller's
+	// aimodel pool, so the chain only carries observability here.
 	// MetricsMiddleware dispatches LLM call events to the hook system.
 	model := largemodel.New(
 		client,
 		largemodel.WithMiddleware(
 			largemodel.NewMetricsMiddleware(hm.Dispatch),
 			largemodel.NewLogMiddleware(),
-			largemodel.NewRetryMiddleware(),
 		),
 	)
 

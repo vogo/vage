@@ -95,7 +95,7 @@ func TestProviderError_StatusCodes(t *testing.T) {
 				// Retry decisions are made on the normalized error, so the
 				// two providers must agree on which failures are transient.
 				wantRetry := status != http.StatusBadRequest
-				if got := isRetryable(err); got != wantRetry {
+				if got := IsRetryable(err); got != wantRetry {
 					t.Errorf("isRetryable = %v, want %v", got, wantRetry)
 				}
 			})

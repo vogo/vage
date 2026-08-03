@@ -16,8 +16,8 @@
  */
 
 // Package largemodel calls vendor model APIs and wraps them in the
-// cross-cutting governance vage applies to every call: retry, caching, rate
-// limiting, circuit breaking, timeouts, budgets, logging and metrics.
+// cross-cutting governance vage applies to every call: caching, rate limiting,
+// timeouts, budgets, logging and metrics.
 //
 // vage speaks each vendor's native protocol directly — OpenAI Chat
 // Completions, OpenAI Responses, and Anthropic Messages — rather than through
@@ -25,6 +25,13 @@
 // configuration time, and the Caller for that protocol owns the translation
 // between vage's Request/Response envelopes and that vendor's wire types.
 // Middlewares wrap a Caller and see only the envelopes.
+//
+// Retrying a failed call and taking a sick endpoint out of rotation are not
+// among those concerns, and no middleware here provides them. A Caller reaches
+// its vendor through an aimodel pool — one endpoint or several, the shape is
+// the same — and that pool owns the retries, the endpoint health and the
+// failover. vage does not run a second attempt loop above it; see
+// OpenAIChatComposeCaller for what the pool does and how to tune it.
 package largemodel
 
 // Middleware wraps a Caller to add cross-cutting behavior.
@@ -52,7 +59,7 @@ func Chain(base Caller, middlewares ...Middleware) Caller {
 }
 
 // DefaultChain is like Chain but skips nil entries in the middleware slice.
-// Recommended ordering: Log → CircuitBreaker → RateLimit → Retry → Timeout → Cache → base.
+// Recommended ordering: Log → RateLimit → Timeout → Cache → base.
 func DefaultChain(base Caller, middlewares ...Middleware) Caller {
 	var mws []Middleware
 
