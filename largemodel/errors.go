@@ -26,6 +26,11 @@ import (
 // construction time, before any network I/O is attempted.
 var ErrNoAPIKey = errors.New("vage: API key is required")
 
+// statusOverloaded is Anthropic's 529, returned when the API is temporarily
+// over capacity. It has no net/http constant because it is outside the
+// registered status codes.
+const statusOverloaded = 529
+
 // APIError is a non-2xx response from a model vendor, normalized so the
 // governance middlewares can judge failures uniformly. Each protocol's caller
 // maps its vendor error onto this type, preserving the HTTP status along with

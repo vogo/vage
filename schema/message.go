@@ -461,22 +461,20 @@ func (m *Message) SetText(text string) {
 		rewritten := make([]anthropicBlock, 0, len(blocks)+1)
 		replaced := false
 
+		// Only the first textual block is rewritten; every other block is
+		// carried through untouched, so a multi-block message (merged tool
+		// results, thinking, tool calls) keeps everything the rewrite does not
+		// address.
 		for _, block := range blocks {
-			switch block.Type {
-			case anthropicBlockText:
-				if replaced {
-					continue
+			if !replaced {
+				switch block.Type {
+				case anthropicBlockText:
+					block.Text = text
+					replaced = true
+				case anthropicBlockToolResult:
+					block.Content = json.RawMessage(mustEncodeString(text))
+					replaced = true
 				}
-
-				block.Text = text
-				replaced = true
-			case anthropicBlockToolResult:
-				if replaced {
-					continue
-				}
-
-				block.Content = json.RawMessage(mustEncodeString(text))
-				replaced = true
 			}
 
 			rewritten = append(rewritten, block)

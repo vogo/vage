@@ -95,8 +95,8 @@ func DefaultContextEditPlaceholderV2(toolCallID string, originalBytes int, reaso
 }
 
 // ContextEditorMiddleware folds older tool_result messages into short
-// placeholders before the request reaches the underlying ChatCompleter,
-// so multi-iteration ReAct loops do not pay for the full tool_result
+// placeholders before the request reaches the underlying Caller, so
+// multi-iteration ReAct loops do not pay for the full tool_result
 // payload on every turn.
 //
 // Editing is applied to a SHALLOW COPY of *Request. The

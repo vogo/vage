@@ -48,8 +48,10 @@ type Stream struct {
 	closed atomic.Bool
 
 	// usage retains the last usage the vendor reported, which arrives on or
-	// near the terminal chunk.
-	usage *schema.Usage
+	// near the terminal chunk. It is held atomically rather than under mu
+	// because Close reads it while a Recv may be blocked on a network read
+	// still holding mu — taking mu here would deadlock the two.
+	usage atomic.Pointer[schema.Usage]
 
 	// onClose, when set, fires once with the final usage as the stream
 	// closes. Middlewares use it to record accounting exactly once, whether
@@ -82,7 +84,7 @@ func (s *Stream) Recv() (*Chunk, error) {
 
 	chunk, err := s.recv()
 	if chunk != nil && chunk.Usage != nil {
-		s.usage = chunk.Usage
+		s.usage.Store(chunk.Usage)
 	}
 
 	return chunk, err
@@ -90,16 +92,16 @@ func (s *Stream) Recv() (*Chunk, error) {
 
 // Usage returns the final token accounting the vendor reported, or nil when
 // the stream ended without reporting any.
+//
+// It takes no lock, so it stays callable from Close while a Recv is in flight.
 func (s *Stream) Usage() *schema.Usage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.usage
+	return s.usage.Load()
 }
 
 // Close releases the stream's resources. It is idempotent and safe to call
 // concurrently with Recv — closing the underlying body unblocks a Recv already
-// in flight, which is why the release runs without holding the mutex.
+// in flight, which is why neither the release nor the onClose callback takes
+// the mutex the blocked Recv is holding.
 func (s *Stream) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil

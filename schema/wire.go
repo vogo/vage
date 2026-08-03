@@ -126,6 +126,69 @@ func newAnthropicMessage(role string, blocks ...anthropicBlock) *anthropic.Messa
 	}
 }
 
+// MergeAnthropicToolResults collapses each run of consecutive user messages
+// that carry nothing but tool_result blocks into a single message, keeping the
+// blocks in their original order.
+//
+// vage records one message per tool result, so a guard or an editor can
+// address each result on its own. The Messages API, however, requires every
+// tool_result answering one assistant turn to travel in the single user
+// message that immediately follows it — a second tool_result message would be
+// rejected because the message before it holds no tool_use blocks. Parallel
+// tool calls therefore have to be joined on the way out, which is what this
+// does.
+//
+// Messages that mix a tool_result with anything else are left alone: they are
+// not something vage builds, and merging them could reorder content the model
+// produced.
+func MergeAnthropicToolResults(msgs []anthropic.MessagesMessage) []anthropic.MessagesMessage {
+	merged := make([]anthropic.MessagesMessage, 0, len(msgs))
+	inRun := false
+
+	for _, msg := range msgs {
+		if !anthropicToolResultOnly(msg) {
+			merged = append(merged, msg)
+			inRun = false
+
+			continue
+		}
+
+		if !inRun {
+			merged = append(merged, msg)
+			inRun = true
+
+			continue
+		}
+
+		last := &merged[len(merged)-1]
+		blocks := append(decodeAnthropicBlocks(last.Content), decodeAnthropicBlocks(msg.Content)...)
+		last.Content = encodeAnthropicBlocks(blocks)
+	}
+
+	return merged
+}
+
+// anthropicToolResultOnly reports whether msg is a user message whose content
+// is one or more tool_result blocks and nothing else.
+func anthropicToolResultOnly(msg anthropic.MessagesMessage) bool {
+	if msg.Role != anthropicRoleUser {
+		return false
+	}
+
+	blocks := decodeAnthropicBlocks(msg.Content)
+	if len(blocks) == 0 {
+		return false
+	}
+
+	for _, block := range blocks {
+		if block.Type != anthropicBlockToolResult {
+			return false
+		}
+	}
+
+	return true
+}
+
 // anthropicToolResultText renders the content of a tool_result block as text.
 // The field is polymorphic — a bare string for simple results, an array of
 // blocks for structured ones — so both forms collapse to their text.

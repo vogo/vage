@@ -285,6 +285,15 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 		o(a)
 	}
 
+	// The caller is the single source of truth for the wire protocol: it is
+	// what actually reaches a vendor, and cfg.Protocol defaults to
+	// openai-chat whenever it is left unset. Adopting the caller's protocol
+	// here keeps a caller/config mismatch from building every message in the
+	// wrong wire form and failing only at the first real call.
+	if a.caller != nil {
+		a.Base.AgentProtocol = a.caller.Protocol()
+	}
+
 	// WithContextEditor is order-insensitive: wrap the caller at the
 	// innermost layer once all options have resolved. A nil caller means
 	// the agent will fail at first Run as before — wrapping nil would just

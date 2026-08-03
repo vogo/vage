@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/vogo/aimodel/provider/anthropic"
@@ -192,6 +193,11 @@ func (c *anthropicMessagesCaller) buildRequest(req *Request) (*anthropic.Message
 		wire.Messages = append(wire.Messages, *msg.Anthropic)
 	}
 
+	// Parallel tool calls produce one tool_result message each, but the
+	// Messages API accepts them only as a single user message following the
+	// assistant turn that requested them.
+	wire.Messages = schema.MergeAnthropicToolResults(wire.Messages)
+
 	if len(systemParts) > 0 {
 		system, err := anthropicSystemField(strings.Join(systemParts, "\n\n"), req.PromptCaching)
 		if err != nil {
@@ -337,6 +343,14 @@ func (d *anthropicStreamDecoder) next() (*Chunk, error) {
 			return nil, normalizeAnthropicError(err)
 		}
 
+		// An error event is delivered as an ordinary event rather than as a
+		// transport error, so the stream has to be failed here. Skipping it
+		// would let a truncated turn pass for a complete one, and the
+		// governance middlewares would never see the failure.
+		if event.Type == anthropicEventError {
+			return nil, anthropicStreamError(event.Error)
+		}
+
 		chunk, ok := d.translate(event)
 		if !ok {
 			continue
@@ -358,10 +372,55 @@ func (d *anthropicStreamDecoder) translate(event *anthropic.StreamEvent) (*Chunk
 		return d.translateMessageDelta(event)
 	case anthropicEventMessageStart:
 		return d.translateMessageStart(event)
-	case anthropicEventError:
-		return nil, false
 	default:
 		return nil, false
+	}
+}
+
+// anthropicStreamError converts a mid-stream error event into an APIError. The
+// event carries no HTTP status of its own — the response headers were already
+// 200 by the time it arrived — so the status is derived from Anthropic's error
+// type, which is what retry and circuit-breaking judge on.
+func anthropicStreamError(resp *anthropic.MessagesErrorResponse) error {
+	if resp == nil {
+		return &APIError{
+			StatusCode: http.StatusInternalServerError,
+			Message:    "anthropic stream reported an error event without detail",
+		}
+	}
+
+	return &APIError{
+		StatusCode: anthropicErrorStatus(resp.Error.Type),
+		Type:       resp.Error.Type,
+		Message:    resp.Error.Message,
+	}
+}
+
+// anthropicErrorStatus maps an Anthropic error type onto the HTTP status the
+// same failure carries when it arrives as a non-2xx response, so a mid-stream
+// failure is judged exactly like one that happened before the stream opened.
+func anthropicErrorStatus(errType string) int {
+	switch errType {
+	case "invalid_request_error":
+		return http.StatusBadRequest
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	case "not_found_error":
+		return http.StatusNotFound
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "timeout_error":
+		return http.StatusRequestTimeout
+	case "overloaded_error":
+		return statusOverloaded
+	default:
+		// api_error and anything Anthropic adds later: treat as a server-side
+		// fault, which is both true of api_error and the safer default.
+		return http.StatusInternalServerError
 	}
 }
 
