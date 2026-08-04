@@ -153,7 +153,7 @@ func TestComposeCaller_Failover(t *testing.T) {
 		t.Fatalf("len(Stats()) = %d, want 2", len(stats))
 	}
 
-	if stats[0].Alias != "primary" || stats[0].Status != composeStatusDead {
+	if stats[0].Alias != "primary" || stats[0].Status != composes.StatusDead {
 		t.Errorf("primary stat = %+v, want alias=primary status=dead", stats[0])
 	}
 
@@ -495,7 +495,7 @@ func TestAnthropicComposeCaller_Failover(t *testing.T) {
 	}
 
 	stats := caller.Stats()
-	if len(stats) != 2 || stats[0].Status != composeStatusDead {
+	if len(stats) != 2 || stats[0].Status != composes.StatusDead {
 		t.Errorf("Stats() = %+v, want primary dead", stats)
 	}
 }
@@ -531,7 +531,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 		t.Fatalf("len(Stats()) = %d, want 1", len(stats))
 	}
 
-	if stats[0].Alias != defaultEndpointAlias || stats[0].Status != composeStatusDead {
+	if stats[0].Alias != defaultEndpointAlias || stats[0].Status != composes.StatusDead {
 		t.Errorf("stat = %+v, want alias=%q status=dead", stats[0], defaultEndpointAlias)
 	}
 
@@ -546,6 +546,60 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 
 	if got := srv.hits.Load(); got != before {
 		t.Errorf("server was hit %d more times while the endpoint was dead", got-before)
+	}
+}
+
+// TestComposeCaller_ProbationCostsOneAttempt pins what a recovered endpoint
+// costs. aimodel restores a dead endpoint on the clock alone, which proves
+// nothing, so the endpoint comes back on probation: still selectable, but
+// attempted once rather than under the retry policy. A pool of one makes the
+// difference countable — three attempts to die, one to re-test.
+func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
+	const recoverTime = 50 * time.Millisecond
+
+	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
+
+	caller, err := NewOpenAIChatCaller(
+		"test-key", srv.URL,
+		WithComposeRouterOptions(
+			composes.WithRetryPolicy(time.Millisecond, 2),
+			composes.WithRecoverTime(recoverTime),
+		),
+	)
+	if err != nil {
+		t.Fatalf("NewOpenAIChatCaller: %v", err)
+	}
+
+	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
+		t.Fatal("Call succeeded, want failure")
+	}
+
+	if got := srv.hits.Load(); got != 3 {
+		t.Fatalf("hits before death = %d, want 3 (one attempt plus two retries)", got)
+	}
+
+	// Once the window elapses the endpoint reads as on probation rather than
+	// as plain available: nothing has confirmed it, only time has passed.
+	waitFor(t, func() bool {
+		stats := caller.Stats()
+
+		return len(stats) == 1 && stats[0].Status == composes.StatusProbation
+	})
+
+	before := srv.hits.Load()
+
+	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
+		t.Fatal("Call on probation succeeded, want failure")
+	}
+
+	if got := srv.hits.Load() - before; got != 1 {
+		t.Errorf("hits on probation = %d, want 1 (the retry policy must not apply)", got)
+	}
+
+	// A failed probation attempt restarts the window, so the endpoint is dead
+	// again rather than staying selectable.
+	if stats := caller.Stats(); stats[0].Status != composes.StatusDead {
+		t.Errorf("status after failed probation = %q, want %q", stats[0].Status, composes.StatusDead)
 	}
 }
 
@@ -606,6 +660,44 @@ func TestComposeCallerFromClient_RejectsNil(t *testing.T) {
 	}
 }
 
+// TestMergeEndpointStats_Probation covers the three-way status merge: the most
+// confident opinion any pool holds wins, so probation outranks dead and is in
+// turn outranked by a pool that has actually succeeded.
+func TestMergeEndpointStats_Probation(t *testing.T) {
+	merged := mergeEndpointStats([][]composes.EndpointStat{
+		{
+			{Alias: "a", Status: composes.StatusDead},
+			{Alias: "b", Status: composes.StatusDead},
+			{Alias: "c", Status: composes.StatusProbation},
+		},
+		{
+			{Alias: "a", Status: composes.StatusProbation},
+			{Alias: "b", Status: composes.StatusDead},
+			{Alias: "c", Status: composes.StatusAvailable},
+		},
+	})
+
+	want := []string{composes.StatusProbation, composes.StatusDead, composes.StatusAvailable}
+	for i, w := range want {
+		if merged[i].Status != w {
+			t.Errorf("merged[%d] (%s) status = %q, want %q", i, merged[i].Alias, merged[i].Status, w)
+		}
+	}
+}
+
+// TestMergeEndpointStats_UnknownStatus pins the conservative default: a status
+// vage does not recognise is not evidence that a backend is usable, so it
+// reports as dead rather than being mistaken for something better.
+func TestMergeEndpointStats_UnknownStatus(t *testing.T) {
+	merged := mergeEndpointStats([][]composes.EndpointStat{
+		{{Alias: "a", Status: "quarantined-in-some-future-release"}},
+	})
+
+	if merged[0].Status != composes.StatusDead {
+		t.Errorf("merged status = %q, want %q", merged[0].Status, composes.StatusDead)
+	}
+}
+
 // TestMergeEndpointStats covers the merge rule directly: an endpoint counts as
 // dead only when every pool that met it judged it dead, error counts add up,
 // and the most recent failure wins.
@@ -618,12 +710,12 @@ func TestMergeEndpointStats(t *testing.T) {
 
 	merged := mergeEndpointStats([][]composes.EndpointStat{
 		{
-			{Alias: "a", Status: composeStatusDead, ErrorCount: 1, LastError: errEarly, ErrorTime: early},
-			{Alias: "b", Status: composeStatusAvailable, Active: true},
+			{Alias: "a", Status: composes.StatusDead, ErrorCount: 1, LastError: errEarly, ErrorTime: early},
+			{Alias: "b", Status: composes.StatusAvailable, Active: true},
 		},
 		{
-			{Alias: "a", Status: composeStatusDead, ErrorCount: 2, LastError: errLate, ErrorTime: late},
-			{Alias: "b", Status: composeStatusDead, ErrorCount: 1},
+			{Alias: "a", Status: composes.StatusDead, ErrorCount: 2, LastError: errLate, ErrorTime: late},
+			{Alias: "b", Status: composes.StatusDead, ErrorCount: 1},
 		},
 	})
 
@@ -631,7 +723,7 @@ func TestMergeEndpointStats(t *testing.T) {
 		t.Fatalf("len(merged) = %d, want 2", len(merged))
 	}
 
-	if merged[0].Alias != "a" || merged[0].Status != composeStatusDead {
+	if merged[0].Alias != "a" || merged[0].Status != composes.StatusDead {
 		t.Errorf("merged[0] = %+v, want alias=a status=dead", merged[0])
 	}
 
@@ -645,7 +737,7 @@ func TestMergeEndpointStats(t *testing.T) {
 
 	// One pool still holds b as available and active, so the caller as a whole
 	// has not given up on it.
-	if merged[1].Status != composeStatusAvailable || !merged[1].Active {
+	if merged[1].Status != composes.StatusAvailable || !merged[1].Active {
 		t.Errorf("merged[1] = %+v, want status=available active", merged[1])
 	}
 }

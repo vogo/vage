@@ -228,26 +228,25 @@ func (p *composePool[T]) snapshot(stats func(T) []composes.EndpointStat) [][]com
 // mergeEndpointStats folds the per-pool snapshots into one view keyed by
 // alias, in the order aliases first appear.
 //
-// The merge states what the caller as a whole knows about a backend: it counts
-// as dead only when every pool that holds an opinion judges it dead, its error
-// count is the sum across pools, and its last error is the most recent one any
-// pool recorded. Active means at least one pool is currently serving from it.
+// The merge states what the caller as a whole knows about a backend. Its error
+// count is the sum across pools and its last error is the most recent one any
+// pool recorded; Active means at least one pool is currently serving from it.
+// The status is the most confident opinion any pool holds, in the order
+// available > probation > dead: one pool having succeeded against a backend is
+// what the caller knows about it, whatever the pools that have not tried since
+// still believe. A merged "dead" therefore means every pool agrees, and a
+// merged "probation" that the best any of them can say is that a recover
+// window elapsed.
 func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.EndpointStat {
 	var (
 		order  []string
 		merged = map[string]*composes.EndpointStat{}
-		dead   = map[string]int{}
-		seen   = map[string]int{}
+		best   = map[string]int{}
 	)
 
 	for _, snapshot := range snapshots {
 		for i := range snapshot {
 			stat := snapshot[i]
-			seen[stat.Alias]++
-
-			if stat.Status == composeStatusDead {
-				dead[stat.Alias]++
-			}
 
 			acc, ok := merged[stat.Alias]
 			if !ok {
@@ -256,7 +255,10 @@ func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.Endpoint
 				merged[stat.Alias] = &copied
 				order = append(order, stat.Alias)
 				acc = &copied
+				best[stat.Alias] = statusConfidence(stat.Status)
 			}
+
+			best[stat.Alias] = max(best[stat.Alias], statusConfidence(stat.Status))
 
 			acc.ErrorCount += stat.ErrorCount
 			acc.Active = acc.Active || stat.Active
@@ -272,11 +274,7 @@ func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.Endpoint
 
 	for _, alias := range order {
 		acc := merged[alias]
-
-		acc.Status = composeStatusAvailable
-		if dead[alias] == seen[alias] {
-			acc.Status = composeStatusDead
-		}
+		acc.Status = statusOfConfidence(best[alias])
 
 		out = append(out, *acc)
 	}
@@ -284,11 +282,42 @@ func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.Endpoint
 	return out
 }
 
-// Endpoint statuses as aimodel reports them.
+// Status confidence levels, ordered from what the pools know least to what
+// they know best. aimodel's status set has grown once already, so an unknown
+// value sorts at the bottom rather than being mistaken for a known one.
 const (
-	composeStatusAvailable = "available"
-	composeStatusDead      = "dead"
+	confidenceUnknown = iota
+	confidenceDead
+	confidenceProbation
+	confidenceAvailable
 )
+
+// statusConfidence ranks one pool's opinion of an endpoint.
+func statusConfidence(status string) int {
+	switch status {
+	case composes.StatusAvailable:
+		return confidenceAvailable
+	case composes.StatusProbation:
+		return confidenceProbation
+	case composes.StatusDead:
+		return confidenceDead
+	default:
+		return confidenceUnknown
+	}
+}
+
+// statusOfConfidence names the merged rank. An unknown rank reports as dead:
+// a status vage cannot read is not evidence that a backend is usable.
+func statusOfConfidence(rank int) string {
+	switch rank {
+	case confidenceAvailable:
+		return composes.StatusAvailable
+	case confidenceProbation:
+		return composes.StatusProbation
+	default:
+		return composes.StatusDead
+	}
+}
 
 // defaultEndpointAlias names the single endpoint of a one-endpoint pool, so
 // its health snapshots and error attribution read the same as a pool's.
@@ -305,6 +334,11 @@ const defaultEndpointAlias = "default"
 // candidate the strategy names — or, with nothing to fail over to, returns
 // composes.ErrNoActiveModels until the recover window (60s by default) elapses.
 // [WithComposeRouterOptions] tunes all three.
+//
+// A recovered endpoint comes back on probation rather than restored: the clock
+// proves nothing on its own, so the next real call re-tests it with a single
+// attempt instead of a whole retry round, and only a success promotes it. That
+// is what Stats reports as composes.StatusProbation.
 //
 // One consequence deserves stating plainly: aimodel judges only HTTP 401 and
 // 403 as unretryable, so a deterministic 400 is retried like a transient

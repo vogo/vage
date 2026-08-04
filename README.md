@@ -108,6 +108,10 @@ caller, err := largemodel.NewOpenAIChatCaller(apiKey, baseURL,
 )
 ```
 
+When the recover window elapses the endpoint comes back *on probation* rather
+than restored: the next real call re-tests it with a single attempt instead of
+a whole retry round, and only a success promotes it back to available.
+
 Two consequences are worth knowing. aimodel treats only HTTP 401 and 403 as
 unretryable, so a deterministic 400 is retried like a transient failure and
 then costs the endpoint its recover window — `largemodel.IsRetryable` is vage's
