@@ -378,7 +378,8 @@ func (d *anthropicStreamDecoder) translate(event *anthropic.StreamEvent) (*Chunk
 // anthropicStreamError converts a mid-stream error event into an APIError. The
 // event carries no HTTP status of its own — the response headers were already
 // 200 by the time it arrived — so the status is derived from Anthropic's error
-// type, which is what retry and circuit-breaking judge on.
+// type, which is what overflow detection and other governance middlewares
+// judge on.
 func anthropicStreamError(resp *anthropic.MessagesErrorResponse) error {
 	if resp == nil {
 		return &APIError{

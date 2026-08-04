@@ -46,4 +46,4 @@
 - 语言/工具链:Go 1.26,Apache-2.0 许可。
 - 质量门禁:`make build` = license-check → format → lint → test;覆盖率上报 Codecov。
 - 代码规模量级:约 400 个 Go 源文件、200+ 测试文件;`integrations/` 下有跨包集成测试矩阵。
-- 阶段:活跃开发中,依赖 `github.com/vogo/aimodel@v0.7.0`。
+- 阶段:活跃开发中,依赖 `github.com/vogo/aimodel@v0.7.1`。

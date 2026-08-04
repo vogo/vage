@@ -266,7 +266,7 @@ func openAIChunk(chunk *openai.ChatCompletionChunk) *Chunk {
 }
 
 // normalizeOpenAIError converts a native OpenAI failure into vage's APIError
-// so retry, circuit-breaking and overflow detection can judge it without
+// so overflow detection and other governance middlewares can judge it without
 // knowing which vendor produced it.
 func normalizeOpenAIError(err error) error {
 	var httpErr *openai.HTTPError

@@ -53,6 +53,10 @@ type composeConfig struct {
 // every pool the caller builds — retry policy, recover time, attempt
 // observers. They describe the pool's operational behaviour, which on this
 // path belongs to aimodel rather than to vage's middlewares.
+//
+// A caller may dispatch through several pools concurrently. Consequently, an
+// attempt observer registered with [composes.WithAttemptObserver] may be called
+// concurrently and must synchronize access to any shared state itself.
 func WithComposeRouterOptions(opts ...composes.Option) ComposeOption {
 	return func(c *composeConfig) {
 		c.routerOpts = append(c.routerOpts, opts...)
