@@ -30,9 +30,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	"github.com/vogo/vage/integrations/internal/testenv"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -639,8 +639,8 @@ func TestExecuteErrorThenSuccess(t *testing.T) {
 // appears in the response. Skipped if no API key is available.
 func TestBashToolWithLLMAgent(t *testing.T) {
 	client, err := largemodel.NewOpenAIChatCaller(
-		aimodel.GetEnv("AI_API_KEY", "OPENAI_API_KEY"),
-		aimodel.GetEnv("AI_BASE_URL", "OPENAI_BASE_URL"),
+		testenv.First("AI_API_KEY", "OPENAI_API_KEY"),
+		testenv.First("AI_BASE_URL", "OPENAI_BASE_URL"),
 	)
 	if err != nil {
 		t.Skipf("Skipping LLM integration test: failed to create aimodel client: %v", err)

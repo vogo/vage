@@ -136,9 +136,7 @@ func TestDefaultChain_AllMiddlewares(t *testing.T) {
 	wrapped := DefaultChain(
 		mock,
 		NewLogMiddleware(),
-		NewCircuitBreakerMiddleware(),
 		NewRateLimitMiddleware(),
-		NewRetryMiddleware(withSleepFn(noSleep)),
 		NewTimeoutMiddleware(5*time.Second),
 		NewCacheMiddleware(NewMapCache()),
 	)

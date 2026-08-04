@@ -250,7 +250,7 @@ func TestAnthropicStream_MidStreamErrorEvent(t *testing.T) {
 		t.Errorf("Type = %q, want %q", apiErr.Type, "overloaded_error")
 	}
 
-	if !isRetryable(recvErr) {
+	if !IsRetryable(recvErr) {
 		t.Error("mid-stream overload is not retryable; retry middleware would not re-issue the call")
 	}
 }

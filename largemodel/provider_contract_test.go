@@ -64,7 +64,7 @@ type providerCase struct {
 func newOpenAICaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewOpenAIChatCaller("test-key", baseURL)
+	c, err := NewOpenAIChatCaller("test-key", baseURL, fastRouting())
 	if err != nil {
 		t.Fatalf("NewOpenAIChatCaller: %v", err)
 	}
@@ -75,7 +75,7 @@ func newOpenAICaller(t *testing.T, baseURL string) Caller {
 func newAnthropicCaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewAnthropicMessagesCaller("test-key", baseURL)
+	c, err := NewAnthropicMessagesCaller("test-key", baseURL, fastRouting())
 	if err != nil {
 		t.Fatalf("NewAnthropicMessagesCaller: %v", err)
 	}

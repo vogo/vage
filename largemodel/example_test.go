@@ -23,6 +23,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/vogo/aimodel/composes"
+	"github.com/vogo/aimodel/composes/openais"
 	"github.com/vogo/aimodel/provider/anthropic"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
@@ -40,11 +42,11 @@ func ExampleNewOpenAIChatCaller() {
 	}
 
 	// Wrap the caller in the governance middlewares. Ordering is meaningful:
-	// the first listed is outermost.
+	// the first listed is outermost. Retries are not among them — they happen
+	// inside the caller's aimodel pool.
 	model := largemodel.New(
 		caller,
 		largemodel.WithMiddleware(
-			largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
 			largemodel.NewTimeoutMiddleware(30*time.Second),
 		),
 	)
@@ -58,10 +60,12 @@ func ExampleNewOpenAIChatCaller() {
 // endpoint, and the vendor options — the call surface is identical.
 func ExampleNewAnthropicMessagesCaller() {
 	// An empty base URL uses https://api.anthropic.com. Vendor headers are
-	// set through the provider's own client options.
+	// set through the provider's own client options, and the pool's retry and
+	// recovery behaviour through aimodel's routing options.
 	caller, err := largemodel.NewAnthropicMessagesCaller(
 		"sk-ant-your-key", "",
-		anthropic.WithBeta("context-1m-2025-08-07"),
+		largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")),
+		largemodel.WithComposeRouterOptions(composes.WithRetryPolicy(time.Second, 2)),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -70,12 +74,51 @@ func ExampleNewAnthropicMessagesCaller() {
 	model := largemodel.New(
 		caller,
 		largemodel.WithMiddleware(
-			largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
+			largemodel.NewLogMiddleware(),
 		),
 	)
 
 	fmt.Println(model.Protocol())
 	// Output: anthropic-messages
+}
+
+// ExampleNewOpenAIChatComposeCaller spreads one logical model over several
+// OpenAI-compatible endpoints. It differs from NewOpenAIChatCaller only in how
+// many endpoints the pool holds: selection, in-call retries and endpoint
+// health belong to aimodel's composes either way.
+func ExampleNewOpenAIChatComposeCaller() {
+	caller, err := largemodel.NewOpenAIChatComposeCaller(
+		composes.StrategyFailover,
+		[]openais.EndpointSpec{
+			{Alias: "primary", BaseURL: "https://api.openai.com/v1", APIKey: "sk-primary", Model: "gpt-4o"},
+			{Alias: "backup", BaseURL: "https://backup.example.com/v1", APIKey: "sk-backup", Model: "gpt-4o-mini"},
+		},
+		largemodel.WithComposeRouterOptions(composes.WithRecoverTime(5*time.Minute)),
+		// One pool serves one call at a time, so this is also how many calls
+		// the caller serves concurrently before one has to wait.
+		largemodel.WithComposeConcurrency(4),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	model := largemodel.New(
+		caller,
+		largemodel.WithMiddleware(
+			largemodel.NewTimeoutMiddleware(30*time.Second),
+		),
+	)
+
+	// Endpoint health is readable at any time, merged across the pools.
+	for _, stat := range caller.Stats() {
+		fmt.Println(stat.Alias, stat.Status)
+	}
+
+	fmt.Println(model.Protocol())
+	// Output:
+	// primary available
+	// backup available
+	// openai-chat
 }
 
 // ExampleCaller_agent wires a caller into a TaskAgent. The agent's protocol

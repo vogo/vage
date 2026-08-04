@@ -12,7 +12,7 @@ A Go framework for building LLM-based intelligent agent systems.
 - **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling
 - **Three-Level Memory** — Working (request) → Session (conversation) → Store (persistent), with context compression and token budgets
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
-- **LLM Middleware** — Decorator chain: logging, circuit breaker, rate limiting, retry, timeout, cache, metrics
+- **LLM Middleware** — Decorator chain: logging, rate limiting, timeout, cache, metrics (retries and endpoint health live in the caller's aimodel pool)
 - **Tool System** — Local functions, MCP remote tools, agent-as-tool, built-in bash tool with process isolation
 - **Agent Skills** — Compatible with the [Agent Skills](https://agentskills.io) open standard
 - **MCP Protocol** — Client (consume external tools) and server (expose agent capabilities)
@@ -79,11 +79,10 @@ caller, err := largemodel.NewOpenAIChatCaller(apiKey, "https://api.openai.com/v1
 // Anthropic Messages. An empty base URL uses https://api.anthropic.com;
 // vendor headers go through the provider's own options.
 caller, err := largemodel.NewAnthropicMessagesCaller(apiKey, "",
-	anthropic.WithBeta("context-1m-2025-08-07"))
+	largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")))
 
 model := largemodel.New(caller,
 	largemodel.WithMiddleware(
-		largemodel.NewRetryMiddleware(largemodel.WithMaxRetries(3)),
 		largemodel.NewTimeoutMiddleware(30*time.Second),
 	),
 )
@@ -95,11 +94,59 @@ a := taskagent.New(
 )
 ```
 
+There is no retry middleware in that chain, and no circuit breaker: a caller
+reaches its endpoint through an [aimodel](https://github.com/vogo/aimodel)
+pool, and the pool owns the retries, the endpoint health and the failover.
+`WithComposeRouterOptions` tunes them:
+
+```go
+caller, err := largemodel.NewOpenAIChatCaller(apiKey, baseURL,
+	largemodel.WithComposeRouterOptions(
+		composes.WithRetryPolicy(time.Second, 2), // 1s then 2s, three attempts
+		composes.WithRecoverTime(5*time.Minute),  // how long a dead endpoint stays out
+	),
+)
+```
+
+When the recover window elapses the endpoint comes back *on probation* rather
+than restored: the next real call re-tests it with a single attempt instead of
+a whole retry round, and only a success promotes it back to available.
+
+Two consequences are worth knowing. aimodel treats only HTTP 401 and 403 as
+unretryable, so a deterministic 400 is retried like a transient failure and
+then costs the endpoint its recover window — `largemodel.IsRetryable` is vage's
+own, narrower reading of an error for code that has to judge one. And a pool
+serves one call at a time, so a caller shared by parallel agents keeps several;
+`WithComposeConcurrency` caps how many (8 by default), and calls beyond that
+wait rather than fail.
+
 Messages are stored in the wire form of the vendor that produced them, so an
 agent's `Protocol` must match its caller's; replaying a conversation against a
 different protocol fails with `schema.ErrProtocolMismatch` rather than being
 silently converted. Runnable versions of these snippets live in
 [`largemodel/example_test.go`](largemodel/example_test.go).
+
+### Several endpoints behind one model
+
+A single-endpoint caller is a pool of one, so spreading a model over several
+backends of the same protocol only changes how the pool is built:
+
+```go
+caller, err := largemodel.NewOpenAIChatComposeCaller(
+	composes.StrategyFailover,
+	[]openais.EndpointSpec{
+		{Alias: "primary", BaseURL: primaryURL, APIKey: primaryKey, Model: "gpt-4o"},
+		{Alias: "backup", BaseURL: backupURL, APIKey: backupKey, Model: "gpt-4o-mini"},
+	},
+	largemodel.WithComposeRouterOptions(composes.WithRecoverTime(5*time.Minute)),
+)
+```
+
+Each endpoint sends the model name it was configured with, whatever model the
+request named. Strategies are aimodel's — failover, random, weighted, cost,
+latency — and `caller.Stats()` reports per-endpoint health merged across the
+caller's pools. There is no cross-protocol failover: an OpenAI pool and an
+Anthropic pool are separate, with no shared request to hand between them.
 
 ## License
 

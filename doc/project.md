@@ -21,7 +21,7 @@
 
 **非目标(不做):**
 
-- 不自研大模型推理或托管,通过 `github.com/vogo/aimodel` 的各 provider native 客户端接入外部模型 API。
+- 不自研大模型推理或托管,通过 `github.com/vogo/aimodel` 的各 provider native 客户端接入外部模型 API;多端点路由与故障转移同样取自 `aimodel/composes`,不另起一套。
 - 不做前端 UI、不做可视化编排器。
 - 不做通用工作流引擎;编排能力聚焦于"驱动 Agent 与工具"这一场景。
 - 不内置向量数据库,只定义可插拔的向量召回接口(自带内存实现,qdrant 等为外部后端)。
@@ -46,4 +46,4 @@
 - 语言/工具链:Go 1.26,Apache-2.0 许可。
 - 质量门禁:`make build` = license-check → format → lint → test;覆盖率上报 Codecov。
 - 代码规模量级:约 400 个 Go 源文件、200+ 测试文件;`integrations/` 下有跨包集成测试矩阵。
-- 阶段:活跃开发中,依赖 `github.com/vogo/aimodel@v0.6.0`。
+- 阶段:活跃开发中,依赖 `github.com/vogo/aimodel@v0.7.1`。
