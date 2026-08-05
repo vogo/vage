@@ -419,6 +419,7 @@ func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest
 		AgentID:   a.ID(),
 		Intent:    "react-iter",
 		Request:   req,
+		Protocol:  a.Protocol(),
 	})
 	if err != nil {
 		return buildResult{}, fmt.Errorf("vage: build context: %w", err)

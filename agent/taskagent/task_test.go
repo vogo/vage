@@ -193,6 +193,38 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 	if req.Messages[0].Text() != "You are helpful." {
 		t.Errorf("system content = %q, want %q", req.Messages[0].Text(), "You are helpful.")
 	}
+	if req.Messages[0].Protocol != schema.ProtocolOpenAIChat {
+		t.Errorf("system Protocol = %q, want %q", req.Messages[0].Protocol, schema.ProtocolOpenAIChat)
+	}
+}
+
+func TestAgent_Run_SystemPromptUsesAgentProtocol(t *testing.T) {
+	mock := &mockCaller{FakeCaller: &largemodel.FakeCaller{
+		Proto: schema.ProtocolAnthropicMessages,
+		Responses: []*largemodel.Response{
+			largemodel.FakeStopResponse(schema.ProtocolAnthropicMessages, "ok", schema.Usage{}),
+		},
+	}}
+	a := New(
+		agent.Config{},
+		WithCaller(mock),
+		WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
+	)
+
+	_, err := a.Run(context.Background(), &schema.RunRequest{
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolAnthropicMessages, "hi")},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	sys := mock.Requests()[0].Messages[0]
+	if sys.Protocol != schema.ProtocolAnthropicMessages {
+		t.Errorf("system Protocol = %q, want %q", sys.Protocol, schema.ProtocolAnthropicMessages)
+	}
+	if err := sys.RequireProtocol(schema.ProtocolAnthropicMessages); err != nil {
+		t.Fatalf("system message RequireProtocol: %v", err)
+	}
 }
 
 func TestAgent_Run_WithTemplateSystemPrompt(t *testing.T) {
