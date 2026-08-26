@@ -29,26 +29,72 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/aimodel/composes"
-	"github.com/vogo/aimodel/composes/anthropics"
-	"github.com/vogo/aimodel/composes/openais"
-	"github.com/vogo/aimodel/provider/anthropic"
+	"github.com/vogo/vage/largemodel/composes/anthropics"
+	"github.com/vogo/vage/largemodel/composes/openais"
+	"github.com/vogo/vage/largemodel/router"
+	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/vage/schema"
 )
 
 // These tests cover the multi-endpoint callers, whose routing, retries and
-// health tracking belong to aimodel rather than to vage's middlewares. What
-// vage owns on this path is the pool set that makes an aimodel pool — which
+// health tracking belong to largemodel/router rather than to vage middlewares.
+// What vage owns on this path is the pool set that makes a router pool — which
 // serves one call at a time — safe behind a Caller several agents share.
 
-// fastRouting keeps a test pool from sleeping through aimodel's default
-// backoff: one attempt per endpoint, and a recover window long enough that a
-// dead endpoint stays dead for the duration of a test.
+// fastRouting keeps a test pool from sleeping through the default backoff.
 func fastRouting() ComposeOption {
-	return WithComposeRouterOptions(
-		composes.WithRetryPolicy(time.Millisecond, 0),
-		composes.WithRecoverTime(time.Minute),
-	)
+	return func(c *composeConfig) {
+		c.routerOpts = append(c.routerOpts,
+			router.WithRetryPolicy(time.Millisecond, 0),
+			router.WithRecoverTime(time.Minute),
+		)
+	}
+}
+
+func openAIEndpointsFromSpecs(specs []openais.EndpointSpec) []OpenAIEndpoint {
+	endpoints := make([]OpenAIEndpoint, len(specs))
+	for i, s := range specs {
+		endpoints[i] = OpenAIEndpoint{
+			Alias: s.Alias, APIKey: s.APIKey, BaseURL: s.BaseURL, Model: s.Model,
+			Weight: s.Weight, Tags: s.Tags, Cost: s.Cost, Latency: s.Latency,
+		}
+	}
+	return endpoints
+}
+
+func mustOpenAIComposeCaller(t *testing.T, strategy Strategy, specs []openais.EndpointSpec, opts ...ComposeOption) *OpenAIChatComposeCaller {
+	t.Helper()
+
+	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Strategy: strategy, Endpoints: openAIEndpointsFromSpecs(specs),
+	}, opts...)
+	if err != nil {
+		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+	}
+
+	return caller
+}
+
+func mustAnthropicComposeCaller(t *testing.T, strategy Strategy, specs []anthropics.EndpointSpec, opts ...ComposeOption) *AnthropicMessagesComposeCaller {
+	t.Helper()
+
+	endpoints := make([]AnthropicEndpoint, len(specs))
+	for i, s := range specs {
+		endpoints[i] = AnthropicEndpoint{
+			Alias: s.Alias, APIKey: s.APIKey, BaseURL: s.BaseURL, Model: s.Model,
+			Weight: s.Weight, Tags: s.Tags, Version: s.Version, Beta: s.Beta,
+			Cost: s.Cost, Latency: s.Latency,
+		}
+	}
+
+	caller, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+		Strategy: strategy, Endpoints: endpoints,
+	}, opts...)
+	if err != nil {
+		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
+	}
+
+	return caller
 }
 
 // countingServer replies with status and body, counting the requests it saw
@@ -121,13 +167,10 @@ func TestComposeCaller_Failover(t *testing.T) {
 	bad := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 	good := newCountingServer(t, http.StatusOK, openAITextReply, 0)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("primary", bad.URL, "model-a"),
 		openAISpec("secondary", good.URL, "model-b"),
 	}, fastRouting())
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	resp, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat))
 	if err != nil {
@@ -153,7 +196,7 @@ func TestComposeCaller_Failover(t *testing.T) {
 		t.Fatalf("len(Stats()) = %d, want 2", len(stats))
 	}
 
-	if stats[0].Alias != "primary" || stats[0].Status != composes.StatusDead {
+	if stats[0].Alias != "primary" || stats[0].Status != router.StatusDead {
 		t.Errorf("primary stat = %+v, want alias=primary status=dead", stats[0])
 	}
 
@@ -168,12 +211,9 @@ func TestComposeCaller_Failover(t *testing.T) {
 func TestComposeCaller_EndpointModelOverride(t *testing.T) {
 	srv := newCountingServer(t, http.StatusOK, openAITextReply, 0)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("only", srv.URL, "vendor-model-name"),
 	}, fastRouting())
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err != nil {
 		t.Fatalf("Call: %v", err)
@@ -197,15 +237,12 @@ func TestComposeCaller_AllEndpointsFail(t *testing.T) {
 	first := newCountingServer(t, http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`, 0)
 	second := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("first", first.URL, "model-a"),
 		openAISpec("second", second.URL, "model-b"),
 	}, fastRouting())
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
-	_, err = caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat))
+	_, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat))
 	if err == nil {
 		t.Fatal("Call succeeded, want failure")
 	}
@@ -220,9 +257,9 @@ func TestComposeCaller_AllEndpointsFail(t *testing.T) {
 	}
 
 	// Both endpoints were tried, and the aggregate is still reachable.
-	var multi *composes.MultiError
+	var multi *router.MultiError
 	if !errors.As(err, &multi) {
-		t.Fatalf("error %v does not carry a *composes.MultiError", err)
+		t.Fatalf("error %v does not carry a *router.MultiError", err)
 	}
 
 	if len(multi.Errors) != 2 {
@@ -236,12 +273,9 @@ func TestComposeCaller_AllEndpointsFail(t *testing.T) {
 func TestComposeCaller_Concurrent(t *testing.T) {
 	srv := newCountingServer(t, http.StatusOK, openAITextReply, 20*time.Millisecond)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("only", srv.URL, "model-a"),
 	}, fastRouting())
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	const callers = 8
 
@@ -263,7 +297,7 @@ func TestComposeCaller_Concurrent(t *testing.T) {
 	close(errs)
 
 	for callErr := range errs {
-		if errors.Is(callErr, composes.ErrCallInProgress) {
+		if errors.Is(callErr, router.ErrCallInProgress) {
 			t.Fatalf("concurrent call was rejected as busy: %v", callErr)
 		}
 
@@ -281,12 +315,9 @@ func TestComposeCaller_Concurrent(t *testing.T) {
 func TestComposeCaller_ConcurrencyLimitWaits(t *testing.T) {
 	srv := newCountingServer(t, http.StatusOK, openAITextReply, 20*time.Millisecond)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("only", srv.URL, "model-a"),
 	}, fastRouting(), WithComposeConcurrency(1))
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	var (
 		wg   sync.WaitGroup
@@ -332,12 +363,9 @@ func TestComposeCaller_WaitRespectsContext(t *testing.T) {
 		srv.Close()
 	})
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("only", srv.URL, "model-a"),
 	}, fastRouting(), WithComposeConcurrency(1))
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	blocked := make(chan struct{})
 
@@ -422,12 +450,9 @@ func TestComposeCaller_StreamReleasesPool(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	caller, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, []openais.EndpointSpec{
+	caller := mustOpenAIComposeCaller(t, StrategyFailover, []openais.EndpointSpec{
 		openAISpec("only", srv.URL, "model-a"),
 	}, fastRouting(), WithComposeConcurrency(1))
-	if err != nil {
-		t.Fatalf("NewOpenAIChatComposeCaller: %v", err)
-	}
 
 	stream, err := caller.CallStream(context.Background(), simpleRequest(schema.ProtocolOpenAIChat))
 	if err != nil {
@@ -473,13 +498,10 @@ func TestAnthropicComposeCaller_Failover(t *testing.T) {
 		`{"type":"error","error":{"type":"api_error","message":"boom"}}`, 0)
 	good := newCountingServer(t, http.StatusOK, anthropicTextReply, 0)
 
-	caller, err := NewAnthropicMessagesComposeCaller(composes.StrategyFailover, []anthropics.EndpointSpec{
+	caller := mustAnthropicComposeCaller(t, StrategyFailover, []anthropics.EndpointSpec{
 		{BaseURL: bad.URL, APIKey: "test-key", Model: "claude-a", Alias: "primary"},
 		{BaseURL: good.URL, APIKey: "test-key", Model: "claude-b", Alias: "secondary"},
 	}, fastRouting())
-	if err != nil {
-		t.Fatalf("NewAnthropicMessagesComposeCaller: %v", err)
-	}
 
 	resp, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolAnthropicMessages))
 	if err != nil {
@@ -495,23 +517,24 @@ func TestAnthropicComposeCaller_Failover(t *testing.T) {
 	}
 
 	stats := caller.Stats()
-	if len(stats) != 2 || stats[0].Status != composes.StatusDead {
+	if len(stats) != 2 || stats[0].Status != router.StatusDead {
 		t.Errorf("Stats() = %+v, want primary dead", stats)
 	}
 }
 
 // TestSingleEndpointCaller_IsAPoolOfOne pins that the plain constructors route
-// through aimodel too: one endpoint, retried in place and then judged dead,
+// through the router too: one endpoint, retried in place and then judged dead,
 // with no second candidate to fail over to.
 func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCaller(
-		"test-key", srv.URL,
-		WithComposeRouterOptions(
-			composes.WithRetryPolicy(time.Millisecond, 2),
-			composes.WithRecoverTime(time.Minute),
-		),
+	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{
+			Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+		}},
+	},
+		WithRetryPolicy(time.Millisecond, 2),
+		WithRecoverTime(time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("NewOpenAIChatCaller: %v", err)
@@ -531,7 +554,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 		t.Fatalf("len(Stats()) = %d, want 1", len(stats))
 	}
 
-	if stats[0].Alias != defaultEndpointAlias || stats[0].Status != composes.StatusDead {
+	if stats[0].Alias != defaultEndpointAlias || stats[0].Status != router.StatusDead {
 		t.Errorf("stat = %+v, want alias=%q status=dead", stats[0], defaultEndpointAlias)
 	}
 
@@ -540,8 +563,8 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 	before := srv.hits.Load()
 
 	_, err = caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat))
-	if !errors.Is(err, composes.ErrNoActiveModels) {
-		t.Errorf("second Call error = %v, want composes.ErrNoActiveModels", err)
+	if !errors.Is(err, ErrNoActiveEndpoints) {
+		t.Errorf("second Call error = %v, want ErrNoActiveEndpoints", err)
 	}
 
 	if got := srv.hits.Load(); got != before {
@@ -550,7 +573,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 }
 
 // TestComposeCaller_ProbationCostsOneAttempt pins what a recovered endpoint
-// costs. aimodel restores a dead endpoint on the clock alone, which proves
+// costs. The router restores a dead endpoint on the clock alone, which proves
 // nothing, so the endpoint comes back on probation: still selectable, but
 // attempted once rather than under the retry policy. A pool of one makes the
 // difference countable — three attempts to die, one to re-test.
@@ -559,12 +582,13 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCaller(
-		"test-key", srv.URL,
-		WithComposeRouterOptions(
-			composes.WithRetryPolicy(time.Millisecond, 2),
-			composes.WithRecoverTime(recoverTime),
-		),
+	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{
+			Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+		}},
+	},
+		WithRetryPolicy(time.Millisecond, 2),
+		WithRecoverTime(recoverTime),
 	)
 	if err != nil {
 		t.Fatalf("NewOpenAIChatCaller: %v", err)
@@ -583,7 +607,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 	waitFor(t, func() bool {
 		stats := caller.Stats()
 
-		return len(stats) == 1 && stats[0].Status == composes.StatusProbation
+		return len(stats) == 1 && stats[0].Status == router.StatusProbation
 	})
 
 	before := srv.hits.Load()
@@ -598,8 +622,8 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 
 	// A failed probation attempt restarts the window, so the endpoint is dead
 	// again rather than staying selectable.
-	if stats := caller.Stats(); stats[0].Status != composes.StatusDead {
-		t.Errorf("status after failed probation = %q, want %q", stats[0].Status, composes.StatusDead)
+	if stats := caller.Stats(); stats[0].Status != router.StatusDead {
+		t.Errorf("status after failed probation = %q, want %q", stats[0].Status, router.StatusDead)
 	}
 }
 
@@ -639,12 +663,12 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 // TestComposeCaller_RejectsEmptyEndpoints checks that a misconfiguration
 // surfaces at construction rather than on the first call.
 func TestComposeCaller_RejectsEmptyEndpoints(t *testing.T) {
-	if _, err := NewOpenAIChatComposeCaller(composes.StrategyFailover, nil); err == nil {
-		t.Error("NewOpenAIChatComposeCaller with no endpoints succeeded, want error")
+	if _, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{}); err == nil {
+		t.Error("NewOpenAIChatCallerFromConfig with no endpoints succeeded, want error")
 	}
 
-	if _, err := NewAnthropicMessagesComposeCaller(composes.StrategyFailover, nil); err == nil {
-		t.Error("NewAnthropicMessagesComposeCaller with no endpoints succeeded, want error")
+	if _, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{}); err == nil {
+		t.Error("NewAnthropicMessagesCallerFromConfig with no endpoints succeeded, want error")
 	}
 }
 
@@ -664,20 +688,20 @@ func TestComposeCallerFromClient_RejectsNil(t *testing.T) {
 // confident opinion any pool holds wins, so probation outranks dead and is in
 // turn outranked by a pool that has actually succeeded.
 func TestMergeEndpointStats_Probation(t *testing.T) {
-	merged := mergeEndpointStats([][]composes.EndpointStat{
+	merged := mergeEndpointStats([][]router.EndpointStat{
 		{
-			{Alias: "a", Status: composes.StatusDead},
-			{Alias: "b", Status: composes.StatusDead},
-			{Alias: "c", Status: composes.StatusProbation},
+			{Alias: "a", Status: router.StatusDead},
+			{Alias: "b", Status: router.StatusDead},
+			{Alias: "c", Status: router.StatusProbation},
 		},
 		{
-			{Alias: "a", Status: composes.StatusProbation},
-			{Alias: "b", Status: composes.StatusDead},
-			{Alias: "c", Status: composes.StatusAvailable},
+			{Alias: "a", Status: router.StatusProbation},
+			{Alias: "b", Status: router.StatusDead},
+			{Alias: "c", Status: router.StatusAvailable},
 		},
 	})
 
-	want := []string{composes.StatusProbation, composes.StatusDead, composes.StatusAvailable}
+	want := []string{router.StatusProbation, router.StatusDead, router.StatusAvailable}
 	for i, w := range want {
 		if merged[i].Status != w {
 			t.Errorf("merged[%d] (%s) status = %q, want %q", i, merged[i].Alias, merged[i].Status, w)
@@ -689,12 +713,12 @@ func TestMergeEndpointStats_Probation(t *testing.T) {
 // vage does not recognise is not evidence that a backend is usable, so it
 // reports as dead rather than being mistaken for something better.
 func TestMergeEndpointStats_UnknownStatus(t *testing.T) {
-	merged := mergeEndpointStats([][]composes.EndpointStat{
+	merged := mergeEndpointStats([][]router.EndpointStat{
 		{{Alias: "a", Status: "quarantined-in-some-future-release"}},
 	})
 
-	if merged[0].Status != composes.StatusDead {
-		t.Errorf("merged status = %q, want %q", merged[0].Status, composes.StatusDead)
+	if merged[0].Status != router.StatusDead {
+		t.Errorf("merged status = %q, want %q", merged[0].Status, router.StatusDead)
 	}
 }
 
@@ -708,14 +732,14 @@ func TestMergeEndpointStats(t *testing.T) {
 	errEarly := errors.New("early")
 	errLate := errors.New("late")
 
-	merged := mergeEndpointStats([][]composes.EndpointStat{
+	merged := mergeEndpointStats([][]router.EndpointStat{
 		{
-			{Alias: "a", Status: composes.StatusDead, ErrorCount: 1, LastError: errEarly, ErrorTime: early},
-			{Alias: "b", Status: composes.StatusAvailable, Active: true},
+			{Alias: "a", Status: router.StatusDead, ErrorCount: 1, LastError: errEarly, ErrorTime: early},
+			{Alias: "b", Status: router.StatusAvailable, Active: true},
 		},
 		{
-			{Alias: "a", Status: composes.StatusDead, ErrorCount: 2, LastError: errLate, ErrorTime: late},
-			{Alias: "b", Status: composes.StatusDead, ErrorCount: 1},
+			{Alias: "a", Status: router.StatusDead, ErrorCount: 2, LastError: errLate, ErrorTime: late},
+			{Alias: "b", Status: router.StatusDead, ErrorCount: 1},
 		},
 	})
 
@@ -723,7 +747,7 @@ func TestMergeEndpointStats(t *testing.T) {
 		t.Fatalf("len(merged) = %d, want 2", len(merged))
 	}
 
-	if merged[0].Alias != "a" || merged[0].Status != composes.StatusDead {
+	if merged[0].Alias != "a" || merged[0].Status != router.StatusDead {
 		t.Errorf("merged[0] = %+v, want alias=a status=dead", merged[0])
 	}
 
@@ -737,7 +761,7 @@ func TestMergeEndpointStats(t *testing.T) {
 
 	// One pool still holds b as available and active, so the caller as a whole
 	// has not given up on it.
-	if merged[1].Status != composes.StatusAvailable || !merged[1].Active {
+	if merged[1].Status != router.StatusAvailable || !merged[1].Active {
 		t.Errorf("merged[1] = %+v, want status=available active", merged[1])
 	}
 }

@@ -29,7 +29,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"

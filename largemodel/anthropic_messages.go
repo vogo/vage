@@ -26,9 +26,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vogo/aimodel/composes"
-	"github.com/vogo/aimodel/composes/anthropics"
-	"github.com/vogo/aimodel/provider/anthropic"
+	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/vage/schema"
 )
 
@@ -59,11 +57,10 @@ type anthropicMessagesCaller struct {
 // baseURL may be empty to use Anthropic's own endpoint. The API key is
 // required and validated here so misconfiguration surfaces before any call.
 //
-// As with the OpenAI caller, the endpoint is reached through an aimodel pool
-// of one, so retries and the dead/recover window apply to a single endpoint
-// too. Vendor headers and other provider client options go through
-// [WithAnthropicClientOptions]; use [NewAnthropicMessagesCallerFromBackend] to
-// bypass routing.
+// Deprecated: prefer [NewAnthropicMessagesCallerFromConfig] with a single
+// [AnthropicEndpoint]. Vendor headers and other provider client options go
+// through [WithAnthropicClientOptions]; use [NewAnthropicMessagesCallerFromBackend]
+// to bypass routing.
 func NewAnthropicMessagesCaller(
 	apiKey, baseURL string, opts ...ComposeOption,
 ) (*AnthropicMessagesComposeCaller, error) {
@@ -71,19 +68,13 @@ func NewAnthropicMessagesCaller(
 		return nil, ErrNoAPIKey
 	}
 
-	cfg := newComposeConfig(opts...)
-
-	clientOpts := cfg.anthropicClientOpts
-	if baseURL != "" {
-		clientOpts = append([]anthropic.ClientOption{anthropic.WithBaseURL(baseURL)}, clientOpts...)
-	}
-
-	client := anthropic.NewClient(apiKey, clientOpts...)
-	entries := []anthropics.ModelEntry{{Client: client, Alias: defaultEndpointAlias}}
-
-	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
-		return anthropics.NewComposeClient(composes.StrategyFailover, entries, cfg.routerOpts...)
-	}, cfg)
+	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+		Endpoints: []AnthropicEndpoint{{
+			Alias:   defaultEndpointAlias,
+			APIKey:  apiKey,
+			BaseURL: baseURL,
+		}},
+	}, opts...)
 }
 
 // Protocol implements Caller.

@@ -100,7 +100,7 @@ sequenceDiagram
 
 架构级、有长期影响或多种权衡的决策记录于 `architecture/adr/`(编号 `NNNN-title.md`)。ADR 需人工评审通过后方可写入,新建默认 `proposed` 状态。当前尚无 ADR;后续可将以下已体现在代码中的关键决策补记为 ADR:
 
-- 以 `largemodel.Caller` 作为唯一模型接入点,其后端是 `aimodel/composes` 池(单端点即一个端点的池);重试、端点健康与同协议故障转移取自 `composes` 而非自研。
+- 以 `largemodel.Caller` 作为唯一模型接入点,其后端是 `largemodel/router` 池(单端点即一个端点的池);重试、端点健康与同协议故障转移取自 router 而非自研。
 - `schema` 作为零内部依赖的根契约包。
 - `checkpoint` 与 `orchestrate` checkpoint 双轨分离。
 - 上下文编辑采用"收敛策略单一判定点"折叠旧工具结果。

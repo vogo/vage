@@ -23,9 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/vogo/aimodel/composes"
-	"github.com/vogo/aimodel/composes/openais"
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/schema"
 )
 
@@ -55,33 +53,21 @@ type openAIChatCaller struct {
 // OpenAI-compatible endpoint. The API key is required and validated here so
 // misconfiguration surfaces before any call is attempted.
 //
-// The endpoint is reached through an aimodel pool of one, so a single endpoint
-// gets the same in-call retries and the same dead/recover window as a pool of
-// several — see [OpenAIChatComposeCaller] for what that means, and
-// [WithComposeRouterOptions] to tune it. Provider client options go through
-// [WithOpenAIClientOptions]. Pass [NewOpenAIChatCallerFromBackend] a client
-// instead to bypass routing altogether.
+// Deprecated: prefer [NewOpenAIChatCallerFromConfig] with a single [OpenAIEndpoint].
+// Provider client options go through [WithOpenAIClientOptions]; use
+// [NewOpenAIChatCallerFromBackend] to bypass routing altogether.
 func NewOpenAIChatCaller(apiKey, baseURL string, opts ...ComposeOption) (*OpenAIChatComposeCaller, error) {
 	if apiKey == "" {
 		return nil, ErrNoAPIKey
 	}
 
-	cfg := newComposeConfig(opts...)
-
-	clientOpts := cfg.openAIClientOpts
-	if baseURL != "" {
-		clientOpts = append([]openai.ClientOption{openai.WithBaseURL(baseURL)}, clientOpts...)
-	}
-
-	// The client carries no mutable state, so every pool in the set shares this
-	// one — what a pool owns is the routing and health of its endpoints, not
-	// the transport. Leaving Name empty keeps the model the request asked for.
-	client := openai.NewClient(apiKey, clientOpts...)
-	entries := []openais.ModelEntry{{Client: client, Alias: defaultEndpointAlias}}
-
-	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
-		return openais.NewComposeClient(composes.StrategyFailover, entries, cfg.routerOpts...)
-	}, cfg)
+	return NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{
+			Alias:   defaultEndpointAlias,
+			APIKey:  apiKey,
+			BaseURL: baseURL,
+		}},
+	}, opts...)
 }
 
 // Protocol implements Caller.

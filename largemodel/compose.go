@@ -20,12 +20,13 @@ package largemodel
 import (
 	"context"
 	"sync"
+	"time"
 
-	"github.com/vogo/aimodel/composes"
-	"github.com/vogo/aimodel/composes/anthropics"
-	"github.com/vogo/aimodel/composes/openais"
-	"github.com/vogo/aimodel/provider/anthropic"
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/vage/largemodel/composes/anthropics"
+	"github.com/vogo/vage/largemodel/composes/openais"
+	"github.com/vogo/vage/largemodel/router"
+	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/aimodel/openai"
 
 	"github.com/vogo/vage/schema"
 )
@@ -39,7 +40,7 @@ const defaultComposeConcurrency = 8
 type ComposeOption func(*composeConfig)
 
 type composeConfig struct {
-	routerOpts  []composes.Option
+	routerOpts  []router.Option
 	concurrency int
 
 	// Provider client options reach the single-endpoint constructors, which
@@ -49,15 +50,39 @@ type composeConfig struct {
 	anthropicClientOpts []anthropic.ClientOption
 }
 
-// WithComposeRouterOptions passes aimodel's own routing options through to
-// every pool the caller builds — retry policy, recover time, attempt
-// observers. They describe the pool's operational behaviour, which on this
-// path belongs to aimodel rather than to vage's middlewares.
+// WithRetryPolicy sets the in-call retry policy for each router pool the
+// caller builds: base is the wait before the first retry and each further retry
+// doubles it.
+func WithRetryPolicy(base time.Duration, maxRetries int) ComposeOption {
+	return WithComposeRouterOptions(router.WithRetryPolicy(base, maxRetries))
+}
+
+// WithRecoverTime sets how long a dead endpoint stays out of rotation before it
+// returns on probation.
+func WithRecoverTime(d time.Duration) ComposeOption {
+	return WithComposeRouterOptions(router.WithRecoverTime(d))
+}
+
+// WithAttemptObserver registers a callback invoked when each endpoint attempt
+// finishes. Observers may run concurrently when several pools are active.
+func WithAttemptObserver(fn func(AttemptResult)) ComposeOption {
+	return WithComposeRouterOptions(router.WithAttemptObserver(fn))
+}
+
+// WithConcurrency caps how many router pools the caller builds. WithComposeConcurrency
+// is a deprecated alias.
+func WithConcurrency(n int) ComposeOption {
+	return WithComposeConcurrency(n)
+}
+
+// WithComposeRouterOptions passes low-level router options through to every pool
+// the caller builds. Prefer [WithRetryPolicy], [WithRecoverTime] and
+// [WithAttemptObserver] for the common cases.
 //
 // A caller may dispatch through several pools concurrently. Consequently, an
-// attempt observer registered with [composes.WithAttemptObserver] may be called
+// attempt observer registered with [router.WithAttemptObserver] may be called
 // concurrently and must synchronize access to any shared state itself.
-func WithComposeRouterOptions(opts ...composes.Option) ComposeOption {
+func WithComposeRouterOptions(opts ...router.Option) ComposeOption {
 	return func(c *composeConfig) {
 		c.routerOpts = append(c.routerOpts, opts...)
 	}
@@ -112,7 +137,7 @@ func newComposeConfig(opts ...ComposeOption) *composeConfig {
 // composePool hands out aimodel compose clients one caller at a time.
 //
 // An aimodel pool belongs to one conversation and serves it one call at a
-// time: a second concurrent call is rejected with composes.ErrCallInProgress
+// time: a second concurrent call is rejected with router.ErrCallInProgress
 // rather than queued. vage shares a Caller across agents that do run in
 // parallel, so the caller keeps several pools and lends one out per call,
 // which is aimodel's own prescription — one pool per concurrent worker.
@@ -217,11 +242,11 @@ func (p *composePool[T]) release(c T) {
 
 // snapshot collects one health snapshot per pool built so far. aimodel allows
 // Stats to run concurrently with dispatch, so a borrowed pool is included.
-func (p *composePool[T]) snapshot(stats func(T) []composes.EndpointStat) [][]composes.EndpointStat {
+func (p *composePool[T]) snapshot(stats func(T) []router.EndpointStat) [][]router.EndpointStat {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	out := make([][]composes.EndpointStat, 0, len(p.clients))
+	out := make([][]router.EndpointStat, 0, len(p.clients))
 	for _, c := range p.clients {
 		out = append(out, stats(c))
 	}
@@ -241,10 +266,10 @@ func (p *composePool[T]) snapshot(stats func(T) []composes.EndpointStat) [][]com
 // still believe. A merged "dead" therefore means every pool agrees, and a
 // merged "probation" that the best any of them can say is that a recover
 // window elapsed.
-func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.EndpointStat {
+func mergeEndpointStats(snapshots [][]router.EndpointStat) []router.EndpointStat {
 	var (
 		order  []string
-		merged = map[string]*composes.EndpointStat{}
+		merged = map[string]*router.EndpointStat{}
 		best   = map[string]int{}
 	)
 
@@ -274,7 +299,7 @@ func mergeEndpointStats(snapshots [][]composes.EndpointStat) []composes.Endpoint
 		}
 	}
 
-	out := make([]composes.EndpointStat, 0, len(order))
+	out := make([]router.EndpointStat, 0, len(order))
 
 	for _, alias := range order {
 		acc := merged[alias]
@@ -299,11 +324,11 @@ const (
 // statusConfidence ranks one pool's opinion of an endpoint.
 func statusConfidence(status string) int {
 	switch status {
-	case composes.StatusAvailable:
+	case router.StatusAvailable:
 		return confidenceAvailable
-	case composes.StatusProbation:
+	case router.StatusProbation:
 		return confidenceProbation
-	case composes.StatusDead:
+	case router.StatusDead:
 		return confidenceDead
 	default:
 		return confidenceUnknown
@@ -315,11 +340,11 @@ func statusConfidence(status string) int {
 func statusOfConfidence(rank int) string {
 	switch rank {
 	case confidenceAvailable:
-		return composes.StatusAvailable
+		return router.StatusAvailable
 	case confidenceProbation:
-		return composes.StatusProbation
+		return router.StatusProbation
 	default:
-		return composes.StatusDead
+		return router.StatusDead
 	}
 }
 
@@ -336,13 +361,13 @@ const defaultEndpointAlias = "default"
 // its active endpoint with exponential waits (500ms doubling, three retries by
 // default), marks it dead when they are exhausted, and fails over to the next
 // candidate the strategy names — or, with nothing to fail over to, returns
-// composes.ErrNoActiveModels until the recover window (60s by default) elapses.
+// router.ErrNoActiveModels until the recover window (60s by default) elapses.
 // [WithComposeRouterOptions] tunes all three.
 //
 // A recovered endpoint comes back on probation rather than restored: the clock
 // proves nothing on its own, so the next real call re-tests it with a single
 // attempt instead of a whole retry round, and only a success promotes it. That
-// is what Stats reports as composes.StatusProbation.
+// is what Stats reports as router.StatusProbation.
 //
 // One consequence deserves stating plainly: aimodel judges only HTTP 401 and
 // 403 as unretryable, so a deterministic 400 is retried like a transient
@@ -370,17 +395,29 @@ func (c *OpenAIChatComposeCaller) CallStream(ctx context.Context, req *Request) 
 // NewOpenAIChatComposeCaller builds a Caller over several OpenAI-compatible
 // endpoints, routed by the given strategy.
 //
+// Deprecated: use [NewOpenAIChatCallerFromConfig] with [OpenAIConfig] instead.
+//
 // Each spec names its own model, which replaces the model on the request when
 // that endpoint serves it: a vage Request states the model it wants, and an
 // endpoint that speaks of the same model under another name overrides it.
 func NewOpenAIChatComposeCaller(
-	strategy composes.Strategy, specs []openais.EndpointSpec, opts ...ComposeOption,
+	strategy Strategy, specs []openais.EndpointSpec, opts ...ComposeOption,
 ) (*OpenAIChatComposeCaller, error) {
-	cfg := newComposeConfig(opts...)
+	endpoints := make([]OpenAIEndpoint, len(specs))
+	for i, s := range specs {
+		endpoints[i] = OpenAIEndpoint{
+			Alias:   s.Alias,
+			APIKey:  s.APIKey,
+			BaseURL: s.BaseURL,
+			Model:   s.Model,
+			Weight:  s.Weight,
+			Tags:    s.Tags,
+			Cost:    s.Cost,
+			Latency: s.Latency,
+		}
+	}
 
-	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
-		return openais.NewFromEndpoints(strategy, specs, cfg.routerOpts...)
-	}, cfg)
+	return NewOpenAIChatCallerFromConfig(OpenAIConfig{Strategy: strategy, Endpoints: endpoints}, opts...)
 }
 
 // newOpenAIComposeCaller wires a pool set built by build behind the OpenAI
@@ -415,11 +452,16 @@ func NewOpenAIChatCallerFromBackend(backend OpenAIChatBackend) (Caller, error) {
 
 // Stats reports endpoint health merged across the caller's pools. See
 // mergeEndpointStats for what merging means when pools disagree.
-func (c *OpenAIChatComposeCaller) Stats() []composes.EndpointStat {
-	return mergeEndpointStats(c.pool.snapshot(func(cc *openais.ComposeClient) []composes.EndpointStat {
+//
+// EndpointStats is an alias for Stats.
+func (c *OpenAIChatComposeCaller) Stats() []EndpointStat {
+	return mergeEndpointStats(c.pool.snapshot(func(cc *openais.ComposeClient) []router.EndpointStat {
 		return cc.Stats()
 	}))
 }
+
+// EndpointStats reports endpoint health merged across the caller's pools.
+func (c *OpenAIChatComposeCaller) EndpointStats() []EndpointStat { return c.Stats() }
 
 // openAIComposeBackend borrows a pool for the duration of one call.
 type openAIComposeBackend struct {
@@ -481,14 +523,28 @@ func (c *AnthropicMessagesComposeCaller) CallStream(ctx context.Context, req *Re
 
 // NewAnthropicMessagesComposeCaller builds a Caller over several
 // Anthropic-compatible endpoints, routed by the given strategy.
+//
+// Deprecated: use [NewAnthropicMessagesCallerFromConfig] with [AnthropicConfig] instead.
 func NewAnthropicMessagesComposeCaller(
-	strategy composes.Strategy, specs []anthropics.EndpointSpec, opts ...ComposeOption,
+	strategy Strategy, specs []anthropics.EndpointSpec, opts ...ComposeOption,
 ) (*AnthropicMessagesComposeCaller, error) {
-	cfg := newComposeConfig(opts...)
+	endpoints := make([]AnthropicEndpoint, len(specs))
+	for i, s := range specs {
+		endpoints[i] = AnthropicEndpoint{
+			Alias:   s.Alias,
+			APIKey:  s.APIKey,
+			BaseURL: s.BaseURL,
+			Model:   s.Model,
+			Weight:  s.Weight,
+			Tags:    s.Tags,
+			Version: s.Version,
+			Beta:    s.Beta,
+			Cost:    s.Cost,
+			Latency: s.Latency,
+		}
+	}
 
-	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
-		return anthropics.NewFromEndpoints(strategy, specs, cfg.routerOpts...)
-	}, cfg)
+	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{Strategy: strategy, Endpoints: endpoints}, opts...)
 }
 
 // newAnthropicComposeCaller wires a pool set built by build behind the
@@ -519,11 +575,14 @@ func NewAnthropicMessagesCallerFromBackend(backend AnthropicMessagesBackend) (Ca
 }
 
 // Stats reports endpoint health merged across the caller's pools.
-func (c *AnthropicMessagesComposeCaller) Stats() []composes.EndpointStat {
-	return mergeEndpointStats(c.pool.snapshot(func(cc *anthropics.ComposeClient) []composes.EndpointStat {
+func (c *AnthropicMessagesComposeCaller) Stats() []EndpointStat {
+	return mergeEndpointStats(c.pool.snapshot(func(cc *anthropics.ComposeClient) []router.EndpointStat {
 		return cc.Stats()
 	}))
 }
+
+// EndpointStats reports endpoint health merged across the caller's pools.
+func (c *AnthropicMessagesComposeCaller) EndpointStats() []EndpointStat { return c.Stats() }
 
 // anthropicComposeBackend borrows a pool for the duration of one call.
 type anthropicComposeBackend struct {

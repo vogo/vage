@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/aimodel/provider/anthropic"
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/aimodel/openai"
 )
 
 // StopReason indicates why an agent run terminated.

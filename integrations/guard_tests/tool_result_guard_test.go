@@ -31,7 +31,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/aimodel/provider/openai"
+	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"

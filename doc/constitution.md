@@ -19,7 +19,7 @@
 
 - **语言**:Go(当前基线 1.26),仅使用标准库 + `go.mod` 已声明依赖。
 - **大模型接入**:唯一入口是 `largemodel` 的 `Caller` 协议调用层,其后端是 `github.com/vogo/aimodel` 各 provider 的 native 客户端(OpenAI Chat / OpenAI Responses / Anthropic Messages)。厂商协议细节只允许出现在 `largemodel` 的 provider 实现与 `schema` 的 wire 承载类型中,不得散落到其他核心包。
-- **重试与路由不自研**:调用内重试、端点存活判定与同协议多端点的选择策略一律取 `aimodel/composes`,vage 只负责把它接到 `Caller` 后端接口上并承载并发,不得再提供第二套重试或熔断机制。跨协议的路由与故障转移不做。
+- **重试与路由不自研**:调用内重试、端点存活判定与同协议多端点的选择策略一律取 `largemodel/router`,vage 只负责把它接到 `Caller` 后端接口上并承载并发,不得再提供第二套重试或熔断机制。跨协议的路由与故障转移不做。
 - **引入新核心依赖**:需经维护者评审(说明必要性、许可证兼容性、维护活跃度)。
 - **禁止**:在核心库中硬编码厂商私有端点、模型名或鉴权方式;凭证与 base URL 一律由调用方注入。
 

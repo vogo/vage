@@ -23,9 +23,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/vogo/aimodel/composes"
-	"github.com/vogo/aimodel/composes/openais"
-	"github.com/vogo/aimodel/provider/anthropic"
+	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/largemodel"
@@ -43,7 +41,7 @@ func ExampleNewOpenAIChatCaller() {
 
 	// Wrap the caller in the governance middlewares. Ordering is meaningful:
 	// the first listed is outermost. Retries are not among them — they happen
-	// inside the caller's aimodel pool.
+	// inside the caller's router pool.
 	model := largemodel.New(
 		caller,
 		largemodel.WithMiddleware(
@@ -61,11 +59,11 @@ func ExampleNewOpenAIChatCaller() {
 func ExampleNewAnthropicMessagesCaller() {
 	// An empty base URL uses https://api.anthropic.com. Vendor headers are
 	// set through the provider's own client options, and the pool's retry and
-	// recovery behaviour through aimodel's routing options.
+	// recovery behaviour through largemodel routing options.
 	caller, err := largemodel.NewAnthropicMessagesCaller(
 		"sk-ant-your-key", "",
 		largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")),
-		largemodel.WithComposeRouterOptions(composes.WithRetryPolicy(time.Second, 2)),
+		largemodel.WithRetryPolicy(time.Second, 2),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -82,75 +80,67 @@ func ExampleNewAnthropicMessagesCaller() {
 	// Output: anthropic-messages
 }
 
-// ExampleNewOpenAIChatComposeCaller spreads one logical model over several
-// OpenAI-compatible endpoints. It differs from NewOpenAIChatCaller only in how
-// many endpoints the pool holds: selection, in-call retries and endpoint
-// health belong to aimodel's composes either way.
-func ExampleNewOpenAIChatComposeCaller() {
-	caller, err := largemodel.NewOpenAIChatComposeCaller(
-		composes.StrategyFailover,
-		[]openais.EndpointSpec{
+// ExampleNewOpenAIChatCallerFromConfig spreads one logical model over several
+// OpenAI-compatible endpoints.
+func ExampleNewOpenAIChatCallerFromConfig() {
+	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Strategy: largemodel.StrategyFailover,
+		Endpoints: []largemodel.OpenAIEndpoint{
 			{Alias: "primary", BaseURL: "https://api.openai.com/v1", APIKey: "sk-primary", Model: "gpt-4o"},
 			{Alias: "backup", BaseURL: "https://backup.example.com/v1", APIKey: "sk-backup", Model: "gpt-4o-mini"},
 		},
-		largemodel.WithComposeRouterOptions(composes.WithRecoverTime(5*time.Minute)),
-		// One pool serves one call at a time, so this is also how many calls
-		// the caller serves concurrently before one has to wait.
-		largemodel.WithComposeConcurrency(4),
+	},
+		largemodel.WithRecoverTime(5*time.Minute),
+		largemodel.WithConcurrency(4),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	model := largemodel.New(
-		caller,
-		largemodel.WithMiddleware(
-			largemodel.NewTimeoutMiddleware(30*time.Second),
-		),
-	)
-
-	// Endpoint health is readable at any time, merged across the pools.
-	for _, stat := range caller.Stats() {
-		fmt.Println(stat.Alias, stat.Status)
-	}
-
-	fmt.Println(model.Protocol())
-	// Output:
-	// primary available
-	// backup available
-	// openai-chat
-}
-
-// ExampleCaller_agent wires a caller into a TaskAgent. The agent's protocol
-// must match its caller's, because messages are stored in the vendor's own
-// wire form and cannot be replayed against a different vendor.
-func ExampleCaller_agent() {
-	caller, err := largemodel.NewAnthropicMessagesCaller("sk-ant-your-key", "")
-	if err != nil {
-		log.Fatal(err)
-	}
+	model := largemodel.New(caller)
 
 	a := taskagent.New(
-		agent.Config{
-			ID:       "assistant",
-			Name:     "Assistant",
-			Protocol: caller.Protocol(),
-		},
-		taskagent.WithCaller(caller),
-		taskagent.WithModel("claude-sonnet-4-5"),
+		agent.Config{ID: "assistant", Protocol: model.Protocol()},
+		taskagent.WithCaller(model),
+		taskagent.WithModel("gpt-4o"),
 	)
 
-	// Build request messages in the agent's protocol.
-	req := &schema.RunRequest{
-		Messages: []schema.Message{
-			schema.NewUserMessage(a.Protocol(), "Summarize the release notes."),
+	fmt.Println(a.Protocol())
+	// Output: openai-chat
+}
+
+// ExampleNewOpenAIChatCallerFromConfig_endpointStats shows per-endpoint health.
+func ExampleNewOpenAIChatCallerFromConfig_endpointStats() {
+	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{
+			{Alias: "only", APIKey: "sk-test", BaseURL: "https://api.openai.com/v1"},
 		},
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Run against the live API (skipped here — this example only shows wiring).
-	_ = req
-	_ = context.Background()
+	stats := caller.EndpointStats()
+	if len(stats) == 1 {
+		fmt.Println(stats[0].Alias, stats[0].Status)
+	}
+	// Output: only available
+}
 
-	fmt.Println(a.Protocol())
-	// Output: anthropic-messages
+// ExampleCaller_protocolMismatch shows that messages must match the caller's
+// protocol.
+func ExampleCaller_protocolMismatch() {
+	caller, err := largemodel.NewOpenAIChatCaller("sk-test", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	model := largemodel.New(caller)
+	_, err = model.Call(context.Background(), &largemodel.Request{
+		Messages: []schema.Message{
+			schema.NewAnthropicMessage(anthropic.MessagesMessage{Role: "user", Content: []byte(`"hi"`)}, "hi"),
+		},
+	})
+	fmt.Println(err != nil)
+	// Output: true
 }

@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/vogo/aimodel/provider/anthropic"
+	"github.com/vogo/aimodel/anthropic"
 )
 
 // Anthropic content block types vage reads and writes. Anthropic carries tool

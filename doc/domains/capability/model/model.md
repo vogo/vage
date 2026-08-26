@@ -3,7 +3,7 @@
 | 元数据 | 值 |
 |--------|----|
 | 业务组 | capability |
-| 一句话 | 保真于各厂商 native 协议地调用大模型:路由与重试交给 `aimodel/composes`,治理与上下文编辑由中间件链承担 |
+| 一句话 | 保真于各厂商 native 协议地调用大模型:路由与重试由 `largemodel/router` 承担,治理与上下文编辑由中间件链承担 |
 | 负责人 | vogo 维护者 |
 | 状态 | active |
 | 依赖领域 | agent-core(`schema`)、tooling(上下文编辑感知工具资源) |
@@ -16,21 +16,21 @@
 
 `largemodel` 定义 `Caller` —— 按协议分派的模型调用接缝。每种协议有各自的实现,后端是 `aimodel` 对应 provider 的 native 客户端,并负责 vage 的 `Request`/`Response` 信封与该厂商 wire 类型之间的双向转换。中间件只看见信封,永远看不到厂商类型。
 
-后端以接口形态注入(`OpenAIChatBackend` / `AnthropicMessagesBackend`),其方法集恰好是 native 客户端与 `aimodel/composes` 池共有的那一组。**所有 Caller 都经由 composes 池请求模型** —— 单端点是"一个端点的池",多端点是"多个端点的池",两者只差池怎么建。重试、端点存活判定与故障转移因此统一归 `composes`,vage 不再持有第二套。
+后端以接口形态注入(`OpenAIChatBackend` / `AnthropicMessagesBackend`),其方法集恰好是 native 客户端与 `largemodel/composes` 路由池共有的那一组。**所有 Caller 都经由 router 池请求模型** —— 单端点是"一个端点的池",多端点是"多个端点的池",两者只差池怎么建。重试、端点存活判定与故障转移因此统一归 `largemodel/router`,vage 不再持有第二套。
 
 在 `Caller` 之上是一条**装饰器中间件链**:日志、缓存、限流、超时、指标、token 预算、上下文编辑、溢出处理。每个中间件包裹下一个,组成可插拔的治理栈,并透传被包裹 Caller 的协议。重试与熔断不在其中。
 
-**边界(不做):** 不实现模型推理(委托底层 `aimodel` 的 provider 客户端);不自研重试、熔断、路由与健康判定 —— 全部取 `aimodel/composes` 的实现;不做跨协议的路由或故障转移(OpenAI 池与 Anthropic 池各自独立,请求模型不共享);不做提示词内容治理(那是 `prompt`/`skill`)。
+**边界(不做):** 不实现模型推理(委托底层 `aimodel` 的 provider 客户端);不自研重试、熔断、路由与健康判定 —— 全部取 `largemodel/router` 的实现;不做跨协议的路由或故障转移(OpenAI 池与 Anthropic 池各自独立,请求模型不共享);不做提示词内容治理(那是 `prompt`/`skill`)。
 
 ## 核心实体(概念层)
 
 - **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。取值为 openai-chat / openai-responses / anthropic-messages。
 - **Caller(调用接缝)**:一次模型调用的协议无关接口;每种协议一个实现,拥有该厂商的请求构造、响应解析、流解码与错误归一化。
-- **Backend(后端接口)**:Caller 调用的最小方法集,由 `aimodel/composes` 池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
-- **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `aimodel/composes`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
-- **池集合(pool set)**:compose Caller 持有的多个 `aimodel` 池。一个池一次只服务一个调用,而 vage 的 Caller 被并行 Agent 共享,故按需借还;并发上限即池数上限,超出时等待而非失败。
+- **Backend(后端接口)**:Caller 调用的最小方法集,由 `largemodel/composes` 路由池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
+- **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `largemodel/router`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
+- **池集合(pool set)**:compose Caller 持有的多个 router 池。一个池一次只服务一个调用,而 vage 的 Caller 被并行 Agent 共享,故按需借还;并发上限即池数上限,超出时等待而非失败。
 - **中间件**:`Wrap(next Caller) Caller` 的装饰器,可任意组合与排序。
-- **治理中间件**:超时、限流、缓存 —— 约束对上游模型的调用(重试与熔断不在此处,归 `composes`)。
+- **治理中间件**:超时、限流、缓存 —— 约束对上游模型的调用(重试与熔断不在此处,归 `router`)。
 - **可观测中间件**:日志、指标、debug。
 - **预算中间件(budget)**:在调用前后核算 token 消耗,配合 Agent 的预算终止。
 - **溢出处理(overflow)**:上下文超限时的处置。
@@ -48,12 +48,12 @@
 | MOD-4 | **收敛策略单一判定点**:哪些工具结果被折叠由单一收敛判定决定(如"保留最后 k 个"、"被后续写操作作废的旧读结果"),避免多处各判一套导致的漂移。 |
 | MOD-5 | **占位符自解释**:被折叠的工具结果留下说明"为何被折叠"(recency / stale_resource 等)的占位符,便于人读提示时理解。 |
 | MOD-6 | **超大结果外置**:单条工具结果超过字节上限时外置到工件存储,提示里只留短引用;外置失败则回退为内联提示。 |
-| MOD-9 | **重试与存活判定单一来源**:归 `composes`,vage 不提供 Retry / CircuitBreaker 中间件,以免尝试次数相乘。代价须知悉:`composes` 只把 401/403 视为不可重试,确定性的 400 也会被重试满并使端点进入恢复窗口。`largemodel.IsRetryable` 保留 vage 自己更窄的错误判读,供上层决策使用,但不驱动任何重试循环。 |
-| MOD-10 | **池不共享**:一个 `composes` 池归属一个会话、一次只服务一个调用;并发由多个池承担,每个池独立学习端点健康。跨池的健康视图只在读取时按别名合并,不回写;合并取各池中最有把握的判断(available > probation > dead),无法识别的状态按 dead 处理。 |
+| MOD-9 | **重试与存活判定单一来源**:归 `largemodel/router`,vage 不提供 Retry / CircuitBreaker 中间件,以免尝试次数相乘。代价须知悉:router 只把 401/403 视为不可重试,确定性的 400 也会被重试满并使端点进入恢复窗口。`largemodel.IsRetryable` 保留 vage 自己更窄的错误判读,供上层决策使用,但不驱动任何重试循环。 |
+| MOD-10 | **池不共享**:一个 router 池归属一个会话、一次只服务一个调用;并发由多个池承担,每个池独立学习端点健康。跨池的健康视图只在读取时按别名合并,不回写;合并取各池中最有把握的判断(available > probation > dead),无法识别的状态按 dead 处理。 |
 
 ## 状态与转换
 
-本领域唯一的显式状态机是**端点存活**,由 `composes` 拥有,三态:
+本领域唯一的显式状态机是**端点存活**,由 `largemodel/router` 拥有,三态:
 
 - **available**:有调用成功过。
 - **dead**:调用内重试耗尽,或凭证被拒即刻判死;在恢复窗口内不参与选择。
@@ -69,4 +69,4 @@
 - **tooling**:上下文编辑的 stale_resource 判定需查询工具的资源语义(ResourceTracker),识别"被后续写作废的旧读结果"。
 - **memory**:与记忆压缩互补 —— 编辑管"每轮少付 token",压缩管"记多少历史"(见 [memory-design](../../memory/memory/memory-design.md))。
 
-技术实现(中间件清单、上下文编辑 V1/V2 兼容层)见 [model-design](model-design.md)。
+技术实现(中间件清单、上下文编辑 V1/V2 兼容层)见 [model-design](model-design.md)。多端点路由、重试与健康见 [router-design](router-design.md)。
