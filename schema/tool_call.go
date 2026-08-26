@@ -15,13 +15,18 @@
  * limitations under the License.
  */
 
-// Package router is the protocol-neutral routing core for multi-backend model
-// callers in vage: active endpoint selection, strategies, in-call retries,
-// endpoint health, alias identity, observation and failure attribution.
-//
-// Application code should use [github.com/vogo/vage/largemodel] instead of
-// importing this package directly, unless building a custom routed backend.
-//
-// Protocol adapters live in [github.com/vogo/vage/largemodel/provider/openais]
-// and [github.com/vogo/vage/largemodel/provider/anthropics].
-package router
+package schema
+
+// ToolCall is a model-requested tool invocation in vage's own vocabulary. The
+// vendors disagree on shape, so provider codecs normalize both into this
+// representation for tool dispatch.
+type ToolCall struct {
+	// ID correlates the call with the tool result that answers it.
+	ID string `json:"id"`
+
+	// Name is the tool to invoke.
+	Name string `json:"name"`
+
+	// Arguments is the raw JSON argument object.
+	Arguments string `json:"arguments"`
+}

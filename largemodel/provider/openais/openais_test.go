@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 // newTestServer creates an httptest server that echoes the requested model back

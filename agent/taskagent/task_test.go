@@ -193,8 +193,8 @@ func TestAgent_Run_WithSystemPrompt(t *testing.T) {
 	if req.Messages[0].Text() != "You are helpful." {
 		t.Errorf("system content = %q, want %q", req.Messages[0].Text(), "You are helpful.")
 	}
-	if req.Messages[0].Protocol != schema.ProtocolOpenAIChat {
-		t.Errorf("system Protocol = %q, want %q", req.Messages[0].Protocol, schema.ProtocolOpenAIChat)
+	if req.Messages[0].Protocol() != schema.ProtocolOpenAIChat {
+		t.Errorf("system Protocol = %q, want %q", req.Messages[0].Protocol(), schema.ProtocolOpenAIChat)
 	}
 }
 
@@ -219,8 +219,8 @@ func TestAgent_Run_SystemPromptUsesAgentProtocol(t *testing.T) {
 	}
 
 	sys := mock.Requests()[0].Messages[0]
-	if sys.Protocol != schema.ProtocolAnthropicMessages {
-		t.Errorf("system Protocol = %q, want %q", sys.Protocol, schema.ProtocolAnthropicMessages)
+	if sys.Protocol() != schema.ProtocolAnthropicMessages {
+		t.Errorf("system Protocol = %q, want %q", sys.Protocol(), schema.ProtocolAnthropicMessages)
 	}
 	if err := sys.RequireProtocol(schema.ProtocolAnthropicMessages); err != nil {
 		t.Fatalf("system message RequireProtocol: %v", err)

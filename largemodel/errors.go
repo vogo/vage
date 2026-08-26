@@ -82,7 +82,7 @@ var retryableStatusCodes = map[int]bool{
 // response.
 //
 // It is a reading of an error, not a policy — vage runs no retry loop of its
-// own. Retries happen inside aimodel's routing layer, which classifies more
+// own. Retries happen inside largemodel/router, which classifies more
 // bluntly: everything except HTTP 401/403 is retried there, so a deterministic
 // 400 is retried despite this function calling it permanent. Use this where
 // something above the model has to decide whether a failure is worth reacting

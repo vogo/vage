@@ -19,11 +19,13 @@ package largemodel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/provider/openais"
 	"github.com/vogo/vage/schema"
 )
 
@@ -90,11 +92,19 @@ func (c *openAIChatCaller) Call(ctx context.Context, req *Request) (*Response, e
 	}
 
 	choice := resp.Choices[0]
+	wirePayload, err := json.Marshal(choice.Message)
+	if err != nil {
+		return nil, fmt.Errorf("vage: encode openai response message: %w", err)
+	}
+	msg, err := openais.DecodeOpenAIMessage(wirePayload, "")
+	if err != nil {
+		return nil, fmt.Errorf("vage: decode openai response message: %w", err)
+	}
 
 	out := &Response{
 		ID:      resp.ID,
 		Model:   resp.Model,
-		Message: schema.NewOpenAIMessage(schema.ProtocolOpenAIChat, choice.Message, ""),
+		Message: msg,
 		Usage:   openAIUsage(resp.Usage, resp.ServiceTier),
 	}
 
@@ -151,11 +161,11 @@ func (c *openAIChatCaller) buildRequest(req *Request) (*openai.ChatCompletionReq
 			return nil, err
 		}
 
-		if msg.OpenAI == nil {
-			return nil, fmt.Errorf("vage: openai message %d has no wire payload", i)
+		native, err := openais.EncodeOpenAIMessage(msg)
+		if err != nil {
+			return nil, fmt.Errorf("vage: openai message %d encode: %w", i, err)
 		}
-
-		wire.Messages = append(wire.Messages, *msg.OpenAI)
+		wire.Messages = append(wire.Messages, native)
 	}
 
 	for _, def := range req.Tools {

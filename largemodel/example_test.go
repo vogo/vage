@@ -136,9 +136,10 @@ func ExampleCaller_protocolMismatch() {
 	}
 
 	model := largemodel.New(caller)
+	foreign := schema.NewUserMessage(schema.ProtocolAnthropicMessages, "hi")
 	_, err = model.Call(context.Background(), &largemodel.Request{
 		Messages: []schema.Message{
-			schema.NewAnthropicMessage(anthropic.MessagesMessage{Role: "user", Content: []byte(`"hi"`)}, "hi"),
+			foreign,
 		},
 	})
 	fmt.Println(err != nil)

@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/vogo/aimodel/anthropic"
-	"github.com/vogo/aimodel/openai"
 )
 
 // StopReason indicates why an agent run terminated.
@@ -52,80 +49,103 @@ const (
 	RoleTool      Role = "tool"
 )
 
-// Message is one chat message held in its originating vendor's native wire
-// form. vage stores exactly what the vendor produced — OpenAI messages as
-// openai.ChatCompletionMessage, Anthropic messages as
-// anthropic.MessagesMessage — and never converts between them, so a message
-// round-trips through persistence without passing through a lossy neutral
-// representation.
+// MessagePartType names a canonical content part kind.
+type MessagePartType string
+
+// Message part kind constants.
+const (
+	MessagePartText       MessagePartType = "text"
+	MessagePartThinking   MessagePartType = "thinking"
+	MessagePartToolCall   MessagePartType = "tool_call"
+	MessagePartToolResult MessagePartType = "tool_result"
+)
+
+// MessagePart is a provider-neutral piece of message content.
+type MessagePart struct {
+	Type MessagePartType `json:"type"`
+
+	Text string `json:"text,omitempty"`
+
+	// Thinking carries reasoning text when the provider surfaces it.
+	Thinking string `json:"thinking,omitempty"`
+
+	// ToolCall carries a requested tool invocation.
+	ToolCall *ToolCall `json:"tool_call,omitempty"`
+
+	// ToolResult fields correlate and carry a tool result payload.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+}
+
+// Message is one provider-neutral conversation message.
 //
-// Protocol says which of the wire fields is populated; exactly one ever is.
-// Callers that only need to read a message should use the accessors (Role,
-// Text, ToolCalls, …) rather than reaching into the wire field, so they work
-// across both protocols.
-//
-// Because the stored form is vendor-specific, a message recorded under one
-// protocol cannot be replayed under another — see ErrProtocolMismatch.
+// Its private role and parts are the canonical source of truth. An optional
+// provider-native origin is retained only while the canonical state remains
+// unmodified, allowing a same-protocol caller to replay it losslessly.
 type Message struct {
-	// Protocol identifies which wire form this message holds.
-	Protocol Protocol `json:"protocol"`
-
-	// OpenAI holds the message when Protocol is ProtocolOpenAIChat or
-	// ProtocolOpenAIResponses; nil otherwise.
-	OpenAI *openai.ChatCompletionMessage `json:"openai,omitempty"`
-
-	// Anthropic holds the message when Protocol is
-	// ProtocolAnthropicMessages; nil otherwise.
-	Anthropic *anthropic.MessagesMessage `json:"anthropic,omitempty"`
-
-	// SystemText carries the text of a system message under
-	// ProtocolAnthropicMessages, where the Messages API has no system role
-	// and the text belongs to the request-level system field instead. It is
-	// unused for the OpenAI protocols, which keep system messages inline.
-	SystemText string `json:"system_text,omitempty"`
+	protocol Protocol
+	role     Role
+	parts    []MessagePart
+	// origin is a replay cache for an unmodified provider response. Every
+	// canonical mutation clears it, keeping role/parts as the single source
+	// of truth while retaining lossless same-protocol replay when possible.
+	origin json.RawMessage
 
 	AgentID   string         `json:"agent_id,omitempty"`
 	Timestamp time.Time      `json:"timestamp"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
+type messageJSON struct {
+	Protocol  Protocol        `json:"protocol"`
+	Role      Role            `json:"role,omitempty"`
+	Parts     []MessagePart   `json:"parts,omitempty"`
+	Origin    json.RawMessage `json:"origin,omitempty"`
+	AgentID   string          `json:"agent_id,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
+	Metadata  map[string]any  `json:"metadata,omitempty"`
+}
+
+// NewMessage creates a canonical message without a provider replay payload.
+func NewMessage(proto Protocol, role Role, parts []MessagePart) Message {
+	return Message{
+		protocol:  proto,
+		role:      role,
+		parts:     cloneMessageParts(parts),
+		Timestamp: time.Now(),
+	}
+}
+
+// NewMessageWithOrigin creates a canonical message backed by an unmodified
+// provider-native payload. Provider codecs are responsible for deriving role
+// and parts from origin before calling this constructor.
+func NewMessageWithOrigin(
+	proto Protocol,
+	role Role,
+	parts []MessagePart,
+	origin json.RawMessage,
+	agentID string,
+) Message {
+	return Message{
+		protocol:  proto,
+		role:      role,
+		parts:     cloneMessageParts(parts),
+		origin:    cloneRawMessage(origin),
+		AgentID:   agentID,
+		Timestamp: time.Now(),
+	}
+}
+
 // NewUserMessage creates a user message for the given protocol.
 func NewUserMessage(proto Protocol, text string) Message {
-	m := Message{Protocol: proto, Timestamp: time.Now()}
-
-	if proto == ProtocolAnthropicMessages {
-		m.Anthropic = newAnthropicMessage(anthropicRoleUser,
-			anthropicBlock{Type: anthropicBlockText, Text: text})
-
-		return m
-	}
-
-	m.OpenAI = &openai.ChatCompletionMessage{
-		Role:    string(RoleUser),
-		Content: openai.NewTextContent(text),
-	}
-
-	return m
+	return NewMessage(proto, RoleUser, []MessagePart{{Type: MessagePartText, Text: text}})
 }
 
 // NewSystemMessage creates a system message for the given protocol. Under
-// ProtocolAnthropicMessages the text is held in SystemText, since the Messages
-// API carries system text on the request rather than as a message.
+// ProtocolAnthropicMessages the text is carried on the request-level system
+// field rather than in the message list.
 func NewSystemMessage(proto Protocol, text string) Message {
-	m := Message{Protocol: proto, Timestamp: time.Now()}
-
-	if proto == ProtocolAnthropicMessages {
-		m.SystemText = text
-
-		return m
-	}
-
-	m.OpenAI = &openai.ChatCompletionMessage{
-		Role:    string(RoleSystem),
-		Content: openai.NewTextContent(text),
-	}
-
-	return m
+	return NewMessage(proto, RoleSystem, []MessagePart{{Type: MessagePartText, Text: text}})
 }
 
 // NewTextMessage creates a plain text message for the given protocol and
@@ -139,21 +159,7 @@ func NewTextMessage(proto Protocol, role Role, text string) Message {
 	case RoleSystem:
 		return NewSystemMessage(proto, text)
 	case RoleAssistant:
-		m := Message{Protocol: proto, Timestamp: time.Now()}
-
-		if proto == ProtocolAnthropicMessages {
-			m.Anthropic = newAnthropicMessage(anthropicRoleAssistant,
-				anthropicBlock{Type: anthropicBlockText, Text: text})
-
-			return m
-		}
-
-		m.OpenAI = &openai.ChatCompletionMessage{
-			Role:    string(RoleAssistant),
-			Content: openai.NewTextContent(text),
-		}
-
-		return m
+		return NewMessage(proto, RoleAssistant, []MessagePart{{Type: MessagePartText, Text: text}})
 	default:
 		return NewUserMessage(proto, text)
 	}
@@ -163,260 +169,116 @@ func NewTextMessage(proto Protocol, role Role, text string) Message {
 // expresses it as a dedicated tool-role message; Anthropic as a user message
 // carrying a tool_result block.
 func NewToolResultMessage(proto Protocol, toolCallID, text string, isError bool) Message {
-	m := Message{Protocol: proto, Timestamp: time.Now()}
-
-	if proto == ProtocolAnthropicMessages {
-		m.Anthropic = newAnthropicMessage(anthropicRoleUser, anthropicBlock{
-			Type:      anthropicBlockToolResult,
-			ToolUseID: toolCallID,
-			Content:   json.RawMessage(mustEncodeString(text)),
-			IsError:   isError,
-		})
-
-		return m
-	}
-
-	m.OpenAI = &openai.ChatCompletionMessage{
-		Role:       string(RoleTool),
-		Content:    openai.NewTextContent(text),
+	return NewMessage(proto, RoleTool, []MessagePart{{
+		Type:       MessagePartToolResult,
 		ToolCallID: toolCallID,
-	}
-
-	return m
+		Text:       text,
+		IsError:    isError,
+	}})
 }
 
 // NewAssistantTurn builds a complete assistant message from its parts. It is
 // how a streamed turn — reassembled from deltas rather than received whole —
-// re-enters the conversation in the vendor's own wire form, so the next
-// iteration replays it exactly like a non-streamed turn.
+// re-enters the canonical conversation before a provider codec serializes the
+// next iteration.
 func NewAssistantTurn(proto Protocol, text, thinking string, calls []ToolCall) Message {
-	m := Message{Protocol: proto, Timestamp: time.Now()}
-
-	if proto == ProtocolAnthropicMessages {
-		// Anthropic orders blocks thinking → text → tool_use, and requires
-		// the thinking block to come first when extended thinking is on.
-		var blocks []anthropicBlock
-
-		if thinking != "" {
-			blocks = append(blocks, anthropicBlock{Type: anthropicBlockThinking, Thinking: thinking})
-		}
-
-		if text != "" {
-			blocks = append(blocks, anthropicBlock{Type: anthropicBlockText, Text: text})
-		}
-
-		for _, call := range calls {
-			blocks = append(blocks, anthropicBlock{
-				Type:  anthropicBlockToolUse,
-				ID:    call.ID,
-				Name:  call.Name,
-				Input: json.RawMessage(call.Arguments),
-			})
-		}
-
-		m.Anthropic = newAnthropicMessage(anthropicRoleAssistant, blocks...)
-
-		return m
+	var parts []MessagePart
+	if thinking != "" {
+		parts = append(parts, MessagePart{Type: MessagePartThinking, Thinking: thinking})
+	}
+	if text != "" {
+		parts = append(parts, MessagePart{Type: MessagePartText, Text: text})
+	}
+	for i := range calls {
+		call := calls[i]
+		c := call
+		parts = append(parts, MessagePart{Type: MessagePartToolCall, ToolCall: &c})
 	}
 
-	wire := &openai.ChatCompletionMessage{
-		Role:             string(RoleAssistant),
-		Content:          openai.NewTextContent(text),
-		ReasoningContent: thinking,
-	}
-
-	for i, call := range calls {
-		wire.ToolCalls = append(wire.ToolCalls, openai.ChatCompletionToolCall{
-			Index: i,
-			ID:    call.ID,
-			Type:  openai.ToolTypeFunction,
-			Function: openai.ChatCompletionFunctionCall{
-				Name:      call.Name,
-				Arguments: call.Arguments,
-			},
-		})
-	}
-
-	m.OpenAI = wire
-
-	return m
+	return NewMessage(proto, RoleAssistant, parts)
 }
 
-// NewOpenAIMessage wraps a native OpenAI message produced by the model.
-func NewOpenAIMessage(proto Protocol, msg openai.ChatCompletionMessage, agentID string) Message {
-	return Message{
-		Protocol:  proto,
-		OpenAI:    &msg,
-		AgentID:   agentID,
-		Timestamp: time.Now(),
-	}
+// MarshalJSON persists the canonical state and includes origin only while the
+// message is still eligible for provider-native replay.
+func (m Message) MarshalJSON() ([]byte, error) {
+	return json.Marshal(messageJSON{
+		Protocol:  m.protocol,
+		Role:      m.role,
+		Parts:     m.parts,
+		Origin:    m.origin,
+		AgentID:   m.AgentID,
+		Timestamp: m.Timestamp,
+		Metadata:  m.Metadata,
+	})
 }
 
-// NewAnthropicMessage wraps a native Anthropic message produced by the model.
-func NewAnthropicMessage(msg anthropic.MessagesMessage, agentID string) Message {
-	return Message{
-		Protocol:  ProtocolAnthropicMessages,
-		Anthropic: &msg,
-		AgentID:   agentID,
-		Timestamp: time.Now(),
+// UnmarshalJSON restores the persisted canonical state. Provider payloads do
+// not need decoding here because role and parts are always persisted beside
+// origin.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var raw messageJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
 	}
+	*m = Message{
+		protocol:  raw.Protocol,
+		role:      raw.Role,
+		parts:     cloneMessageParts(raw.Parts),
+		origin:    cloneRawMessage(raw.Origin),
+		AgentID:   raw.AgentID,
+		Timestamp: raw.Timestamp,
+		Metadata:  raw.Metadata,
+	}
+	return nil
 }
 
-// mustEncodeString marshals s as a JSON string. Encoding a string cannot fail,
-// so a failure would be a programming error; the empty-string literal keeps
-// the wire payload well-formed regardless.
-func mustEncodeString(s string) string {
-	raw, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
+// Protocol reports which model protocol records the message.
+func (m Message) Protocol() Protocol { return m.protocol }
 
-	return string(raw)
-}
+// Role reports the provider-neutral conversation role.
+func (m Message) Role() Role { return m.role }
 
-// Role reports the message role in vage's vocabulary, normalizing across the
-// two wire forms: an Anthropic user message carrying only tool_result blocks
-// reads back as RoleTool, and a message held as SystemText reads as
-// RoleSystem.
-func (m Message) Role() Role {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.Anthropic == nil {
-			return RoleSystem
-		}
+// Parts returns a deep copy of the canonical content parts.
+func (m Message) Parts() []MessagePart { return cloneMessageParts(m.parts) }
 
-		if m.isAnthropicToolResult() {
-			return RoleTool
-		}
-
-		if m.Anthropic.Role == anthropicRoleAssistant {
-			return RoleAssistant
-		}
-
-		return RoleUser
-	}
-
-	if m.OpenAI == nil {
-		return ""
-	}
-
-	return Role(m.OpenAI.Role)
-}
-
-// isAnthropicToolResult reports whether the message consists of tool_result
-// blocks, which is how the Messages API expresses a tool response.
-func (m Message) isAnthropicToolResult() bool {
-	blocks := decodeAnthropicBlocks(m.Anthropic.Content)
-	if len(blocks) == 0 {
-		return false
-	}
-
-	for _, block := range blocks {
-		if block.Type != anthropicBlockToolResult {
-			return false
-		}
-	}
-
-	return true
-}
+// Origin returns a copy of the provider-native replay payload. An empty result
+// means the canonical message must be encoded by a provider codec.
+func (m Message) Origin() json.RawMessage { return cloneRawMessage(m.origin) }
 
 // Text returns the message's textual content, concatenating text parts when
 // the content is structured. Non-text payloads (tool calls, thinking) are
 // excluded; read them with ToolCalls and Thinking.
 func (m Message) Text() string {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.SystemText != "" {
-			return m.SystemText
+	var b strings.Builder
+	for _, part := range m.parts {
+		if part.Type == MessagePartText || part.Type == MessagePartToolResult {
+			b.WriteString(part.Text)
 		}
-
-		if m.Anthropic == nil {
-			return ""
-		}
-
-		var b strings.Builder
-
-		for _, block := range decodeAnthropicBlocks(m.Anthropic.Content) {
-			switch block.Type {
-			case anthropicBlockText:
-				b.WriteString(block.Text)
-			case anthropicBlockToolResult:
-				b.WriteString(anthropicToolResultText(block.Content))
-			}
-		}
-
-		return b.String()
 	}
 
-	if m.OpenAI == nil {
-		return ""
-	}
-
-	return m.OpenAI.Content.Text()
+	return b.String()
 }
 
 // Thinking returns the model's reasoning text, or empty when the message
 // carries none.
 func (m Message) Thinking() string {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.Anthropic == nil {
-			return ""
+	var b strings.Builder
+	for _, part := range m.parts {
+		if part.Type == MessagePartThinking {
+			b.WriteString(part.Thinking)
 		}
-
-		var b strings.Builder
-
-		for _, block := range decodeAnthropicBlocks(m.Anthropic.Content) {
-			if block.Type == anthropicBlockThinking {
-				b.WriteString(block.Thinking)
-			}
-		}
-
-		return b.String()
 	}
 
-	if m.OpenAI == nil {
-		return ""
-	}
-
-	return m.OpenAI.ReasoningContent
+	return b.String()
 }
 
 // ToolCalls returns the tool invocations the model requested, in wire order.
 func (m Message) ToolCalls() []ToolCall {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.Anthropic == nil {
-			return nil
-		}
-
-		var calls []ToolCall
-
-		for _, block := range decodeAnthropicBlocks(m.Anthropic.Content) {
-			if block.Type != anthropicBlockToolUse {
-				continue
-			}
-
-			args := string(block.Input)
-			if args == "" {
-				args = "{}"
-			}
-
-			calls = append(calls, ToolCall{ID: block.ID, Name: block.Name, Arguments: args})
-		}
-
-		return calls
-	}
-
-	if m.OpenAI == nil {
-		return nil
-	}
-
 	var calls []ToolCall
-
-	for _, call := range m.OpenAI.ToolCalls {
-		args := call.Function.Arguments
-		if args == "" {
-			args = "{}"
+	for _, part := range m.parts {
+		if part.Type == MessagePartToolCall && part.ToolCall != nil {
+			calls = append(calls, *part.ToolCall)
 		}
-
-		calls = append(calls, ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: args})
 	}
 
 	return calls
@@ -425,75 +287,127 @@ func (m Message) ToolCalls() []ToolCall {
 // ToolCallID returns the identifier of the tool call this message answers, or
 // empty when the message is not a tool result.
 func (m Message) ToolCallID() string {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.Anthropic == nil {
-			return ""
+	for _, part := range m.parts {
+		if part.Type == MessagePartToolResult {
+			return part.ToolCallID
 		}
-
-		for _, block := range decodeAnthropicBlocks(m.Anthropic.Content) {
-			if block.Type == anthropicBlockToolResult {
-				return block.ToolUseID
-			}
-		}
-
-		return ""
 	}
 
-	if m.OpenAI == nil {
-		return ""
-	}
-
-	return m.OpenAI.ToolCallID
+	return ""
 }
 
 // SetText replaces the message's textual content, preserving its protocol and
-// every non-text payload it carries (tool calls, thinking, tool-result
-// correlation). Guards use it to rewrite content in place.
+// every canonical non-text payload it carries (tool calls, thinking and
+// tool-result correlation). Any provider-native replay payload is invalidated.
 func (m *Message) SetText(text string) {
-	if m.Protocol == ProtocolAnthropicMessages {
-		if m.SystemText != "" || m.Anthropic == nil {
-			m.SystemText = text
+	m.invalidateOrigin()
+	m.parts = cloneMessageParts(m.parts)
 
-			return
-		}
-
-		blocks := decodeAnthropicBlocks(m.Anthropic.Content)
-		rewritten := make([]anthropicBlock, 0, len(blocks)+1)
+	if len(m.parts) > 0 {
 		replaced := false
-
-		// Only the first textual block is rewritten; every other block is
-		// carried through untouched, so a multi-block message (merged tool
-		// results, thinking, tool calls) keeps everything the rewrite does not
-		// address.
-		for _, block := range blocks {
-			if !replaced {
-				switch block.Type {
-				case anthropicBlockText:
-					block.Text = text
-					replaced = true
-				case anthropicBlockToolResult:
-					block.Content = json.RawMessage(mustEncodeString(text))
-					replaced = true
-				}
+		for i := range m.parts {
+			switch m.parts[i].Type {
+			case MessagePartText:
+				m.parts[i].Text = text
+				replaced = true
+			case MessagePartToolResult:
+				m.parts[i].Text = text
+				replaced = true
 			}
-
-			rewritten = append(rewritten, block)
+			if replaced {
+				break
+			}
 		}
-
 		if !replaced {
-			rewritten = append(rewritten, anthropicBlock{Type: anthropicBlockText, Text: text})
+			m.parts = append(m.parts, MessagePart{Type: MessagePartText, Text: text})
 		}
-
-		m.Anthropic.Content = encodeAnthropicBlocks(rewritten)
-
 		return
 	}
 
-	if m.OpenAI == nil {
-		m.OpenAI = &openai.ChatCompletionMessage{Role: string(RoleUser)}
+	m.parts = []MessagePart{{Type: MessagePartText, Text: text}}
+	if m.role == "" {
+		m.role = RoleUser
 	}
+}
 
-	m.OpenAI.Content = openai.NewTextContent(text)
+// SetRole replaces the canonical role and invalidates native replay.
+func (m *Message) SetRole(role Role) {
+	m.invalidateOrigin()
+	m.role = role
+}
+
+// ReplaceParts replaces the canonical content and invalidates native replay.
+func (m *Message) ReplaceParts(parts []MessagePart) {
+	m.invalidateOrigin()
+	m.parts = cloneMessageParts(parts)
+}
+
+// AppendPart appends canonical content and invalidates native replay.
+func (m *Message) AppendPart(part MessagePart) {
+	m.invalidateOrigin()
+	parts := cloneMessageParts(m.parts)
+	m.parts = append(parts, cloneMessagePart(part))
+}
+
+func (m *Message) invalidateOrigin() { m.origin = nil }
+
+// Validate checks the canonical message invariants shared by provider codecs.
+func (m Message) Validate() error {
+	if err := m.protocol.Validate(); err != nil {
+		return err
+	}
+	switch m.role {
+	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
+	default:
+		return fmt.Errorf("vage: invalid message role %q", m.role)
+	}
+	for i, part := range m.parts {
+		switch part.Type {
+		case MessagePartText:
+			if part.Thinking != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError {
+				return fmt.Errorf("vage: message part %d text has fields for another part type", i)
+			}
+		case MessagePartThinking:
+			if part.Text != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError {
+				return fmt.Errorf("vage: message part %d thinking has fields for another part type", i)
+			}
+		case MessagePartToolCall:
+			if part.ToolCall == nil {
+				return fmt.Errorf("vage: message part %d tool_call is nil", i)
+			}
+			if part.Text != "" || part.Thinking != "" || part.ToolCallID != "" || part.IsError {
+				return fmt.Errorf("vage: message part %d tool_call has fields for another part type", i)
+			}
+			if part.ToolCall.ID == "" || part.ToolCall.Name == "" {
+				return fmt.Errorf("vage: message part %d tool_call requires id and name", i)
+			}
+			if args := part.ToolCall.Arguments; args != "" && !json.Valid([]byte(args)) {
+				return fmt.Errorf("vage: message part %d tool_call arguments are invalid JSON", i)
+			}
+		case MessagePartToolResult:
+			if part.ToolCallID == "" {
+				return fmt.Errorf("vage: message part %d tool_result requires tool_call_id", i)
+			}
+			if part.Thinking != "" || part.ToolCall != nil {
+				return fmt.Errorf("vage: message part %d tool_result has fields for another part type", i)
+			}
+		default:
+			return fmt.Errorf("vage: message part %d has unsupported type %q", i, part.Type)
+		}
+	}
+	if m.role == RoleTool {
+		hasResult := false
+		for _, part := range m.parts {
+			if part.Type == MessagePartToolResult {
+				hasResult = true
+				break
+			}
+		}
+		if !hasResult {
+			return fmt.Errorf("vage: tool message requires a tool_result part")
+		}
+	}
+	return nil
 }
 
 // ProtocolOf reports the protocol a message sequence is recorded under,
@@ -504,8 +418,8 @@ func (m *Message) SetText(text string) {
 // An empty sequence yields ProtocolOpenAIChat, the default vage configures.
 func ProtocolOf(msgs []Message) Protocol {
 	for _, m := range msgs {
-		if m.Protocol != "" {
-			return m.Protocol
+		if m.protocol != "" {
+			return m.protocol
 		}
 	}
 
@@ -513,14 +427,38 @@ func ProtocolOf(msgs []Message) Protocol {
 }
 
 // RequireProtocol reports an error when the message was not recorded under
-// want. vage stores native vendor wire forms, so replaying a message under a
-// different protocol is a mismatch rather than a conversion.
+// want. vage does not implicitly translate persisted conversations between
+// provider protocols.
 func (m Message) RequireProtocol(want Protocol) error {
-	if m.Protocol != want {
-		return fmt.Errorf("%w: message is %q, caller is %q", ErrProtocolMismatch, m.Protocol, want)
+	if m.protocol != want {
+		return fmt.Errorf("%w: message is %q, caller is %q", ErrProtocolMismatch, m.protocol, want)
 	}
 
 	return nil
+}
+
+func cloneMessageParts(parts []MessagePart) []MessagePart {
+	if parts == nil {
+		return nil
+	}
+	out := make([]MessagePart, len(parts))
+	for i, part := range parts {
+		out[i] = cloneMessagePart(part)
+	}
+	return out
+}
+
+func cloneMessagePart(part MessagePart) MessagePart {
+	out := part
+	if part.ToolCall != nil {
+		call := *part.ToolCall
+		out.ToolCall = &call
+	}
+	return out
+}
+
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	return append(json.RawMessage(nil), raw...)
 }
 
 // ContentPart represents a piece of content in a tool result.

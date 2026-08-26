@@ -50,6 +50,7 @@ type wireBlock struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	ToolUseID string `json:"tool_use_id"`
+	IsError   bool   `json:"is_error"`
 }
 
 // wireRequest is the subset of the Messages request body under test.
@@ -195,6 +196,24 @@ func TestAnthropicWire_SystemHoistedOutOfMessages(t *testing.T) {
 
 	if got.Messages[0].Role != "user" {
 		t.Errorf("messages[0].role = %q, want user", got.Messages[0].Role)
+	}
+}
+
+func TestAnthropicWire_ToolErrorPreserved(t *testing.T) {
+	proto := schema.ProtocolAnthropicMessages
+	got := captureAnthropicWire(t, []schema.Message{
+		schema.NewUserMessage(proto, "run it"),
+		schema.NewAssistantTurn(proto, "", "", []schema.ToolCall{{
+			ID: "t1", Name: "run", Arguments: `{}`,
+		}}),
+		schema.NewToolResultMessage(proto, "t1", "failed", true),
+	})
+
+	if len(got.Messages) != 3 || len(got.Messages[2].Content) != 1 {
+		t.Fatalf("unexpected wire messages: %+v", got.Messages)
+	}
+	if !got.Messages[2].Content[0].IsError {
+		t.Fatal("tool result omitted is_error=true")
 	}
 }
 

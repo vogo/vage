@@ -515,7 +515,7 @@ func (m *ContextEditorMiddleware) applyElision(
 		placeholderBytes += len(placeholder)
 
 		out[i] = schema.NewToolResultMessage(
-			original.Protocol, original.ToolCallID(), placeholder, false,
+			original.Protocol(), original.ToolCallID(), placeholder, false,
 		)
 	}
 

@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/provider/anthropics"
 	"github.com/vogo/vage/schema"
 )
 
@@ -110,13 +111,22 @@ func (c *anthropicMessagesCaller) Call(ctx context.Context, req *Request) (*Resp
 		return nil, fmt.Errorf("vage: encode anthropic response content: %w", err)
 	}
 
+	wirePayload, err := json.Marshal(anthropic.MessagesMessage{
+		Role:    resp.Role,
+		Content: content,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vage: encode anthropic response message wire: %w", err)
+	}
+	msg, err := anthropics.DecodeAnthropicMessage(wirePayload, "")
+	if err != nil {
+		return nil, fmt.Errorf("vage: decode anthropic response message: %w", err)
+	}
+
 	return &Response{
-		ID:    resp.ID,
-		Model: resp.Model,
-		Message: schema.NewAnthropicMessage(anthropic.MessagesMessage{
-			Role:    resp.Role,
-			Content: content,
-		}, ""),
+		ID:           resp.ID,
+		Model:        resp.Model,
+		Message:      msg,
 		FinishReason: anthropicFinishReason(resp.StopReason),
 		Usage:        anthropicUsage(&resp.Usage),
 	}, nil
@@ -181,17 +191,21 @@ func (c *anthropicMessagesCaller) buildRequest(req *Request) (*anthropic.Message
 			continue
 		}
 
-		if msg.Anthropic == nil {
-			return nil, fmt.Errorf("vage: anthropic message %d has no wire payload", i)
+		native, err := anthropics.EncodeAnthropicMessage(msg)
+		if err != nil {
+			return nil, fmt.Errorf("vage: anthropic message %d encode: %w", i, err)
 		}
-
-		wire.Messages = append(wire.Messages, *msg.Anthropic)
+		wire.Messages = append(wire.Messages, native)
 	}
 
 	// Parallel tool calls produce one tool_result message each, but the
 	// Messages API accepts them only as a single user message following the
 	// assistant turn that requested them.
-	wire.Messages = schema.MergeAnthropicToolResults(wire.Messages)
+	merged, err := anthropics.MergeAnthropicToolResults(wire.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("vage: merge anthropic tool results: %w", err)
+	}
+	wire.Messages = merged
 
 	if len(systemParts) > 0 {
 		system, err := anthropicSystemField(strings.Join(systemParts, "\n\n"), req.PromptCaching)

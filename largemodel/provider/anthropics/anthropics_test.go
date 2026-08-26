@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 // newTestServer echoes the requested model back in a valid Messages response

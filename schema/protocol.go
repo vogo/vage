@@ -28,9 +28,9 @@ import (
 // types are in play — vage keeps no vendor-neutral request type to dispatch
 // on.
 //
-// Protocol also tags every persisted message: a Message stores the wire form
-// of the vendor that produced it, so replaying a session requires the same
-// protocol that recorded it.
+// Protocol also tags every persisted canonical message and identifies the
+// optional provider-native replay payload. vage does not implicitly translate
+// a session to another provider protocol.
 type Protocol string
 
 // The protocols vage speaks. Each implemented one maps to a native aimodel
@@ -52,10 +52,8 @@ const (
 // returned at configuration time, before any network I/O.
 var ErrUnknownProtocol = errors.New("vage: unknown model protocol")
 
-// ErrProtocolMismatch reports an attempt to read a message in a protocol
-// other than the one that recorded it. Because vage stores native vendor wire
-// forms, a session recorded against one protocol cannot be replayed against
-// another.
+// ErrProtocolMismatch reports an attempt to replay a message through a
+// protocol other than the one that recorded it.
 var ErrProtocolMismatch = errors.New("vage: message protocol mismatch")
 
 // Valid reports whether p is a protocol vage implements — that is, one a

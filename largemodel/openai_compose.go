@@ -1,0 +1,178 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package largemodel
+
+import (
+	"context"
+
+	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/provider/openais"
+	"github.com/vogo/vage/largemodel/router"
+	"github.com/vogo/vage/schema"
+)
+
+// OpenAIChatComposeCaller is a Caller over one or more OpenAI-compatible
+// endpoints. Every OpenAI Chat Completions caller vage builds is one of these:
+// a single endpoint is a pool of one, so the reliability story does not change
+// shape when a second endpoint is added.
+//
+// Routing, in-call retries and endpoint health belong to largemodel/router: a
+// pool retries its active endpoint with exponential waits (500ms doubling,
+// three retries by default), marks it dead when they are exhausted, and fails
+// over to the next candidate the strategy names — or, with nothing to fail
+// over to, returns router.ErrNoActiveModels until the recover window (60s by
+// default) elapses. [WithComposeRouterOptions] tunes all three.
+//
+// A recovered endpoint comes back on probation rather than restored: the clock
+// proves nothing on its own, so the next real call re-tests it with a single
+// attempt instead of a whole retry round, and only a success promotes it. That
+// is what Stats reports as router.StatusProbation.
+//
+// One consequence deserves stating plainly: the router judges only HTTP 401 and
+// 403 as unretryable, so a deterministic 400 is retried like a transient
+// failure and then costs the endpoint its recover window. [IsRetryable] is
+// vage's own, narrower reading of the same error, for callers deciding whether
+// a failure is worth reacting to.
+type OpenAIChatComposeCaller struct {
+	caller Caller
+	pool   *composePool[*openais.ComposeClient]
+}
+
+// Protocol implements Caller.
+func (c *OpenAIChatComposeCaller) Protocol() schema.Protocol { return c.caller.Protocol() }
+
+// Call implements Caller.
+func (c *OpenAIChatComposeCaller) Call(ctx context.Context, req *Request) (*Response, error) {
+	return c.caller.Call(ctx, req)
+}
+
+// CallStream implements Caller.
+func (c *OpenAIChatComposeCaller) CallStream(ctx context.Context, req *Request) (*Stream, error) {
+	return c.caller.CallStream(ctx, req)
+}
+
+// NewOpenAIChatComposeCaller builds a Caller over several OpenAI-compatible
+// endpoints, routed by the given strategy.
+//
+// Deprecated: use [NewOpenAIChatCallerFromConfig] with [OpenAIConfig] instead.
+//
+// Each spec names its own model, which replaces the model on the request when
+// that endpoint serves it: a vage Request states the model it wants, and an
+// endpoint that speaks of the same model under another name overrides it.
+func NewOpenAIChatComposeCaller(
+	strategy Strategy, specs []openais.EndpointSpec, opts ...ComposeOption,
+) (*OpenAIChatComposeCaller, error) {
+	endpoints := make([]OpenAIEndpoint, len(specs))
+	for i, s := range specs {
+		endpoints[i] = OpenAIEndpoint{
+			Alias:   s.Alias,
+			APIKey:  s.APIKey,
+			BaseURL: s.BaseURL,
+			Model:   s.Model,
+			Weight:  s.Weight,
+			Tags:    s.Tags,
+			Cost:    s.Cost,
+			Latency: s.Latency,
+		}
+	}
+
+	return NewOpenAIChatCallerFromConfig(OpenAIConfig{Strategy: strategy, Endpoints: endpoints}, opts...)
+}
+
+// newOpenAIComposeCaller wires a pool set built by build behind the OpenAI
+// caller. It is what both entry points — one endpoint and several — end up
+// calling, so the two differ only in how a pool is built.
+func newOpenAIComposeCaller(
+	build func() (*openais.ComposeClient, error), cfg *composeConfig,
+) (*OpenAIChatComposeCaller, error) {
+	pool, err := newComposePool(cfg.concurrency, build)
+	if err != nil {
+		return nil, err
+	}
+
+	return &OpenAIChatComposeCaller{
+		caller: &openAIChatCaller{client: &openAIComposeBackend{pool: pool}},
+		pool:   pool,
+	}, nil
+}
+
+// NewOpenAIChatCallerFromBackend wraps a backend the caller built itself — a
+// bare *openai.Client, a hand-assembled compose client, a test double. The
+// backend is used as-is: nothing is routed, retried or health-tracked around
+// it, and if it is a provider pool it still serves one call at a time and must
+// not be shared with agents that run in parallel.
+func NewOpenAIChatCallerFromBackend(backend OpenAIChatBackend) (Caller, error) {
+	if backend == nil {
+		return nil, ErrNoBackend
+	}
+
+	return &openAIChatCaller{client: backend}, nil
+}
+
+// Stats reports endpoint health merged across the caller's pools. See
+// mergeEndpointStats for what merging means when pools disagree.
+//
+// EndpointStats is an alias for Stats.
+func (c *OpenAIChatComposeCaller) Stats() []EndpointStat {
+	return mergeEndpointStats(c.pool.snapshot(func(cc *openais.ComposeClient) []router.EndpointStat {
+		return cc.Stats()
+	}))
+}
+
+// EndpointStats reports endpoint health merged across the caller's pools.
+func (c *OpenAIChatComposeCaller) EndpointStats() []EndpointStat { return c.Stats() }
+
+// openAIComposeBackend borrows a pool for the duration of one call.
+type openAIComposeBackend struct {
+	pool *composePool[*openais.ComposeClient]
+}
+
+// ChatCompletions implements OpenAIChatBackend.
+func (b *openAIComposeBackend) ChatCompletions(
+	ctx context.Context, request *openai.ChatCompletionRequest,
+) (*openai.ChatCompletionResponse, error) {
+	client, err := b.pool.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer b.pool.release(client)
+
+	return client.ChatCompletions(ctx, request)
+}
+
+// ChatCompletionsStream implements OpenAIChatBackend. The pool is released as
+// soon as the stream is established: routing covers establishment
+// only, and the stream that follows no longer passes through it.
+func (b *openAIComposeBackend) ChatCompletionsStream(
+	ctx context.Context, request *openai.ChatCompletionRequest,
+) (*openai.ChatCompletionStream, error) {
+	client, err := b.pool.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer b.pool.release(client)
+
+	return client.ChatCompletionsStream(ctx, request)
+}
+
+var (
+	_ Caller            = (*OpenAIChatComposeCaller)(nil)
+	_ OpenAIChatBackend = (*openAIComposeBackend)(nil)
+)

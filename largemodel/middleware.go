@@ -28,7 +28,7 @@
 //
 // Retrying a failed call and taking a sick endpoint out of rotation are not
 // among those concerns, and no middleware here provides them. A Caller reaches
-// its vendor through an aimodel pool — one endpoint or several, the shape is
+// its vendor through a provider router pool — one endpoint or several, the shape is
 // the same — and that pool owns the retries, the endpoint health and the
 // failover. vage does not run a second attempt loop above it; see
 // OpenAIChatComposeCaller for what the pool does and how to tune it.

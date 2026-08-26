@@ -10,8 +10,10 @@
 | `largemodel/openai_chat.go` | OpenAI Chat Completions:`OpenAIChatBackend` 接口 + wire 类型双向转换,默认后端是 `openai` native 客户端 |
 | `largemodel/anthropic_messages.go` | Anthropic Messages:`AnthropicMessagesBackend` 接口 + wire 转换;吸收 system 提升、content block、必填 max_tokens 三处结构差异 |
 | `largemodel/router/` | 协议中立路由核:策略、健康、重试、failover |
-| `largemodel/composes/openais/`、`composes/anthropics/` | 各协议的路由 Backend 绑定 |
-| `largemodel/compose.go` | 池化 Caller:把 router 池接到 Backend 接口上,以池集合承载并发,并合并各池的端点健康视图 |
+| `largemodel/provider/openais/`、`provider/anthropics/` | 各 provider 的路由 Backend 绑定与 message codec |
+| `largemodel/compose_options.go` | 池化 Caller 的并发、重试、恢复时间及 provider client options |
+| `largemodel/compose_pool.go` | provider-neutral 池集合与端点健康视图合并 |
+| `largemodel/openai_compose.go`、`anthropic_compose.go` | 把对应 provider router 池接到根包 Backend 接口与 `Caller` facade |
 | `largemodel/endpoint_config.go` | 统一端点配置与公开 API(`OpenAIConfig`、`WithRetryPolicy` 等) |
 | `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
 | `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
@@ -34,7 +36,8 @@
 ## 关键设计决策
 
 - **协议直连而非中立抽象**:每种厂商协议一个 `Caller` 实现,发出的是该 provider 的 native 请求。代价是调用层感知协议差异,收益是不必为了统一而做有损归一,厂商新能力也不必先等一层中立抽象补齐。
-- **后端接口化,重试与路由整块外包给 router**:`Caller` 持有的不是具体客户端而是最小方法集接口,而 `largemodel/composes` 路由池实现的正是同一组方法。于是重试、端点存活判定、多端点选择与故障转移整块取自 `largemodel/router`,vage 删除了自己的 Retry / CircuitBreaker 中间件 —— 两套机制并存只会把尝试次数相乘。单端点走"一个端点的池",与多端点同形,可靠性行为不因端点数量而换一套说法。
+- **后端接口化,重试与路由整块外包给 router**:`Caller` 持有的不是具体客户端而是最小方法集接口,而 `largemodel/provider/{openais,anthropics}` 路由池实现的正是同一组方法。于是重试、端点存活判定、多端点选择与故障转移整块取自 `largemodel/router`,vage 删除了自己的 Retry / CircuitBreaker 中间件 —— 两套机制并存只会把尝试次数相乘。单端点走"一个端点的池",与多端点同形,可靠性行为不因端点数量而换一套说法。
+- **Caller facade 与 provider backend 分层**:`largemodel/provider/*` 只拥有 native wire codec、endpoint construction 与 routed backend,不反向依赖根包。使用 `Request`/`Response`/`Stream` 实现公开 `Caller` 的 adapter 留在 `largemodel`,避免形成 `largemodel → provider → largemodel` import cycle。为保持 provider 代码聚合,OpenAI 与 Anthropic 的池化 adapter 分别放在同 package 的独立文件中。
 - **已知代价:400 被当作可重试**。router 只把 401/403 判为不可重试,其余(含确定性的 400/404/422)一律重试满再判死端点。一个格式错误的请求因此要付掉整轮退避,并让端点进入恢复窗口。这是"取单一来源"的代价,vage 侧可通过可注入 failure classifier 改进(待做)。`IsRetryable` 保留了 vage 更窄的判读供上层使用。
 - **池集合而非单池**:router 池一次只服务一个调用(并发调用被拒为 `ErrCallInProgress`),而 vage 把一个 `Caller` 注入给并行运行的 Agent。Caller 因此按需建池、用完归还(one pool per concurrent worker)。代价是健康状态按池分散;`EndpointStats()` 在读取时按别名合并出整体视图。流式调用在流建立后立即归还池 —— 路由只覆盖建流那一次。
 - **信封隔离厂商类型**:`Request`/`Response`/`Chunk` 是 vage 自己的调用信封,厂商 wire 类型只出现在 provider 实现内部,因此中间件对协议无感、可跨协议复用。

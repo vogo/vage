@@ -29,9 +29,13 @@
 //   - Responses        — [ComposeClient.Responses] / [ComposeClient.ResponsesStream]
 //
 // A pool here is OpenAI-wire only. Composing Anthropic backends is
-// [github.com/vogo/vage/largemodel/composes/anthropics] — a separate pool over the same
+// [github.com/vogo/vage/largemodel/provider/anthropics] — a separate pool over the same
 // routing core, never a mixed one: what the two share is how a candidate is
 // chosen and how health is recorded, not what a request looks like.
+//
+// The application-facing Caller adapter remains in the parent largemodel
+// package. This package intentionally stays below that facade: it owns native
+// wire codecs and routed backends, and does not import the parent package.
 package openais
 
 import (
@@ -39,8 +43,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 // ChatCompleter is the method set a backend must provide to take part in Chat
@@ -81,12 +85,12 @@ func NewComposeClient(
 	strategy router.Strategy, entries []ModelEntry, opts ...router.Option,
 ) (*ComposeClient, error) {
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("vage/largemodel/composes/openais: at least one model entry is required")
+		return nil, fmt.Errorf("vage/largemodel/provider/openais: at least one model entry is required")
 	}
 
 	for i, e := range entries {
 		if e.Client == nil {
-			return nil, fmt.Errorf("vage/largemodel/composes/openais: entry %d (%q): client is nil", i, e.Name)
+			return nil, fmt.Errorf("vage/largemodel/provider/openais: entry %d (%q): client is nil", i, e.Name)
 		}
 	}
 

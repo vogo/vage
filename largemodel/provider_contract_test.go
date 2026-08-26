@@ -215,8 +215,8 @@ func TestProviderCall_Text(t *testing.T) {
 				t.Errorf("Text() = %q, want %q", got, "hello")
 			}
 
-			if resp.Message.Protocol != pc.protocol {
-				t.Errorf("message protocol = %q, want %q", resp.Message.Protocol, pc.protocol)
+			if resp.Message.Protocol() != pc.protocol {
+				t.Errorf("message protocol = %q, want %q", resp.Message.Protocol(), pc.protocol)
 			}
 
 			if resp.FinishReason != FinishReasonStop {
@@ -406,8 +406,8 @@ func TestProviderStream_ToolCall(t *testing.T) {
 			// A streamed turn must replay as a message in the vendor's own
 			// wire form, so the next iteration can send it back verbatim.
 			msg := acc.AssistantMessage(pc.protocol)
-			if msg.Protocol != pc.protocol {
-				t.Errorf("assistant message protocol = %q, want %q", msg.Protocol, pc.protocol)
+			if msg.Protocol() != pc.protocol {
+				t.Errorf("assistant message protocol = %q, want %q", msg.Protocol(), pc.protocol)
 			}
 
 			if got := msg.ToolCalls(); len(got) != 1 || got[0].ID != "call-1" {
@@ -453,4 +453,89 @@ func TestNewCaller_MissingAPIKey(t *testing.T) {
 	if _, err := NewAnthropicMessagesCaller("", "http://example.invalid"); !errors.Is(err, ErrNoAPIKey) {
 		t.Errorf("NewAnthropicMessagesCaller with no key = %v, want ErrNoAPIKey", err)
 	}
+}
+
+// TestProviderCall_CanonicalOnlyMessages proves callers can encode outbound
+// wire requests from canonical schema.Message fields without legacy wire fields.
+func TestProviderCall_CanonicalOnlyMessages(t *testing.T) {
+	t.Run("openai", func(t *testing.T) {
+		var captured map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+		}))
+		t.Cleanup(srv.Close)
+
+		caller := newOpenAICaller(t, srv.URL)
+		req := &Request{
+			Model: "test-model",
+			Messages: []schema.Message{schema.NewMessage(
+				schema.ProtocolOpenAIChat,
+				schema.RoleUser,
+				[]schema.MessagePart{{Type: schema.MessagePartText, Text: "hi"}},
+			)},
+		}
+		if _, err := caller.Call(context.Background(), req); err != nil {
+			t.Fatalf("Call: %v", err)
+		}
+
+		msgs, ok := captured["messages"].([]any)
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("messages payload = %#v", captured["messages"])
+		}
+		first, _ := msgs[0].(map[string]any)
+		if first["role"] != "user" {
+			t.Errorf("role = %v, want user", first["role"])
+		}
+		if first["content"] != "hi" {
+			t.Errorf("content = %v, want hi", first["content"])
+		}
+	})
+
+	t.Run("anthropic", func(t *testing.T) {
+		var captured map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+		}))
+		t.Cleanup(srv.Close)
+
+		caller := newAnthropicCaller(t, srv.URL)
+		req := &Request{
+			Model: "test-model",
+			Messages: []schema.Message{schema.NewMessage(
+				schema.ProtocolAnthropicMessages,
+				schema.RoleUser,
+				[]schema.MessagePart{{Type: schema.MessagePartText, Text: "hi"}},
+			)},
+		}
+		if _, err := caller.Call(context.Background(), req); err != nil {
+			t.Fatalf("Call: %v", err)
+		}
+
+		msgs, ok := captured["messages"].([]any)
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("messages payload = %#v", captured["messages"])
+		}
+		first, _ := msgs[0].(map[string]any)
+		if first["role"] != "user" {
+			t.Errorf("role = %v, want user", first["role"])
+		}
+		content, ok := first["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("content payload = %#v", first["content"])
+		}
+		block, _ := content[0].(map[string]any)
+		if block["type"] != "text" || block["text"] != "hi" {
+			t.Errorf("content block = %#v, want text hi", block)
+		}
+	})
 }

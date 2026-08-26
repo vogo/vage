@@ -7,22 +7,24 @@
 多端点 dispatch 分两层:**路由机制**与**协议语义**分离,池不跨协议混用。
 
 ```
-largemodel/composes/openais     ChatCompletions · ChatCompletionsStream · Responses · ResponsesStream
-largemodel/composes/anthropics  Messages · MessagesStream
+largemodel/provider/openais     ChatCompletions · ChatCompletionsStream · Responses · ResponsesStream · message codec
+largemodel/provider/anthropics  Messages · MessagesStream · message codec
         │  opaque labels + per-endpoint closure              endpoint index
         ▼                                                              ▲
 largemodel/router              capability filter → active endpoint → retries → failover
                                health · aliases · observers · EndpointStat · MultiError
         ▲
-largemodel/compose.go          池集合:并行 Agent 借还多个 router 池,合并 EndpointStats
+largemodel/compose_pool.go     池集合:并行 Agent 借还多个 router 池,合并 EndpointStats
+largemodel/*_compose.go        provider 池 → Backend 接口 → Caller facade
 largemodel/endpoint_config.go  公开 API: OpenAIConfig / WithRetryPolicy / …
 ```
 
 | 层 | 包 | 职责 |
 |---|---|---|
 | 路由核 | `largemodel/router` | 策略、健康三态、调用内重试、failover;不见 request/response 类型 |
-| 协议绑定 | `largemodel/composes/openais`、`composes/anthropics` | wire 类型复制、model 覆盖、capability 谓词 |
-| 并发与 Caller | `largemodel/compose.go` | 一 router 池同时只服务一次调用;Caller 按需建池、读时合并健康 |
+| provider 绑定 | `largemodel/provider/openais`、`provider/anthropics` | wire 类型复制、canonical message codec、model 覆盖、capability 谓词 |
+| 并发池 | `largemodel/compose_pool.go` | 一 router 池同时只服务一次调用;Caller 按需建池、读时合并健康 |
+| Caller adapter | `largemodel/openai_compose.go`、`anthropic_compose.go` | 把 provider router 池适配到根包 Backend 接口与公开 `Caller` facade |
 
 底层 HTTP 仍由 `github.com/vogo/aimodel/openai`、`anthropic` 发出;aimodel **不含** retry 与路由。
 

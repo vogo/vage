@@ -22,8 +22,8 @@ import (
 	"maps"
 	"time"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 // ModelEntry describes a single model backend in the compose client.
@@ -139,7 +139,7 @@ func NewFromEndpoints(
 	strategy router.Strategy, specs []EndpointSpec, opts ...router.Option,
 ) (*ComposeClient, error) {
 	if len(specs) == 0 {
-		return nil, fmt.Errorf("vage/largemodel/composes/anthropics: at least one endpoint spec is required")
+		return nil, fmt.Errorf("vage/largemodel/provider/anthropics: at least one endpoint spec is required")
 	}
 
 	// Validate aliases up front so the error names the offending position
@@ -148,11 +148,11 @@ func NewFromEndpoints(
 
 	for i, s := range specs {
 		if s.Alias == "" {
-			return nil, fmt.Errorf("vage/largemodel/composes/anthropics: endpoint %d: alias is required", i)
+			return nil, fmt.Errorf("vage/largemodel/provider/anthropics: endpoint %d: alias is required", i)
 		}
 
 		if prev, dup := seen[s.Alias]; dup {
-			return nil, fmt.Errorf("vage/largemodel/composes/anthropics: duplicate alias %q at endpoints %d and %d", s.Alias, prev, i)
+			return nil, fmt.Errorf("vage/largemodel/provider/anthropics: duplicate alias %q at endpoints %d and %d", s.Alias, prev, i)
 		}
 
 		seen[s.Alias] = i

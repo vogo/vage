@@ -6,7 +6,8 @@
 
 | 包 | 关键类型 | 设计角色 |
 |----|----------|----------|
-| `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | 契约层,唯一外部依赖是 `aimodel` 的 provider wire 类型;`Message` 按协议承载 OpenAI/Anthropic 原生消息,并以访问器统一读取 |
+| `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`MessagePart`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | provider-neutral 契约层;`Message` 以私有 canonical 状态和访问器统一读写,不解释 provider wire |
+| `largemodel/provider/openais`、`provider/anthropics` | provider 路由绑定与 message codec | 按 provider 聚合 native wire ↔ canonical message 转换、原生回放、协议结构校验与 Backend 路由绑定 |
 | `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 |
 | `agent/taskagent` | `New` + 一整套 `With*` 选项、`Run`/`RunStream`/`Resume` | ReAct 循环实现,集成中枢 |
 | `agent/routeragent` | `Route`/`RouteFunc`、内置 `FirstFunc`/`IndexFunc`/`KeywordFunc`/`RandomFunc`/`LLMFunc` | 分发策略 |
@@ -19,6 +20,8 @@
 - **通过 context.Context 传递会话身份与 Emitter**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。
+- **消息模型单事实源 + 原生回放缓存**:`schema.Message` 的私有 canonical 状态(`role` + `parts`)是唯一事实源;可选 `origin` 保存未经修改的 provider native wire。同协议且未修改时直接回放 `origin`;任何 `SetText`/`SetRole`/`ReplaceParts`/`AppendPart` mutation 都立即清空它,随后由 provider codec 从 canonical 状态重新编码。
+- **provider codec 边界**:`schema` 不导入或解析 `aimodel` wire 类型。OpenAI/Anthropic 的 decode、encode、role 映射、content block 规则和 Anthropic tool-result 合并分别收敛在 `largemodel/provider/openais` 与 `provider/anthropics`。
 
 ## LLM 路由输出契约
 
@@ -32,5 +35,5 @@
 
 ## 依赖与降级
 
-- 上游依赖 `aimodel` 各 provider 的 native wire 类型;模型调用本身经 `largemodel.Caller` 按协议分派。
+- `largemodel/provider/openais` 与 `provider/anthropics` 分别依赖对应的 `aimodel` native wire 类型;`schema` 保持 provider-neutral。模型调用经 `largemodel.Caller` 按协议分派。
 - 下游各能力缺省即降级:无检查点则不写快照、无技能管理器则不注入技能提示,均不影响主答案产出。

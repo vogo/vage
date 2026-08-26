@@ -376,8 +376,8 @@ func TestContextEditor_PreservesProtocol(t *testing.T) {
 		}
 	}
 
-	if first.Protocol != schema.ProtocolOpenAIChat {
-		t.Fatalf("placeholder protocol = %q, want %q", first.Protocol, schema.ProtocolOpenAIChat)
+	if first.Protocol() != schema.ProtocolOpenAIChat {
+		t.Fatalf("placeholder protocol = %q, want %q", first.Protocol(), schema.ProtocolOpenAIChat)
 	}
 
 	if first.ToolCallID() == "" {

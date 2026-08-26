@@ -16,7 +16,7 @@
 
 `largemodel` 定义 `Caller` —— 按协议分派的模型调用接缝。每种协议有各自的实现,后端是 `aimodel` 对应 provider 的 native 客户端,并负责 vage 的 `Request`/`Response` 信封与该厂商 wire 类型之间的双向转换。中间件只看见信封,永远看不到厂商类型。
 
-后端以接口形态注入(`OpenAIChatBackend` / `AnthropicMessagesBackend`),其方法集恰好是 native 客户端与 `largemodel/composes` 路由池共有的那一组。**所有 Caller 都经由 router 池请求模型** —— 单端点是"一个端点的池",多端点是"多个端点的池",两者只差池怎么建。重试、端点存活判定与故障转移因此统一归 `largemodel/router`,vage 不再持有第二套。
+后端以接口形态注入(`OpenAIChatBackend` / `AnthropicMessagesBackend`),其方法集恰好是 native 客户端与 `largemodel/provider/{openais,anthropics}` 路由池共有的那一组。**所有 Caller 都经由 router 池请求模型** —— 单端点是"一个端点的池",多端点是"多个端点的池",两者只差池怎么建。重试、端点存活判定与故障转移因此统一归 `largemodel/router`,vage 不再持有第二套。
 
 在 `Caller` 之上是一条**装饰器中间件链**:日志、缓存、限流、超时、指标、token 预算、上下文编辑、溢出处理。每个中间件包裹下一个,组成可插拔的治理栈,并透传被包裹 Caller 的协议。重试与熔断不在其中。
 
@@ -26,7 +26,7 @@
 
 - **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。取值为 openai-chat / openai-responses / anthropic-messages。
 - **Caller(调用接缝)**:一次模型调用的协议无关接口;每种协议一个实现,拥有该厂商的请求构造、响应解析、流解码与错误归一化。
-- **Backend(后端接口)**:Caller 调用的最小方法集,由 `largemodel/composes` 路由池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
+- **Backend(后端接口)**:Caller 调用的最小方法集,由 `largemodel/provider/{openais,anthropics}` 路由池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
 - **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `largemodel/router`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
 - **池集合(pool set)**:compose Caller 持有的多个 router 池。一个池一次只服务一个调用,而 vage 的 Caller 被并行 Agent 共享,故按需借还;并发上限即池数上限,超出时等待而非失败。
 - **中间件**:`Wrap(next Caller) Caller` 的装饰器,可任意组合与排序。

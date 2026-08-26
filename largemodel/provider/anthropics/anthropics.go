@@ -24,9 +24,13 @@
 // this package binds it to `anthropic` types.
 //
 // A pool here is Anthropic-wire only, and this package neither imports nor is
-// imported by [github.com/vogo/vage/largemodel/router/openais]. There is no
+// imported by [github.com/vogo/vage/largemodel/provider/openais]. There is no
 // cross-protocol failover and no shared request model: what the two wrappers
 // share is how a candidate is chosen and how health is recorded.
+//
+// The application-facing Caller adapter remains in the parent largemodel
+// package. This package intentionally stays below that facade: it owns native
+// wire codecs and routed backends, and does not import the parent package.
 package anthropics
 
 import (
@@ -34,8 +38,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 // Messenger is the method set a backend must provide to take part in dispatch.
@@ -60,12 +64,12 @@ func NewComposeClient(
 	strategy router.Strategy, entries []ModelEntry, opts ...router.Option,
 ) (*ComposeClient, error) {
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("vage/largemodel/composes/anthropics: at least one model entry is required")
+		return nil, fmt.Errorf("vage/largemodel/provider/anthropics: at least one model entry is required")
 	}
 
 	for i, e := range entries {
 		if e.Client == nil {
-			return nil, fmt.Errorf("vage/largemodel/composes/anthropics: entry %d (%q): client is nil", i, e.Name)
+			return nil, fmt.Errorf("vage/largemodel/provider/anthropics: entry %d (%q): client is nil", i, e.Name)
 		}
 	}
 

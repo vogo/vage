@@ -29,10 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/vage/largemodel/composes/anthropics"
-	"github.com/vogo/vage/largemodel/composes/openais"
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/provider/anthropics"
+	"github.com/vogo/vage/largemodel/provider/openais"
+	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/vage/schema"
 )
 
@@ -413,7 +413,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 // TestComposeCaller_StreamReleasesPool checks that a pool borrowed to open a
-// stream is handed back once the stream is established — aimodel's routing
+// stream is handed back once the stream is established — router dispatch
 // covers establishment only — so a second call is not blocked behind a stream
 // the consumer has not finished reading.
 func TestComposeCaller_StreamReleasesPool(t *testing.T) {

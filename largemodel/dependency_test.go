@@ -84,8 +84,8 @@ func TestRouterCoreImportsNoProvider(t *testing.T) {
 // stay independent of each other.
 func TestBackendWrappersAreIsolated(t *testing.T) {
 	wrappers := map[string]struct{ own, forbidden string }{
-		"composes/openais":    {own: "openai", forbidden: "anthropic"},
-		"composes/anthropics": {own: "anthropic", forbidden: "openai"},
+		"provider/openais":    {own: "openai", forbidden: "anthropic"},
+		"provider/anthropics": {own: "anthropic", forbidden: "openai"},
 	}
 
 	for dir, want := range wrappers {
@@ -101,6 +101,10 @@ func TestBackendWrappersAreIsolated(t *testing.T) {
 
 		if !imports["github.com/vogo/vage/largemodel/router"] {
 			t.Errorf("%s should build on largemodel/router", dir)
+		}
+
+		if imports["github.com/vogo/vage/largemodel"] {
+			t.Errorf("%s must stay below the largemodel facade and must not import it", dir)
 		}
 
 		for other := range wrappers {

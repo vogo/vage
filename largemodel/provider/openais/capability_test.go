@@ -27,8 +27,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 func toolsRequest() *openai.ChatCompletionRequest {

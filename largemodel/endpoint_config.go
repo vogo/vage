@@ -23,8 +23,8 @@ import (
 
 	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/aimodel/openai"
-	"github.com/vogo/vage/largemodel/composes/anthropics"
-	"github.com/vogo/vage/largemodel/composes/openais"
+	"github.com/vogo/vage/largemodel/provider/anthropics"
+	"github.com/vogo/vage/largemodel/provider/openais"
 	"github.com/vogo/vage/largemodel/router"
 )
 

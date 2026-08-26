@@ -32,14 +32,17 @@ func TestNewUserMessage(t *testing.T) {
 		t.Run(string(proto), func(t *testing.T) {
 			msg := NewUserMessage(proto, "hello")
 
-			if msg.Protocol != proto {
-				t.Errorf("Protocol = %q, want %q", msg.Protocol, proto)
+			if msg.Protocol() != proto {
+				t.Errorf("Protocol = %q, want %q", msg.Protocol(), proto)
 			}
 			if msg.Role() != RoleUser {
 				t.Errorf("Role() = %q, want %q", msg.Role(), RoleUser)
 			}
 			if msg.Text() != "hello" {
 				t.Errorf("Text() = %q, want %q", msg.Text(), "hello")
+			}
+			if len(msg.Parts()) != 1 || msg.Parts()[0].Type != MessagePartText {
+				t.Errorf("Parts = %+v, want one text part", msg.Parts())
 			}
 			if msg.Timestamp.IsZero() {
 				t.Error("Timestamp should not be zero")
@@ -68,12 +71,8 @@ func TestNewSystemMessage(t *testing.T) {
 		})
 	}
 
-	if got := NewSystemMessage(ProtocolAnthropicMessages, "be brief").SystemText; got != "be brief" {
-		t.Errorf("anthropic SystemText = %q, want %q", got, "be brief")
-	}
-
-	if NewSystemMessage(ProtocolOpenAIChat, "be brief").OpenAI == nil {
-		t.Error("openai system message should carry a wire payload")
+	if len(NewSystemMessage(ProtocolOpenAIChat, "be brief").Origin()) != 0 {
+		t.Error("newly constructed system messages should rely on canonical fields")
 	}
 }
 
@@ -186,8 +185,11 @@ func TestMessageRoundTrip(t *testing.T) {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 
-			if decoded.Protocol != proto {
-				t.Errorf("Protocol = %q, want %q", decoded.Protocol, proto)
+			if decoded.Protocol() != proto {
+				t.Errorf("Protocol = %q, want %q", decoded.Protocol(), proto)
+			}
+			if decoded.Role() != original.Role() {
+				t.Errorf("Role = %q, want %q", decoded.Role(), original.Role())
 			}
 			if decoded.Text() != original.Text() {
 				t.Errorf("Text() = %q, want %q", decoded.Text(), original.Text())
@@ -201,6 +203,48 @@ func TestMessageRoundTrip(t *testing.T) {
 				t.Errorf("ToolCalls() = %+v, want the original call", got)
 			}
 		})
+	}
+}
+
+func TestCanonicalMutationInvalidatesOrigin(t *testing.T) {
+	payload := json.RawMessage(`{"role":"assistant","content":"hi"}`)
+	msg := NewMessageWithOrigin(
+		ProtocolOpenAIChat,
+		RoleAssistant,
+		[]MessagePart{{Type: MessagePartText, Text: "hi"}},
+		payload,
+		"",
+	)
+	if len(msg.Origin()) == 0 {
+		t.Fatal("origin empty before mutation")
+	}
+
+	msg.SetText("rewritten")
+	if len(msg.Origin()) != 0 {
+		t.Fatal("origin retained after canonical mutation")
+	}
+	if msg.Text() != "rewritten" {
+		t.Fatalf("Text() = %q, want rewritten", msg.Text())
+	}
+}
+
+func TestPartsReturnsDeepCopy(t *testing.T) {
+	msg := NewAssistantTurn(ProtocolOpenAIChat, "", "", []ToolCall{{
+		ID: "call-1", Name: "run", Arguments: `{}`,
+	}})
+	parts := msg.Parts()
+	parts[0].ToolCall.Name = "changed"
+	if got := msg.ToolCalls()[0].Name; got != "run" {
+		t.Fatalf("message mutated through Parts copy: %q", got)
+	}
+}
+
+func TestSetTextDoesNotMutateMessageCopy(t *testing.T) {
+	original := NewAssistantTurn(ProtocolOpenAIChat, "original", "", nil)
+	mutated := original
+	mutated.SetText("changed")
+	if got := original.Text(); got != "original" {
+		t.Fatalf("original Text() = %q after copy mutation", got)
 	}
 }
 

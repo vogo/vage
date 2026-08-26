@@ -26,8 +26,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/largemodel/router"
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/router"
 )
 
 func specForServer(s *httptest.Server, alias, model string) EndpointSpec {
