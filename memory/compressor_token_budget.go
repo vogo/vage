@@ -19,6 +19,7 @@ package memory
 
 import (
 	"context"
+	"slices"
 
 	"github.com/vogo/vage/schema"
 )
@@ -59,8 +60,8 @@ func (c *TokenBudgetCompressor) Compress(ctx context.Context, messages []schema.
 	total := 0
 	startIdx := len(messages)
 
-	for i := len(messages) - 1; i >= 0; i-- {
-		tokens := c.estimator(messages[i])
+	for i, message := range slices.Backward(messages) {
+		tokens := c.estimator(message)
 		if total+tokens > maxTokens {
 			break
 		}

@@ -74,8 +74,8 @@ func TestGenerateID_FormatAndUniqueness(t *testing.T) {
 		// be lexicographically non-decreasing as a prefix.
 		if prev != "" && id <= prev {
 			// Tolerate equal prefix with different random suffix.
-			pPrefix := strings.SplitN(prev, "-", 2)[0]
-			iPrefix := strings.SplitN(id, "-", 2)[0]
+			pPrefix, _, _ := strings.Cut(prev, "-")
+			iPrefix, _, _ := strings.Cut(id, "-")
 			if iPrefix < pPrefix {
 				t.Fatalf("id not monotonic: %q after %q", id, prev)
 			}

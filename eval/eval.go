@@ -19,6 +19,7 @@ package eval
 
 import (
 	"context"
+	"slices"
 
 	"github.com/vogo/vage/schema"
 )
@@ -110,9 +111,9 @@ func lastAssistantText(resp *schema.RunResponse) string {
 		return ""
 	}
 
-	for i := len(resp.Messages) - 1; i >= 0; i-- {
-		if resp.Messages[i].Role() == schema.RoleAssistant {
-			return resp.Messages[i].Text()
+	for _, v := range slices.Backward(resp.Messages) {
+		if v.Role() == schema.RoleAssistant {
+			return v.Text()
 		}
 	}
 

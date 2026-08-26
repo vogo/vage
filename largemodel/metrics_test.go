@@ -226,7 +226,9 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := NewOpenAIChatCaller("sk-test", srv.URL)
+	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "sk-test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -317,7 +319,9 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := NewOpenAIChatCaller("sk-test", srv.URL)
+	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "sk-test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

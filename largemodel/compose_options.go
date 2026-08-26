@@ -96,9 +96,9 @@ func WithComposeConcurrency(n int) ComposeOption {
 }
 
 // WithOpenAIClientOptions passes provider client options — base URL overrides,
-// timeouts, custom headers — to the client [NewOpenAIChatCaller] builds. It has
-// no effect on a pool built from endpoint specs, which carries its connection
-// details per endpoint.
+// timeouts, custom headers — to the clients [NewOpenAIChatCallerFromConfig]
+// builds. It has no effect on a pool built from endpoint specs, which carries
+// its connection details per endpoint.
 func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
 	return func(c *composeConfig) {
 		c.openAIClientOpts = append(c.openAIClientOpts, opts...)
@@ -106,7 +106,7 @@ func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
 }
 
 // WithAnthropicClientOptions is the Anthropic counterpart of
-// [WithOpenAIClientOptions], for the client [NewAnthropicMessagesCaller]
+// [WithOpenAIClientOptions], for the clients [NewAnthropicMessagesCallerFromConfig]
 // builds.
 func WithAnthropicClientOptions(opts ...anthropic.ClientOption) ComposeOption {
 	return func(c *composeConfig) {

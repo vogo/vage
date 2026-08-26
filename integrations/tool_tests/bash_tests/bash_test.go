@@ -638,10 +638,18 @@ func TestExecuteErrorThenSuccess(t *testing.T) {
 // asking it to execute a bash command, and verifies the expected output
 // appears in the response. Skipped if no API key is available.
 func TestBashToolWithLLMAgent(t *testing.T) {
-	client, err := largemodel.NewOpenAIChatCaller(
-		testenv.First("AI_API_KEY", "OPENAI_API_KEY"),
-		testenv.First("AI_BASE_URL", "OPENAI_BASE_URL"),
-	)
+	apiKey := testenv.First("AI_API_KEY", "OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping LLM integration test: no API key in environment")
+	}
+
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{
+			Alias:   "default",
+			APIKey:  apiKey,
+			BaseURL: testenv.First("AI_BASE_URL", "OPENAI_BASE_URL"),
+		}},
+	})
 	if err != nil {
 		t.Skipf("Skipping LLM integration test: failed to create aimodel client: %v", err)
 	}

@@ -44,7 +44,8 @@ import (
 // fastRouting keeps a test pool from sleeping through the default backoff.
 func fastRouting() ComposeOption {
 	return func(c *composeConfig) {
-		c.routerOpts = append(c.routerOpts,
+		c.routerOpts = append(
+			c.routerOpts,
 			router.WithRetryPolicy(time.Millisecond, 0),
 			router.WithRecoverTime(time.Minute),
 		)
@@ -528,16 +529,17 @@ func TestAnthropicComposeCaller_Failover(t *testing.T) {
 func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{
-			Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
-		}},
-	},
+	caller, err := NewOpenAIChatCallerFromConfig(
+		OpenAIConfig{
+			Endpoints: []OpenAIEndpoint{{
+				Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+			}},
+		},
 		WithRetryPolicy(time.Millisecond, 2),
 		WithRecoverTime(time.Minute),
 	)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCaller: %v", err)
+		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
@@ -582,16 +584,17 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{
-			Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
-		}},
-	},
+	caller, err := NewOpenAIChatCallerFromConfig(
+		OpenAIConfig{
+			Endpoints: []OpenAIEndpoint{{
+				Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+			}},
+		},
 		WithRetryPolicy(time.Millisecond, 2),
 		WithRecoverTime(recoverTime),
 	)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCaller: %v", err)
+		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
@@ -642,13 +645,19 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	caller, err := NewAnthropicMessagesCaller(
-		"test-key", srv.URL,
+	caller, err := NewAnthropicMessagesCallerFromConfig(
+		AnthropicConfig{
+			Endpoints: []AnthropicEndpoint{{
+				Alias:   defaultEndpointAlias,
+				APIKey:  "test-key",
+				BaseURL: srv.URL,
+			}},
+		},
 		WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")),
 		fastRouting(),
 	)
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCaller: %v", err)
+		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolAnthropicMessages)); err != nil {

@@ -20,6 +20,7 @@ package compressor_tests
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,12 +143,12 @@ func TestIntegration_ConversationCompactor_RealisticConversation(t *testing.T) {
 	// The last messages should be the protected tail.
 	lastUser := ""
 	lastAssistant := ""
-	for i := len(result) - 1; i >= 0; i-- {
-		if result[i].Role() == schema.RoleAssistant && lastAssistant == "" {
-			lastAssistant = result[i].Text()
+	for _, r := range slices.Backward(result) {
+		if r.Role() == schema.RoleAssistant && lastAssistant == "" {
+			lastAssistant = r.Text()
 		}
-		if result[i].Role() == schema.RoleUser && lastUser == "" {
-			lastUser = result[i].Text()
+		if r.Role() == schema.RoleUser && lastUser == "" {
+			lastUser = r.Text()
 		}
 		if lastUser != "" && lastAssistant != "" {
 			break
@@ -205,13 +206,13 @@ func TestIntegration_ConversationCompactor_ProtectedTurnCounts(t *testing.T) {
 
 			// Count user/assistant pairs at the end of the result (after the summary).
 			pairsAfterSummary := 0
-			for i := len(result) - 1; i >= 0; i-- {
-				if result[i].Metadata != nil {
-					if compressed, ok := result[i].Metadata["compressed"].(bool); ok && compressed {
+			for _, r := range slices.Backward(result) {
+				if r.Metadata != nil {
+					if compressed, ok := r.Metadata["compressed"].(bool); ok && compressed {
 						break
 					}
 				}
-				if result[i].Role() == schema.RoleUser {
+				if r.Role() == schema.RoleUser {
 					pairsAfterSummary++
 				}
 			}
@@ -531,10 +532,10 @@ func TestIntegration_ConversationCompactor_EmergencyCompaction(t *testing.T) {
 	}
 
 	// Verify the last user message is from the last turn.
-	for i := len(result) - 1; i >= 0; i-- {
-		if result[i].Role() == schema.RoleUser {
-			if !strings.Contains(result[i].Text(), "User question 10") {
-				t.Errorf("last protected user = %q, want to contain 'User question 10'", result[i].Text())
+	for _, r := range slices.Backward(result) {
+		if r.Role() == schema.RoleUser {
+			if !strings.Contains(r.Text(), "User question 10") {
+				t.Errorf("last protected user = %q, want to contain 'User question 10'", r.Text())
 			}
 			break
 		}

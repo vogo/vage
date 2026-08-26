@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/vogo/vage/memory"
@@ -265,8 +266,8 @@ func defaultQuery(in FetchInput) string {
 	if in.Request == nil || len(in.Request.Messages) == 0 {
 		return ""
 	}
-	for i := len(in.Request.Messages) - 1; i >= 0; i-- {
-		m := in.Request.Messages[i]
+	for _, m := range slices.Backward(in.Request.Messages) {
+
 		if m.Role() != schema.RoleUser {
 			continue
 		}

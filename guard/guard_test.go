@@ -93,8 +93,7 @@ func TestBlockedError(t *testing.T) {
 		t.Errorf("BlockedError.Error() = %q, want %q", err.Error(), "blocked by pii: PII detected")
 	}
 
-	var be *BlockedError
-	if !errors.As(err, &be) {
+	if _, ok := errors.AsType[*BlockedError](err); !ok {
 		t.Errorf("errors.As failed for BlockedError")
 	}
 }

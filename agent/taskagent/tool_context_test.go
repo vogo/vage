@@ -97,9 +97,11 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
+	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	a := New(
@@ -155,9 +157,11 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
+	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	a := New(agent.Config{ID: "todo-e2e"}, WithCaller(client), WithToolRegistry(reg))

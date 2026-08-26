@@ -311,8 +311,7 @@ func TestMessages_AllFailAggregatesByAlias(t *testing.T) {
 
 	// errors.As reaches the provider's own error through the aggregate, without
 	// this package or the core naming that type.
-	var apiErr *anthropic.HTTPError
-	if !errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*anthropic.HTTPError](err); !ok {
 		t.Fatal("expected errors.As to find *anthropic.HTTPError in the chain")
 	}
 }

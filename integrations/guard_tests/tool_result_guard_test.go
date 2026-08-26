@@ -419,7 +419,9 @@ func TestIntegration_ToolResultGuard_Stream_EventOrder(t *testing.T) {
 	srv := sseStreamServerTR(t, [][]string{tcChunks, textChunks})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

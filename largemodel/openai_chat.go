@@ -50,28 +50,6 @@ type openAIChatCaller struct {
 	client OpenAIChatBackend
 }
 
-// NewOpenAIChatCaller builds a Caller over OpenAI's Chat Completions API.
-// baseURL may be empty to use OpenAI's own endpoint, or point at any
-// OpenAI-compatible endpoint. The API key is required and validated here so
-// misconfiguration surfaces before any call is attempted.
-//
-// Deprecated: prefer [NewOpenAIChatCallerFromConfig] with a single [OpenAIEndpoint].
-// Provider client options go through [WithOpenAIClientOptions]; use
-// [NewOpenAIChatCallerFromBackend] to bypass routing altogether.
-func NewOpenAIChatCaller(apiKey, baseURL string, opts ...ComposeOption) (*OpenAIChatComposeCaller, error) {
-	if apiKey == "" {
-		return nil, ErrNoAPIKey
-	}
-
-	return NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{
-			Alias:   defaultEndpointAlias,
-			APIKey:  apiKey,
-			BaseURL: baseURL,
-		}},
-	}, opts...)
-}
-
 // Protocol implements Caller.
 func (c *openAIChatCaller) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
 

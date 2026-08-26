@@ -297,10 +297,10 @@ func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 	var (
 		muSeen sync.Mutex
 		seen   []schema.CheckpointWrittenData
-		count  int32
+		count  atomic.Int32
 	)
 	hookMgr.Register(hook.NewHookFunc(func(_ context.Context, e schema.Event) error {
-		atomic.AddInt32(&count, 1)
+		count.Add(1)
 		if d, ok := e.Data.(schema.CheckpointWrittenData); ok {
 			muSeen.Lock()
 			seen = append(seen, d)
@@ -322,7 +322,7 @@ func TestCheckpoint_AC_3_3_HookEventEmitted(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&count); got != 1 {
+	if got := count.Load(); got != 1 {
 		t.Fatalf("hook count = %d, want 1", got)
 	}
 	muSeen.Lock()

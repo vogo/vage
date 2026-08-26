@@ -114,8 +114,7 @@ func RunCommand(cmd *exec.Cmd, cancel context.CancelFunc, parentCtx, childCtx co
 			return RunResult{}, fmt.Errorf("command timed out after %s", timeout)
 		}
 
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok {
 			return RunResult{Stdout: stdout, Stderr: stderrStr, ExitCode: exitErr.ExitCode()}, nil
 		}
 

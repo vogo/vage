@@ -54,30 +54,6 @@ type anthropicMessagesCaller struct {
 	client AnthropicMessagesBackend
 }
 
-// NewAnthropicMessagesCaller builds a Caller over Anthropic's Messages API.
-// baseURL may be empty to use Anthropic's own endpoint. The API key is
-// required and validated here so misconfiguration surfaces before any call.
-//
-// Deprecated: prefer [NewAnthropicMessagesCallerFromConfig] with a single
-// [AnthropicEndpoint]. Vendor headers and other provider client options go
-// through [WithAnthropicClientOptions]; use [NewAnthropicMessagesCallerFromBackend]
-// to bypass routing.
-func NewAnthropicMessagesCaller(
-	apiKey, baseURL string, opts ...ComposeOption,
-) (*AnthropicMessagesComposeCaller, error) {
-	if apiKey == "" {
-		return nil, ErrNoAPIKey
-	}
-
-	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
-		Endpoints: []AnthropicEndpoint{{
-			Alias:   defaultEndpointAlias,
-			APIKey:  apiKey,
-			BaseURL: baseURL,
-		}},
-	}, opts...)
-}
-
 // Protocol implements Caller.
 func (c *anthropicMessagesCaller) Protocol() schema.Protocol {
 	return schema.ProtocolAnthropicMessages

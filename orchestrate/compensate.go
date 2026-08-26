@@ -20,6 +20,7 @@ package orchestrate
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/vogo/vage/schema"
@@ -67,8 +68,7 @@ func executeBackwardCompensation(ctx context.Context, cfg *CompensateConfig,
 
 	// Reverse the order for backward compensation.
 	var completedReverse []string
-	for i := len(topoOrder) - 1; i >= 0; i-- {
-		id := topoOrder[i]
+	for _, id := range slices.Backward(topoOrder) {
 		if result.NodeStatus[id] == NodeDone {
 			completedReverse = append(completedReverse, id)
 		}

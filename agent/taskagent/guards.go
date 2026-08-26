@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/vogo/vage/guard"
@@ -36,8 +37,8 @@ func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) erro
 
 	// Find the last user message.
 	idx := -1
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role() == schema.RoleUser {
+	for i, v := range slices.Backward(req.Messages) {
+		if v.Role() == schema.RoleUser {
 			idx = i
 			break
 		}

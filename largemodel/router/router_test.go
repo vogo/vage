@@ -821,8 +821,7 @@ func TestDispatch_AllFailAttributesEachEndpointOnce(t *testing.T) {
 
 	// errors.As reaches through the aggregate to a single endpoint failure and
 	// on to the backend's own error type.
-	var endpointErr *EndpointError
-	if !errors.As(err, &endpointErr) {
+	if _, ok := errors.AsType[*EndpointError](err); !ok {
 		t.Fatal("expected errors.As to find an EndpointError in the chain")
 	}
 

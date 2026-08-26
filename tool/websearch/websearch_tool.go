@@ -240,8 +240,7 @@ func (t *Tool) translateProviderError(query string, err error) schema.ToolResult
 	if errors.Is(err, ErrInvalidAPIKey) {
 		return errorResult(query, t.provider.Name(), "invalid_api_key", "web_search: provider rejected credentials")
 	}
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		env := searchEnvelope{
 			Query:      query,
 			Provider:   t.provider.Name(),

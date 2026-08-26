@@ -24,12 +24,8 @@ import (
 	"net"
 )
 
-// ErrNoAPIKey reports a caller configured without a credential. It surfaces at
-// construction time, before any network I/O is attempted.
-var ErrNoAPIKey = errors.New("vage: API key is required")
-
-// ErrNoBackend reports a caller handed no client to call. Like ErrNoAPIKey it
-// surfaces at construction time.
+// ErrNoBackend reports a caller handed no client to call. It surfaces at
+// construction time.
 var ErrNoBackend = errors.New("vage: model backend is required")
 
 // statusOverloaded is Anthropic's 529, returned when the API is temporarily
@@ -88,13 +84,11 @@ var retryableStatusCodes = map[int]bool{
 // something above the model has to decide whether a failure is worth reacting
 // to (surfacing it, rephrasing the request, giving up on a backend).
 func IsRetryable(err error) bool {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		return retryableStatusCodes[apiErr.StatusCode]
 	}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) {
+	if _, ok := errors.AsType[net.Error](err); ok {
 		return true
 	}
 

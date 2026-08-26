@@ -19,40 +19,66 @@ package largemodel_test
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
 
+func parsePackageFiles(t *testing.T, fset *token.FileSet, dir string, mode parser.Mode) map[string]*ast.File {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+
+	files := make(map[string]*ast.File)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		matches, err := build.Default.MatchFile(dir, name)
+		if err != nil {
+			t.Fatalf("match build constraints for %s: %v", filepath.Join(dir, name), err)
+		}
+		if !matches {
+			continue
+		}
+
+		path := filepath.Join(dir, name)
+		file, err := parser.ParseFile(fset, path, nil, mode)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		files[path] = file
+	}
+
+	return files
+}
+
 func packageImports(t *testing.T, dir string) map[string]bool {
 	t.Helper()
 
 	fset := token.NewFileSet()
-
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
-		name := fi.Name()
-
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
-	}, parser.ImportsOnly)
-	if err != nil {
-		t.Fatalf("parse %s: %v", dir, err)
-	}
+	files := parsePackageFiles(t, fset, dir, parser.ImportsOnly)
 
 	imports := map[string]bool{}
 
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, imp := range file.Imports {
-				path, err := strconv.Unquote(imp.Path.Value)
-				if err != nil {
-					t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
-				}
-
-				imports[path] = true
+	for _, file := range files {
+		for _, imp := range file.Imports {
+			path, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
 			}
+
+			imports[path] = true
 		}
 	}
 
@@ -119,66 +145,56 @@ func TestBackendWrappersAreIsolated(t *testing.T) {
 // no provider request or response type.
 func TestRouterCoreExportsNoProviderType(t *testing.T) {
 	fset := token.NewFileSet()
+	files := parsePackageFiles(t, fset, "router", parser.SkipObjectResolution)
 
-	pkgs, err := parser.ParseDir(fset, "router", func(fi fs.FileInfo) bool {
-		name := fi.Name()
+	for path, file := range files {
+		moduleAliases := map[string]string{}
 
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
-	}, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse router: %v", err)
-	}
-
-	for _, pkg := range pkgs {
-		for path, file := range pkg.Files {
-			moduleAliases := map[string]string{}
-
-			for _, imp := range file.Imports {
-				importPath, err := strconv.Unquote(imp.Path.Value)
-				if err != nil {
-					t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
-				}
-
-				if !strings.HasPrefix(importPath, "github.com/vogo/aimodel") {
-					continue
-				}
-
-				name := importPath[strings.LastIndex(importPath, "/")+1:]
-				if imp.Name != nil {
-					name = imp.Name.Name
-				}
-
-				moduleAliases[name] = importPath
+		for _, imp := range file.Imports {
+			importPath, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
 			}
 
-			if len(moduleAliases) == 0 {
+			if !strings.HasPrefix(importPath, "github.com/vogo/aimodel") {
 				continue
 			}
 
-			for _, decl := range file.Decls {
-				if _, exported := exportedDeclName(decl); !exported {
-					continue
+			name := importPath[strings.LastIndex(importPath, "/")+1:]
+			if imp.Name != nil {
+				name = imp.Name.Name
+			}
+
+			moduleAliases[name] = importPath
+		}
+
+		if len(moduleAliases) == 0 {
+			continue
+		}
+
+		for _, decl := range file.Decls {
+			if _, exported := exportedDeclName(decl); !exported {
+				continue
+			}
+
+			ast.Inspect(decl, func(node ast.Node) bool {
+				sel, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
 				}
 
-				ast.Inspect(decl, func(node ast.Node) bool {
-					sel, ok := node.(*ast.SelectorExpr)
-					if !ok {
-						return true
-					}
-
-					ident, ok := sel.X.(*ast.Ident)
-					if !ok {
-						return true
-					}
-
-					if importPath, found := moduleAliases[ident.Name]; found {
-						t.Errorf("%s: exported API references %s.%s from %q",
-							path, ident.Name, sel.Sel.Name, importPath)
-					}
-
+				ident, ok := sel.X.(*ast.Ident)
+				if !ok {
 					return true
-				})
-			}
+				}
+
+				if importPath, found := moduleAliases[ident.Name]; found {
+					t.Errorf("%s: exported API references %s.%s from %q",
+						path, ident.Name, sel.Sel.Name, importPath)
+				}
+
+				return true
+			})
 		}
 	}
 }

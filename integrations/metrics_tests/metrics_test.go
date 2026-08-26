@@ -59,7 +59,9 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -135,7 +137,9 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -225,7 +229,9 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("sk-test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

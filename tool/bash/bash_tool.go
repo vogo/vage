@@ -191,8 +191,7 @@ func (bt *BashTool) execute(parentCtx context.Context, command string) (schema.T
 			return schema.ErrorResult("", output+fmt.Sprintf("\ncommand timed out after %s", bt.timeout)), nil
 		}
 
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok {
 			return schema.ErrorResult("", output+fmt.Sprintf("\nexit code: %d", exitErr.ExitCode())), nil
 		}
 

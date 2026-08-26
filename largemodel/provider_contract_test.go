@@ -64,9 +64,11 @@ type providerCase struct {
 func newOpenAICaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewOpenAIChatCaller("test-key", baseURL, fastRouting())
+	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
+	}, fastRouting())
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCaller: %v", err)
+		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	return c
@@ -75,9 +77,11 @@ func newOpenAICaller(t *testing.T, baseURL string) Caller {
 func newAnthropicCaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewAnthropicMessagesCaller("test-key", baseURL, fastRouting())
+	c, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+		Endpoints: []AnthropicEndpoint{{Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
+	}, fastRouting())
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCaller: %v", err)
+		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
 	}
 
 	return c
@@ -443,25 +447,17 @@ func TestProviderCall_ProtocolMismatch(t *testing.T) {
 	}
 }
 
-// TestNewCaller_MissingAPIKey covers the construction-time failure both
-// callers must report before any network I/O.
-func TestNewCaller_MissingAPIKey(t *testing.T) {
-	if _, err := NewOpenAIChatCaller("", "http://example.invalid"); !errors.Is(err, ErrNoAPIKey) {
-		t.Errorf("NewOpenAIChatCaller with no key = %v, want ErrNoAPIKey", err)
-	}
-
-	if _, err := NewAnthropicMessagesCaller("", "http://example.invalid"); !errors.Is(err, ErrNoAPIKey) {
-		t.Errorf("NewAnthropicMessagesCaller with no key = %v, want ErrNoAPIKey", err)
-	}
-}
-
 // TestProviderCall_CanonicalOnlyMessages proves callers can encode outbound
 // wire requests from canonical schema.Message fields without legacy wire fields.
 func TestProviderCall_CanonicalOnlyMessages(t *testing.T) {
 	t.Run("openai", func(t *testing.T) {
 		var captured map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer r.Body.Close()
+			defer func() {
+				if err := r.Body.Close(); err != nil {
+					t.Errorf("close request body: %v", err)
+				}
+			}()
 			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 				t.Fatalf("decode request: %v", err)
 			}
@@ -499,7 +495,11 @@ func TestProviderCall_CanonicalOnlyMessages(t *testing.T) {
 	t.Run("anthropic", func(t *testing.T) {
 		var captured map[string]any
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer r.Body.Close()
+			defer func() {
+				if err := r.Body.Close(); err != nil {
+					t.Errorf("close request body: %v", err)
+				}
+			}()
 			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 				t.Fatalf("decode request: %v", err)
 			}

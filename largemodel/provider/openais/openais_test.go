@@ -293,13 +293,11 @@ func TestFailover_AllFailAttributesEveryAlias(t *testing.T) {
 	}
 
 	// errors.As reaches the endpoint attribution and the provider's own error.
-	var endpointErr *router.EndpointError
-	if !errors.As(err, &endpointErr) {
+	if _, ok := errors.AsType[*router.EndpointError](err); !ok {
 		t.Fatal("expected errors.As to find a router.EndpointError in the chain")
 	}
 
-	var apiErr *openai.HTTPError
-	if !errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*openai.HTTPError](err); !ok {
 		t.Fatal("expected errors.As to find *openai.HTTPError in the chain")
 	}
 }

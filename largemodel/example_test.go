@@ -30,11 +30,14 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// ExampleNewOpenAIChatCaller builds a model endpoint on OpenAI's Chat
-// Completions API. Passing an empty base URL uses OpenAI's own endpoint; any
-// OpenAI-compatible endpoint works by passing its URL instead.
-func ExampleNewOpenAIChatCaller() {
-	caller, err := largemodel.NewOpenAIChatCaller("sk-your-key", "https://api.openai.com/v1")
+// ExampleNewOpenAIChatCallerFromConfig_singleEndpoint builds a single OpenAI
+// endpoint the same way the multi-endpoint example does. Passing an empty base
+// URL uses OpenAI's own endpoint; any OpenAI-compatible endpoint works by
+// passing its URL instead.
+func ExampleNewOpenAIChatCallerFromConfig_singleEndpoint() {
+	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-your-key", BaseURL: "https://api.openai.com/v1"}},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -53,15 +56,21 @@ func ExampleNewOpenAIChatCaller() {
 	// Output: openai-chat
 }
 
-// ExampleNewAnthropicMessagesCaller builds a model endpoint on Anthropic's
-// Messages API. The differences from OpenAI are the credential, the default
-// endpoint, and the vendor options — the call surface is identical.
-func ExampleNewAnthropicMessagesCaller() {
+// ExampleNewAnthropicMessagesCallerFromConfig builds a model endpoint on
+// Anthropic's Messages API. The differences from OpenAI are the credential,
+// the default endpoint, and the vendor options — the call surface is identical.
+func ExampleNewAnthropicMessagesCallerFromConfig() {
 	// An empty base URL uses https://api.anthropic.com. Vendor headers are
 	// set through the provider's own client options, and the pool's retry and
 	// recovery behaviour through largemodel routing options.
-	caller, err := largemodel.NewAnthropicMessagesCaller(
-		"sk-ant-your-key", "",
+	caller, err := largemodel.NewAnthropicMessagesCallerFromConfig(
+		largemodel.AnthropicConfig{
+			Endpoints: []largemodel.AnthropicEndpoint{{
+				Alias:   "default",
+				APIKey:  "sk-ant-your-key",
+				BaseURL: "",
+			}},
+		},
 		largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")),
 		largemodel.WithRetryPolicy(time.Second, 2),
 	)
@@ -83,13 +92,14 @@ func ExampleNewAnthropicMessagesCaller() {
 // ExampleNewOpenAIChatCallerFromConfig spreads one logical model over several
 // OpenAI-compatible endpoints.
 func ExampleNewOpenAIChatCallerFromConfig() {
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
-		Strategy: largemodel.StrategyFailover,
-		Endpoints: []largemodel.OpenAIEndpoint{
-			{Alias: "primary", BaseURL: "https://api.openai.com/v1", APIKey: "sk-primary", Model: "gpt-4o"},
-			{Alias: "backup", BaseURL: "https://backup.example.com/v1", APIKey: "sk-backup", Model: "gpt-4o-mini"},
+	caller, err := largemodel.NewOpenAIChatCallerFromConfig(
+		largemodel.OpenAIConfig{
+			Strategy: largemodel.StrategyFailover,
+			Endpoints: []largemodel.OpenAIEndpoint{
+				{Alias: "primary", BaseURL: "https://api.openai.com/v1", APIKey: "sk-primary", Model: "gpt-4o"},
+				{Alias: "backup", BaseURL: "https://backup.example.com/v1", APIKey: "sk-backup", Model: "gpt-4o-mini"},
+			},
 		},
-	},
 		largemodel.WithRecoverTime(5*time.Minute),
 		largemodel.WithConcurrency(4),
 	)
@@ -130,7 +140,9 @@ func ExampleNewOpenAIChatCallerFromConfig_endpointStats() {
 // ExampleCaller_protocolMismatch shows that messages must match the caller's
 // protocol.
 func ExampleCaller_protocolMismatch() {
-	caller, err := largemodel.NewOpenAIChatCaller("sk-test", "")
+	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test"}},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

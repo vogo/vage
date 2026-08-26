@@ -49,32 +49,6 @@ func (c *AnthropicMessagesComposeCaller) CallStream(ctx context.Context, req *Re
 	return c.caller.CallStream(ctx, req)
 }
 
-// NewAnthropicMessagesComposeCaller builds a Caller over several
-// Anthropic-compatible endpoints, routed by the given strategy.
-//
-// Deprecated: use [NewAnthropicMessagesCallerFromConfig] with [AnthropicConfig] instead.
-func NewAnthropicMessagesComposeCaller(
-	strategy Strategy, specs []anthropics.EndpointSpec, opts ...ComposeOption,
-) (*AnthropicMessagesComposeCaller, error) {
-	endpoints := make([]AnthropicEndpoint, len(specs))
-	for i, s := range specs {
-		endpoints[i] = AnthropicEndpoint{
-			Alias:   s.Alias,
-			APIKey:  s.APIKey,
-			BaseURL: s.BaseURL,
-			Model:   s.Model,
-			Weight:  s.Weight,
-			Tags:    s.Tags,
-			Version: s.Version,
-			Beta:    s.Beta,
-			Cost:    s.Cost,
-			Latency: s.Latency,
-		}
-	}
-
-	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{Strategy: strategy, Endpoints: endpoints}, opts...)
-}
-
 // newAnthropicComposeCaller wires a pool set built by build behind the
 // Anthropic caller, for both the one-endpoint and the several-endpoint path.
 func newAnthropicComposeCaller(

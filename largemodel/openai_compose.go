@@ -66,34 +66,6 @@ func (c *OpenAIChatComposeCaller) CallStream(ctx context.Context, req *Request) 
 	return c.caller.CallStream(ctx, req)
 }
 
-// NewOpenAIChatComposeCaller builds a Caller over several OpenAI-compatible
-// endpoints, routed by the given strategy.
-//
-// Deprecated: use [NewOpenAIChatCallerFromConfig] with [OpenAIConfig] instead.
-//
-// Each spec names its own model, which replaces the model on the request when
-// that endpoint serves it: a vage Request states the model it wants, and an
-// endpoint that speaks of the same model under another name overrides it.
-func NewOpenAIChatComposeCaller(
-	strategy Strategy, specs []openais.EndpointSpec, opts ...ComposeOption,
-) (*OpenAIChatComposeCaller, error) {
-	endpoints := make([]OpenAIEndpoint, len(specs))
-	for i, s := range specs {
-		endpoints[i] = OpenAIEndpoint{
-			Alias:   s.Alias,
-			APIKey:  s.APIKey,
-			BaseURL: s.BaseURL,
-			Model:   s.Model,
-			Weight:  s.Weight,
-			Tags:    s.Tags,
-			Cost:    s.Cost,
-			Latency: s.Latency,
-		}
-	}
-
-	return NewOpenAIChatCallerFromConfig(OpenAIConfig{Strategy: strategy, Endpoints: endpoints}, opts...)
-}
-
 // newOpenAIComposeCaller wires a pool set built by build behind the OpenAI
 // caller. It is what both entry points — one endpoint and several — end up
 // calling, so the two differ only in how a pool is built.

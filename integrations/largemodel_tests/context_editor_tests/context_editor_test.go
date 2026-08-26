@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -460,9 +461,11 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
+	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCaller: %v", err)
+		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
 	}
 
 	cap := &streamCapturer{inner: client}
@@ -632,9 +635,9 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 	// Verify the latest (newest) tool_result still has the original
 	// 100-byte "M" payload — proves the agent's accumulator and the
 	// editor's "keep last K" both preserved newest content verbatim.
-	for j := len(r3.Messages) - 1; j >= 0; j-- {
-		if r3.Messages[j].Role() == schema.RoleTool {
-			text := r3.Messages[j].Text()
+	for _, v := range slices.Backward(r3.Messages) {
+		if v.Role() == schema.RoleTool {
+			text := v.Text()
 			if strings.Contains(text, "context_edited") {
 				t.Error("most recent tool_result was elided — keep_last_k violated")
 			}

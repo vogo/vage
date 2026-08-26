@@ -19,6 +19,7 @@ package orchestrate
 
 import (
 	"container/heap"
+	"slices"
 )
 
 // priorityItem wraps a node ID with its priority and insertion order for stable sorting.
@@ -136,8 +137,7 @@ func ComputeCriticalPath(nodes []Node) map[string]int {
 		lst[n.ID] = projectEnd - weight[n.ID] // initialize to max possible
 	}
 	// Process in reverse topological order.
-	for i := len(topoOrder) - 1; i >= 0; i-- {
-		id := topoOrder[i]
+	for _, id := range slices.Backward(topoOrder) {
 		if len(downstream[id]) == 0 {
 			lst[id] = projectEnd - weight[id]
 		} else {

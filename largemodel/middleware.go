@@ -34,6 +34,8 @@
 // OpenAIChatComposeCaller for what the pool does and how to tune it.
 package largemodel
 
+import "slices"
+
 // Middleware wraps a Caller to add cross-cutting behavior.
 type Middleware interface {
 	Wrap(next Caller) Caller
@@ -51,8 +53,8 @@ func (f MiddlewareFunc) Wrap(next Caller) Caller {
 // and middlewares[len-1] is innermost (closest to base).
 func Chain(base Caller, middlewares ...Middleware) Caller {
 	wrapped := base
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		wrapped = middlewares[i].Wrap(wrapped)
+	for _, middleware := range slices.Backward(middlewares) {
+		wrapped = middleware.Wrap(wrapped)
 	}
 
 	return wrapped

@@ -74,11 +74,16 @@ whichever governance middlewares you want:
 
 ```go
 // OpenAI Chat Completions (or any OpenAI-compatible endpoint).
-caller, err := largemodel.NewOpenAIChatCaller(apiKey, "https://api.openai.com/v1")
+caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: "https://api.openai.com/v1"}},
+})
 
 // Anthropic Messages. An empty base URL uses https://api.anthropic.com;
 // vendor headers go through the provider's own options.
-caller, err := largemodel.NewAnthropicMessagesCaller(apiKey, "",
+caller, err := largemodel.NewAnthropicMessagesCallerFromConfig(
+	largemodel.AnthropicConfig{
+		Endpoints: []largemodel.AnthropicEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: ""}},
+	},
 	largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")))
 
 model := largemodel.New(caller,
@@ -100,7 +105,10 @@ pool owns the retries, the endpoint health and the failover.
 `WithRetryPolicy` and `WithRecoverTime` tune them:
 
 ```go
-caller, err := largemodel.NewOpenAIChatCaller(apiKey, baseURL,
+caller, err := largemodel.NewOpenAIChatCallerFromConfig(
+	largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: baseURL}},
+	},
 	largemodel.WithRetryPolicy(time.Second, 2), // 1s then 2s, three attempts
 	largemodel.WithRecoverTime(5*time.Minute),  // how long a dead endpoint stays out
 )

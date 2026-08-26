@@ -302,7 +302,9 @@ func TestAgent_RunStream_ToolResultGuard_Block(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{tcChunks, textChunks})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCaller("test", srv.URL)
+	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

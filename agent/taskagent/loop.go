@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/vogo/vage/largemodel"
@@ -450,8 +451,8 @@ func (a *Agent) storeAndPromoteMessages(ctx context.Context, sessionID string, r
 func (a *Agent) buildSend(ctx context.Context, raw func(schema.Event) error) func(schema.Event) error {
 	send := raw
 	// Apply middlewares in reverse order so the first middleware is outermost.
-	for i := len(a.middlewares) - 1; i >= 0; i-- {
-		send = a.middlewares[i](send)
+	for _, v := range slices.Backward(a.middlewares) {
+		send = v(send)
 	}
 
 	next := send
