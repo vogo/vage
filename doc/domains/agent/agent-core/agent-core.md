@@ -43,7 +43,7 @@
 
 | ID | 规则 |
 |----|------|
-| AC-1 | **ReAct 循环恰好三种终止**:得到最终答案(complete)、达到最大迭代(默认 10)、token 预算耗尽。每种对应一个 StopReason。 |
+| AC-1 | **ReAct 循环恰好三种终止**:得到最终答案(complete)、达到最大迭代(默认 10)、token 预算耗尽。每种对应一个 StopReason;`complete` 有两条到达路径——模型直接给出最终答案,或成功直返工具给出最终答案(见 AC-13)——不新增停止原因。 |
 | AC-2 | **预算双点检查**:每轮 LLM 调用前、每次工具批执行前各检查一次;预算 ≤0 表示无限。 |
 | AC-3 | **消息单调累积**:循环中消息只追加,顺序稳定;工具批结果按调用顺序返回,与并发无关。 |
 | AC-4 | **护栏三态**:输入/输出/工具结果护栏统一为 Pass / Rewrite / Block;输出护栏对非完成态的"部分结果"只告警不失败。 |
@@ -55,6 +55,7 @@
 | AC-10 | **一条链、一次运行、恰好一次**:Agent Middleware 链在 `Run` 与 `RunStream` 上是同一条,每个中间件对每个顶层调用恰好执行一次;ReAct 迭代、模型重试与工具数量都不放大调用次数。多个中间件前置按注册序、后置逆序;nil 条目跳过。 |
 | AC-11 | **短路与改写都不绕过护栏**:不调用 `next` 即短路(保证无 LLM 调用、无工具执行、无 ReAct 检查点写入);调用 `next` 后原地修改或替换 `RunResponse`。两者产出的消息都仍须经过输出护栏、写入会话记忆,并成为 `AgentEnd.Message` 的唯一来源。 |
 | AC-12 | **框架所有的不变式**:`SessionID` 与 `Duration` 最终以请求会话与实测耗时为准,中间件不可伪造;中间件可决定消息、元数据、usage 与 stop reason。`nil, nil` 按 `ErrNilMiddlewareResponse` 失败,中间件错误按运行错误终止终态处理,不产生成功终态事件。 |
+| AC-13 | **直返工具(ReturnDirect)**:被 `taskagent.WithReturnDirectTools` 标记的工具成功后,ReAct 循环跳过下一轮模型调用,把护栏后的 `ToolResult.Text()` 包装为最终 assistant 消息并以 `complete` 终止。同批全部工具仍按既有并发规则执行完毕;在模型调用顺序中选第一个「名称已配置且最终结果成功」的工具,完成时序不参与裁决。失败路径(handler/Registry 错误、`IsError` 结果、工具结果护栏 Block)绝不短路,整批结果照常回填。直返只跳过模型轮次,输出护栏、消息记忆、Agent middleware 后置与 `AgentEnd` 照常运行;usage 只累计已发生的模型调用。 |
 
 ## Agent 运行中间件链
 
@@ -94,6 +95,7 @@ stateDiagram-v2
     LLMCall --> ToolBatch: 有工具调用
     ToolBatch --> Checkpoint
     Checkpoint --> Iteration: 未终止
+    ToolBatch --> Terminal: 成功直返工具
     LLMCall --> Terminal: 无工具调用/达上限/预算耗尽
     Terminal --> AgentEnd
     AgentEnd --> [*]

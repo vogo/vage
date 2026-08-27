@@ -75,8 +75,12 @@ sequenceDiagram
         alt 有工具调用
             Task->>Tool: 并行执行工具批
             Tool-->>Task: ToolResult(经工具结果护栏)
-            Task->>CP: 写非终态快照(尽力而为)
-        else 产出最终答案
+            alt 成功直返工具(WithReturnDirectTools)
+                Task->>Task: 结果包装为最终答案,写终态快照(complete)
+            else 无直返命中
+                Task->>CP: 写非终态快照(尽力而为)
+            end
+        else 模型直接产出最终答案
             Task->>Task: StopReasonComplete
         end
     end
