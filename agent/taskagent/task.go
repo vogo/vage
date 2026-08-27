@@ -55,7 +55,10 @@ type Agent struct {
 	maxTokens        *int
 	temperature      *float64
 	streamBufferSize int
-	middlewares      []agent.StreamMiddleware
+	streamMiddleware []agent.StreamMiddleware
+	// runMiddlewares decorate a whole Run / RunStream as a unit. See
+	// WithMiddleware; Resume deliberately stays out of the chain.
+	runMiddlewares   []agent.Middleware
 	hookManager      *hook.Manager
 	inputGuards      []guard.Guard
 	outputGuards     []guard.Guard
@@ -141,8 +144,46 @@ func WithStreamBufferSize(n int) Option {
 }
 
 // WithStreamMiddleware appends one or more middleware to the stream processing chain.
+//
+// This chain sees individual events on their way to a stream consumer and has
+// no effect on Run. To apply one policy to both entry points, use
+// WithMiddleware instead.
 func WithStreamMiddleware(mw ...agent.StreamMiddleware) Option {
-	return func(a *Agent) { a.middlewares = append(a.middlewares, mw...) }
+	return func(a *Agent) { a.streamMiddleware = append(a.streamMiddleware, mw...) }
+}
+
+// WithMiddleware appends agent.Middleware to the run middleware chain. Both
+// Run and RunStream execute this one chain exactly once per top-level call —
+// ReAct iterations, model retries and tool count do not multiply it — so a
+// policy written once holds for the sync and the streaming entry point alike.
+// The first registered middleware is outermost; nil entries are ignored.
+//
+// A middleware may short-circuit by not calling next, in which case no model
+// call, tool execution or ReAct checkpoint happens. Whatever response comes
+// out of the chain — passed through, rewritten or synthesised — is still the
+// input to the output guards, to session memory and to AgentEnd.Message, so a
+// middleware cannot route around the safety boundary. SessionID and Duration
+// are stamped by the framework afterwards and cannot be forged. Returning
+// (nil, nil) is a contract violation and surfaces as
+// ErrNilMiddlewareResponse.
+//
+// The request context is already built when the chain runs (RunStream builds
+// it up front so build errors surface synchronously), so rewriting
+// req.Messages inside a middleware does not retroactively change the messages
+// the model sees — use input guards or vctx sources for that.
+//
+// Resume does not run this chain: it continues a run that already passed
+// through it.
+func WithMiddleware(mw ...agent.Middleware) Option {
+	return func(a *Agent) {
+		for _, m := range mw {
+			if m == nil {
+				continue
+			}
+
+			a.runMiddlewares = append(a.runMiddlewares, m)
+		}
+	}
 }
 
 // WithMemory sets the memory manager for multi-turn conversation support.
@@ -378,6 +419,15 @@ type runContext struct {
 	lastMsg    schema.Message
 	iteration  int
 	estimated  bool // true if token tracking is based on heuristic estimation
+
+	// reactRan reports whether the shared ReAct loop actually executed, and
+	// stopReason is the terminator it reached. They stay separate from
+	// RunResponse.StopReason because an agent middleware may rewrite what the
+	// response reports — or short-circuit the loop entirely — while guard
+	// strictness and the token-budget event must keep describing what really
+	// happened.
+	reactRan   bool
+	stopReason schema.StopReason
 }
 
 // buildInitialMessages assembles the message list sent to the LLM via a
@@ -454,6 +504,12 @@ func (a *Agent) dispatch(ctx context.Context, event schema.Event) {
 // wires the sync execution mode and the synchronous finalize path. AgentStart
 // is dispatched before prepareContext so its EventContextBuilt still follows
 // AgentStart, matching the historical non-streaming event order.
+//
+// The ReAct execution and its draft response sit inside the agent middleware
+// chain (WithMiddleware) — the same chain RunStream drives — so a run-level
+// policy behaves identically on both entry points. Output guards, memory
+// persistence and AgentEnd run after the chain, on whatever response it
+// produced.
 func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
 	// One fresh run-value store per call, established before anything else so
 	// every stage of this run — and only this run — shares it. See
@@ -481,13 +537,47 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 	}
 	rc.br = br
 
-	mode := &syncMode{a: a, ctx: ctx}
-	stopReason, err := a.runReactLoop(ctx, rc, p, br.messages, aiTools, mode, 0)
+	react := func(ctx context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
+		mode := &syncMode{a: a, ctx: ctx}
+
+		stopReason, err := a.runReactLoop(ctx, rc, p, br.messages, aiTools, mode, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		rc.reactRan = true
+		rc.stopReason = stopReason
+
+		return a.draftResponse(rc), nil
+	}
+
+	resp, err := a.runMiddlewareChain(ctx, req, react)
 	if err != nil {
 		return nil, err
 	}
 
-	return a.finalizeRun(ctx, rc, stopReason), nil
+	return a.finalizeRun(ctx, rc, resp), nil
+}
+
+// runMiddlewareChain drives react through the configured agent middleware
+// chain and enforces the one invariant every entry point depends on: a
+// middleware that reports no error must hand back a response, because the
+// terminal path has nothing to guard, store or announce otherwise.
+func (a *Agent) runMiddlewareChain(
+	ctx context.Context,
+	req *schema.RunRequest,
+	react agent.RunFunc,
+) (*schema.RunResponse, error) {
+	resp, err := agent.ChainMiddleware(react, a.runMiddlewares...)(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp == nil {
+		return nil, ErrNilMiddlewareResponse
+	}
+
+	return resp, nil
 }
 
 // RunStream returns a RunStream that emits events as the ReAct loop executes.
@@ -495,7 +585,12 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 // The shared preparation and iteration skeleton live in loop.go; RunStream
 // builds the context up front (so build errors surface synchronously) and then
 // runs the stream execution mode inside the stream body, where AgentStart is
-// the first event sent through the middleware+hook pipeline.
+// the first event sent through the stream middleware + hook pipeline.
+//
+// The agent middleware chain (WithMiddleware) wraps the ReAct execution inside
+// the stream body, so it runs exactly once per stream and sees the same draft
+// response Run sees. Text deltas already sent are never replayed: a terminal
+// rewrite shows up in AgentEnd and in the persisted messages only.
 func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.RunStream, error) {
 	// The stream body's ctx derives from this one, so binding the store here
 	// keeps it alive for the whole production and gives back-to-back streams
@@ -528,12 +623,25 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 			return err
 		}
 
-		mode := &streamMode{a: a, ctx: ctx, agentID: a.ID(), send: send}
-		stopReason, err := a.runReactLoop(ctx, rc, p, br.messages, aiTools, mode, 0)
+		react := func(ctx context.Context, _ *schema.RunRequest) (*schema.RunResponse, error) {
+			mode := &streamMode{a: a, ctx: ctx, agentID: a.ID(), send: send}
+
+			stopReason, err := a.runReactLoop(ctx, rc, p, br.messages, aiTools, mode, 0)
+			if err != nil {
+				return nil, err
+			}
+
+			rc.reactRan = true
+			rc.stopReason = stopReason
+
+			return a.draftResponse(rc), nil
+		}
+
+		resp, err := a.runMiddlewareChain(ctx, req, react)
 		if err != nil {
 			return err
 		}
 
-		return a.finalizeStream(ctx, send, rc, req, stopReason)
+		return a.finalizeStream(ctx, send, rc, resp)
 	}), nil
 }

@@ -8,8 +8,8 @@
 |----|----------|----------|
 | `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`MessagePart`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | provider-neutral 契约层;`Message` 以私有 canonical 状态和访问器统一读写,不解释 provider wire |
 | `largemodel/provider/openais`、`provider/anthropics` | provider 路由绑定与 message codec | 按 provider 聚合 native wire ↔ canonical message 转换、原生回放、协议结构校验与 Backend 路由绑定 |
-| `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 |
-| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Run`/`RunStream`/`Resume` | ReAct 循环实现,集成中枢 |
+| `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`Middleware`/`MiddlewareFunc`/`ChainMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 + Agent Run 中间件契约 |
+| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Run`/`RunStream`/`Resume`、`WithMiddleware` | ReAct 循环实现,集成中枢 |
 | `agent/routeragent` | `Route`/`RouteFunc`、内置 `FirstFunc`/`IndexFunc`/`KeywordFunc`/`RandomFunc`/`LLMFunc` | 分发策略 |
 | `agent/workflowagent` | `New`/`NewDAG`/`NewDAGWithEdges`/`NewLoop` | 顺序/图/循环编排,委托 `orchestrate` |
 | `prompt` | `PromptTemplate`、`StringPrompt`、`NewPromptTemplate` | 基于 `text/template` 的提示词渲染 |
@@ -17,6 +17,10 @@
 ## 关键设计决策
 
 - **依赖注入而非硬编码**:TaskAgent 的模型、工具、记忆、护栏、技能、检查点、hook、上下文构建器全部通过 `With*` 选项以接口注入。默认值缺省时行为退化(如无迭代存储则不可 Resume),而非报错崩溃。
+- **一次 Run 一个装饰器接缝,同步/流式同链**:`agent.Middleware` 以 `Wrap(next RunFunc) RunFunc` 装饰整次 ReAct 执行,TaskAgent 在 `Run` 与 `RunStream` 上各驱动同一条链恰好一次(第一个注册者最外层,`ChainMiddleware` 跳过 nil)。不引入 before/after/wrap_model/wrap_tool 等分阶段巨型接口,也不合并模型、事件与工具执行中间件。
+- **草拟与终态分离**:链内只产生「草拟 `RunResponse`」,输出护栏、消息记忆写入与成功终态事件都在链之后对最终响应执行,因此短路或改写后的消息与 ReAct 产物受完全相同的约束,并成为 `AgentEnd.Message` 的唯一来源。`SessionID`/`Duration` 在终态阶段由框架回写,不能伪造;`nil, nil` 转 `ErrNilMiddlewareResponse`。
+- **真实终态与报告的 stop reason 分离**:`runContext` 记录 ReAct 循环实际达成的 `stopReason` 与是否真实跑过(`reactRan`),与响应里可被中间件改写的 `StopReason` 分开。护栏对部分结果的宽容、预算耗尽事件都只看真实循环状态,避免伪造的 stop reason 触发假预算事件或放行护栏。
+- **上下文先于链构建**:`RunStream` 提前构建上下文以保持构建错误同步浮现;`prepareContext` 在链之前完成,中间件改写 `req.Messages` 不回溯影响模型输入,需要改输入走输入护栏或 `vctx` 源。`Resume` 复用与 Run 相同的循环与终态路径但刻意不进链。
 - **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件(内置事件直接用 Emitter,应用自定义事件走 `EmitCustomData`)、在一次运行内互传临时值。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。

@@ -34,6 +34,12 @@ import (
 // distinguish it from generic transport failures.
 var ErrEmptyLLMResponse = errors.New("vage: empty response from LLM")
 
+// ErrNilMiddlewareResponse reports that an agent middleware returned
+// (nil, nil). The terminal path has no messages to guard, store or announce
+// in that case, so the framework fails the run rather than inventing an
+// empty success.
+var ErrNilMiddlewareResponse = errors.New("vage: agent middleware returned a nil response without an error")
+
 // saveIterationCheckpoint persists a snapshot of the ReAct loop state at
 // the end of an iteration. final == false snapshots are written after a
 // tool batch completes; final == true snapshots accompany every Run
@@ -118,6 +124,11 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // Resume bypasses input guards (the original Run already vetted the
 // input). Output guards run on the resumed final response. Tool result
 // guards continue to run on every fresh tool execution.
+//
+// The agent middleware chain (WithMiddleware) does not run here: a resume
+// continues a run that already passed through it, and re-entering the chain
+// mid-run would let a short-circuiting middleware discard work the checkpoint
+// already paid for.
 func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunResponse, error) {
 	// A resume is a new in-process run: it gets its own empty store. Run
 	// values are never checkpointed, so nothing from the interrupted run is
@@ -197,5 +208,9 @@ func (a *Agent) runResumeLoop(
 	if err != nil {
 		return nil, err
 	}
-	return a.finalizeRun(ctx, rc, stopReason), nil
+
+	rc.reactRan = true
+	rc.stopReason = stopReason
+
+	return a.finalizeRun(ctx, rc, a.draftResponse(rc)), nil
 }

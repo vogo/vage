@@ -12,6 +12,7 @@ A Go framework for building LLM-based intelligent agent systems.
 - **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling
 - **Three-Level Memory** — Working (request) → Session (conversation) → Store (persistent), with context compression and token budgets
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
+- **Agent Middleware** — One decorator chain shared by sync and streaming runs: short-circuit, audit, or rewrite the final response once per run (hooks stay read-only, stream middleware stays event-level)
 - **LLM Middleware** — Decorator chain: logging, rate limiting, timeout, cache, metrics (retries and endpoint health live in the caller's router pool)
 - **Tool System** — Local functions, MCP remote tools, agent-as-tool, built-in bash tool with process isolation
 - **Agent Skills** — Compatible with the [Agent Skills](https://agentskills.io) open standard
@@ -154,6 +155,55 @@ request named. Strategies are failover, random, weighted, cost, and latency;
 `caller.EndpointStats()` reports per-endpoint health merged across the
 caller's pools. There is no cross-protocol failover: an OpenAI pool and an
 Anthropic pool are separate, with no shared request to hand between them.
+
+## Run Middleware (One Chain for Sync and Streaming)
+
+TaskAgent gives every top-level `Run` and `RunStream` the same `agent.Middleware`
+chain, executed exactly once per call — ReAct iterations, model retries and tool
+counts do not multiply it. A middleware wraps the run's `RunFunc`, so it can
+observe, short-circuit (never call `next`: no model call, no tool execution, no
+checkpoint), or rewrite the final response:
+
+```go
+rewriter := agent.MiddlewareFunc(func(next agent.RunFunc) agent.RunFunc {
+	return func(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
+		// post-phase: the run already happened, rewrite its final response.
+		resp, err := next(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		resp.Messages = []schema.Message{
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleAssistant, "rewritten"),
+		}
+		return resp, nil
+	}
+})
+
+a := taskagent.New(
+	agent.Config{ID: "assistant", Protocol: model.Protocol()},
+	taskagent.WithCaller(model),
+	taskagent.WithMiddleware(rewriter),
+)
+
+// The same middleware fires once on both paths:
+//   - a.Run(ctx, req)
+//   - a.RunStream(ctx, req)   // terminal AgentEnd.Message carries the rewrite
+```
+
+Whatever response leaves the chain — passed through, rewritten, or synthesised
+by a short-circuit — is still what runs through the output guards, gets stored
+to session memory, and becomes `AgentEnd.Message`; a middleware cannot route
+around the safety boundary. `SessionID` and `Duration` are stamped by the
+framework afterwards and cannot be forged. Returning `nil, nil` fails the run
+with `taskagent.ErrNilMiddlewareResponse`.
+
+Decide between the neighbouring seams by layer: `hook.Hook` observes events
+(read-only), `agent.StreamMiddleware` transforms events on their way to a
+stream consumer (streaming only), `largemodel.Middleware` wraps a single model
+call (caching, rate limiting, timeouts), and Agent Middleware is the one
+run-level control point that both entry points share. Existing Hook and
+StreamMiddleware users do not need to migrate; move logic that changes a run's
+outcome to Agent Middleware instead.
 
 ## Sharing State Across Tools in One Run
 
