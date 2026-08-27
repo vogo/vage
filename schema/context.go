@@ -17,7 +17,10 @@
 
 package schema
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 type sessionIDCtxKey struct{}
 
@@ -57,4 +60,64 @@ func WithEmitter(ctx context.Context, e Emitter) context.Context {
 func EmitterFromContext(ctx context.Context) Emitter {
 	v, _ := ctx.Value(emitterCtxKey{}).(Emitter)
 	return v
+}
+
+type runValuesCtxKey struct{}
+
+// WithRunValues binds a fresh, empty run-scoped value store to ctx and returns
+// the derived context. Tool handlers reached through that context can then
+// exchange temporary state via SetRunValue / GetRunValue.
+//
+// A store bound here always shadows one inherited from the parent context:
+// that is what makes a new Run a new isolation boundary, so a nested agent
+// starting its own run cannot read or clobber its parent's values.
+//
+// Agent implementations (TaskAgent does this on Run, RunStream and Resume) and
+// custom executors are the intended callers. The store is process-local and
+// lives exactly as long as the context is reachable — it is never persisted,
+// checkpointed or keyed by SessionID.
+func WithRunValues(ctx context.Context) context.Context {
+	return context.WithValue(ctx, runValuesCtxKey{}, &sync.Map{})
+}
+
+// runValuesFromContext returns the store bound by WithRunValues, or nil when
+// the context carries none. The store itself stays unexported so callers
+// cannot retain it beyond the run.
+func runValuesFromContext(ctx context.Context) *sync.Map {
+	v, _ := ctx.Value(runValuesCtxKey{}).(*sync.Map)
+	return v
+}
+
+// SetRunValue stores value under key in the run-scoped store bound to ctx,
+// overwriting any previous value, and reports whether a store was present.
+// Without WithRunValues the call is a no-op returning false, so tools stay
+// reusable under executors that do not provide run values; callers that
+// require the capability can check the result and fail loudly.
+//
+// Concurrent Set/Get calls from parallel tools are safe. Concurrent writes to
+// the same key have no defined winner, and no compare-and-swap, transaction or
+// tool ordering is promised — a mutable value stored here must be synchronized
+// by its own owner.
+func SetRunValue(ctx context.Context, key string, value any) bool {
+	m := runValuesFromContext(ctx)
+	if m == nil {
+		return false
+	}
+
+	m.Store(key, value)
+
+	return true
+}
+
+// GetRunValue returns the value stored under key by SetRunValue, together with
+// whether it was found. A missing store and a missing key are reported the
+// same way, as nil, false. The value is returned as stored, not copied; type
+// assertions and stable, namespaced keys are the caller's responsibility.
+func GetRunValue(ctx context.Context, key string) (any, bool) {
+	m := runValuesFromContext(ctx)
+	if m == nil {
+		return nil, false
+	}
+
+	return m.Load(key)
 }

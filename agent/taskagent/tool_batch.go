@@ -72,6 +72,11 @@ func (a *Agent) executeToolBatch(
 	// Expose sessionID and a stream emitter to tool handlers that want to
 	// surface their own events (e.g. todo_write). Injection happens at this
 	// single choke point — both sync and stream paths funnel through here.
+	//
+	// The run-value store is deliberately NOT bound here: it comes down with
+	// ctx from Run / RunStream / Resume so every batch and iteration of one
+	// run shares it. Re-binding it per batch would silently drop values
+	// between ReAct rounds.
 	ctx = schema.WithSessionID(ctx, rc.sessionID)
 	if eventSink != nil {
 		ctx = schema.WithEmitter(ctx, schema.Emitter(eventSink))

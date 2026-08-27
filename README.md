@@ -155,6 +155,45 @@ request named. Strategies are failover, random, weighted, cost, and latency;
 caller's pools. There is no cross-protocol failover: an OpenAI pool and an
 Anthropic pool are separate, with no shared request to hand between them.
 
+## Sharing State Across Tools in One Run
+
+Tools in the same run can hand each other temporary state through the run-value
+store that `taskagent` binds to the context on every `Run`, `RunStream` and
+`Resume`. Below, `plan` publishes a key in one ReAct round and `apply` reads it
+back in a later round — no shared globals, no change to the tool signature:
+
+```go
+_ = reg.Register(schema.ToolDef{Name: "plan"},
+	func(ctx context.Context, _, args string) (schema.ToolResult, error) {
+		if !schema.SetRunValue(ctx, "demo/plan", args) {
+			// No store bound: this executor does not provide run values.
+			return schema.ErrorResult("", "run values unavailable"), nil
+		}
+		return schema.TextResult("", "planned"), nil
+	},
+)
+
+_ = reg.Register(schema.ToolDef{Name: "apply"},
+	func(ctx context.Context, _, _ string) (schema.ToolResult, error) {
+		v, ok := schema.GetRunValue(ctx, "demo/plan")
+		if !ok {
+			return schema.ErrorResult("", "call plan first"), nil
+		}
+		return schema.TextResult("", "applied "+v.(string)), nil
+	},
+)
+```
+
+The store is scoped to one run, not to one session: every round and every
+parallel tool of that run shares it, while a second run — even on the same
+agent with the same `SessionID` — starts empty. `SetRunValue` returns `false`
+and `GetRunValue` returns `nil, false` when no store is bound, so the same tool
+still works under an executor that provides none. Reads and writes are safe
+from parallel tools, but concurrent writes to one key have no defined winner
+and there is no compare-and-swap or ordering guarantee. Nothing here is
+persisted or checkpointed — use `memory` or `workspace` for state that must
+outlive the run.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

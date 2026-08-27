@@ -17,11 +17,23 @@
 ## 关键设计决策
 
 - **依赖注入而非硬编码**:TaskAgent 的模型、工具、记忆、护栏、技能、检查点、hook、上下文构建器全部通过 `With*` 选项以接口注入。默认值缺省时行为退化(如无迭代存储则不可 Resume),而非报错崩溃。
-- **通过 context.Context 传递会话身份与 Emitter**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件。这使工具签名保持稳定。
+- **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件、在一次运行内互传临时值。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。
 - **消息模型单事实源 + 原生回放缓存**:`schema.Message` 的私有 canonical 状态(`role` + `parts`)是唯一事实源;可选 `origin` 保存未经修改的 provider native wire。同协议且未修改时直接回放 `origin`;任何 `SetText`/`SetRole`/`ReplaceParts`/`AppendPart` mutation 都立即清空它,随后由 provider codec 从 canonical 状态重新编码。
 - **provider codec 边界**:`schema` 不导入或解析 `aimodel` wire 类型。OpenAI/Anthropic 的 decode、encode、role 映射、content block 规则和 Anthropic tool-result 合并分别收敛在 `largemodel/provider/openais` 与 `provider/anthropics`。
+
+## Run 作用域值(Run values)
+
+`schema` 的 `WithRunValues` / `SetRunValue` / `GetRunValue` 让同一次运行内的多个工具通过字符串 key 交换临时状态,契约要点如下。
+
+- **创建时机**:TaskAgent 只在 `Run`、`RunStream`、`Resume` 三个公开入口各绑定一次全新空存储,随 ctx 传至工具批注入点,因此一次运行的所有轮次、所有串行/并行工具共享同一张表。按批次或按迭代重建会在 ReAct 轮次之间丢值;挂到 `Agent` 字段或按 SessionID 复用则会跨运行泄漏 —— 两者都是被禁止的实现方式。
+- **生命周期**:由上下文可达性自然约束,运行结束无需清理。`RunStream` 的表活到流生产结束/报错/取消为止;执行链不得把表写入响应、事件、检查点或其他长期对象。
+- **缺省语义**:未绑定存储时 `SetRunValue` 无副作用并返回 `false`,`GetRunValue` 与 key 不存在一样返回 `nil, false` —— 选择可探测的 no-op 而非 panic/error,是为了让同一个工具在 TaskAgent 之外的执行器里也能复用;必须要有这项能力的调用方自行检查布尔返回并失败。
+- **并发限度**:单次读写与覆盖写对并行工具是安全的;同一 key 的并发写不承诺确定的最终值,也不提供 compare-and-swap、事务、过期时间或工具调用顺序保证。存进去的可变对象仍由调用方自行同步。值不复制,类型断言与命名空间化的 key 由调用方负责。
+- **运行边界即隔离边界**:新绑定的存储总是覆盖从父上下文继承的那一个,所以嵌套 Agent 启动自己的运行时不会与父运行串值。
+
+与相邻概念的区别:**SessionID** 只用于事件关联、会话记忆与检查点寻址,既不是 Run 值的键,也不是使用前提 —— 无 SessionID 的运行照样能存取,相同 SessionID 的两次运行也不共享;**memory / workspace** 才是跨运行、跨进程的长期存储,Run 值不写检查点,`Resume` 从空表开始,断点续跑所需的状态必须显式经长期存储重建。
 
 ## LLM 路由输出契约
 

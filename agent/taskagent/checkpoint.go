@@ -119,6 +119,11 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // input). Output guards run on the resumed final response. Tool result
 // guards continue to run on every fresh tool execution.
 func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunResponse, error) {
+	// A resume is a new in-process run: it gets its own empty store. Run
+	// values are never checkpointed, so nothing from the interrupted run is
+	// restored here.
+	ctx = schema.WithRunValues(ctx)
+
 	if a.caller == nil {
 		return nil, errors.New("vage: model caller is required")
 	}
