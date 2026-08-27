@@ -1,0 +1,420 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package tool_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/vogo/vage/schema"
+	"github.com/vogo/vage/tool"
+)
+
+type inferInner struct {
+	Enabled bool    `json:"enabled"`
+	Ratio   float64 `json:"ratio,omitempty"`
+}
+
+type inferArgs struct {
+	City    string            `json:"city" jsonschema_description:"City to look up"`
+	Count   int               `json:"count"`
+	Units   string            `json:"units,omitempty"`
+	Temp    float64           `json:"temperature,omitempty"`
+	Secret  string            `json:"-"`
+	hidden  int               // unexported, must not appear in the schema
+	Labels  []string          `json:"labels,omitempty"`
+	Matrix  [][]int           `json:"matrix,omitempty"`
+	Meta    map[string]string `json:"meta,omitempty"`
+	Nested  inferInner        `json:"nested"`
+	Maybe   *int              `json:"maybe,omitempty"`
+	Pointer *inferInner       `json:"pointer,omitempty"`
+}
+
+// TestInfer_BuildsObjectSchema asserts the reflected schema matches the rules:
+// object root with additionalProperties:false, json-tag names, required only for
+// non-omitempty fields, jsonschema_description written through, and recursive
+// mapping for nested structs, slices, maps, and nullable pointers.
+func TestInfer_BuildsObjectSchema(t *testing.T) {
+	noop := func(context.Context, inferArgs) (schema.ToolResult, error) { return schema.ToolResult{}, nil }
+	def, _ := tool.Infer("weather", "look up weather", noop)
+
+	if def.Name != "weather" {
+		t.Errorf("def.Name = %q, want %q", def.Name, "weather")
+	}
+	if def.Description != "look up weather" {
+		t.Errorf("def.Description = %q, want %q", def.Description, "look up weather")
+	}
+	if def.Source != schema.ToolSourceLocal {
+		t.Errorf("def.Source = %q, want %q", def.Source, schema.ToolSourceLocal)
+	}
+
+	inner := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"enabled": map[string]any{"type": "boolean"}, "ratio": map[string]any{"type": "number"}},
+		"required":             []string{"enabled"},
+		"additionalProperties": false,
+	}
+
+	want := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"city", "count", "nested"},
+		"properties": map[string]any{
+			"city":        map[string]any{"type": "string", "description": "City to look up"},
+			"count":       map[string]any{"type": "integer"},
+			"units":       map[string]any{"type": "string"},
+			"temperature": map[string]any{"type": "number"},
+			"labels":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"matrix":      map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}},
+			"meta":        map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+			"nested":      inner,
+			"maybe":       map[string]any{"type": []any{"integer", "null"}},
+			"pointer":     map[string]any{"type": []any{"object", "null"}, "properties": inner["properties"], "required": inner["required"], "additionalProperties": false},
+		},
+	}
+
+	if !reflect.DeepEqual(def.Parameters, want) {
+		t.Errorf("Parameters mismatch:\n got: %#v\nwant: %#v", def.Parameters, want)
+	}
+
+	// The schema must survive JSON serialization (the OpenAI/Anthropic/MCP
+	// adapters pass Parameters through as raw JSON).
+	if _, err := json.Marshal(def.Parameters); err != nil {
+		t.Errorf("json.Marshal(Parameters) error: %v", err)
+	}
+}
+
+func TestInfer_FlattensEmbeddedStructs(t *testing.T) {
+	t.Run("unnamed embedded struct is flattened", func(t *testing.T) {
+		type embedded struct {
+			A int    `json:"a"`
+			B string `json:"b,omitempty"`
+		}
+		type outer struct {
+			embedded
+			C bool `json:"c"`
+		}
+		def, _ := tool.Infer("x", "", func(context.Context, outer) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+		params := def.Parameters.(map[string]any)
+		props := params["properties"].(map[string]any)
+		if len(props) != 3 {
+			t.Fatalf("flattened properties = %d, want 3 (%v)", len(props), props)
+		}
+		for _, name := range []string{"a", "b", "c"} {
+			if _, ok := props[name]; !ok {
+				t.Errorf("missing promoted property %q", name)
+			}
+		}
+		req := params["required"].([]string)
+		if !reflect.DeepEqual(req, []string{"c", "a"}) {
+			t.Errorf("required = %v, want [c a] (b is omitempty; direct fields precede promoted ones)", req)
+		}
+	})
+
+	t.Run("named embedded struct becomes a nested object", func(t *testing.T) {
+		type embedded struct {
+			A int `json:"a"`
+		}
+		type outer struct {
+			embedded `json:"inner"`
+			C        bool `json:"c"`
+		}
+		def, _ := tool.Infer("x", "", func(context.Context, outer) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+		params := def.Parameters.(map[string]any)
+		props := params["properties"].(map[string]any)
+		if _, ok := props["a"]; ok {
+			t.Error("named embedded struct must not flatten its fields")
+		}
+		inner, ok := props["inner"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected nested object property %q", "inner")
+		}
+		if inner["type"] != "object" {
+			t.Errorf("inner type = %v, want object", inner["type"])
+		}
+	})
+
+	t.Run("direct field wins over promoted field", func(t *testing.T) {
+		type embedded struct {
+			Name int `json:"name"`
+		}
+		type outer struct {
+			embedded
+			Name string `json:"name"` // shadows the promoted int field
+		}
+		def, _ := tool.Infer("x", "", func(context.Context, outer) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+		params := def.Parameters.(map[string]any)
+		props := params["properties"].(map[string]any)
+		name := props["name"].(map[string]any)
+		if name["type"] != "string" {
+			t.Errorf("name type = %v, want string (direct field must shadow promoted field)", name["type"])
+		}
+	})
+}
+
+func TestInfer_HandlerSuccess(t *testing.T) {
+	calls := 0
+	wantCtx := context.WithValue(context.Background(), inferCtxKey("k"), "v")
+
+	def, handler := tool.Infer("echo", "echo tool", func(ctx context.Context, a inferArgs) (schema.ToolResult, error) {
+		calls++
+		if ctx != wantCtx {
+			t.Error("fn received a different context than the one passed to the handler")
+		}
+		if a.City != "Paris" || a.Count != 3 || a.Units != "metric" {
+			t.Errorf("fn received unexpected arguments: %+v", a)
+		}
+		if a.hidden != 0 {
+			t.Errorf("unexported field must stay untouched by decoding, got %d", a.hidden)
+		}
+		return schema.TextResult("", fmt.Sprintf("%s:%d", a.City, a.Count)), nil
+	})
+
+	if def.Name != "echo" {
+		t.Errorf("def.Name = %q, want %q", def.Name, "echo")
+	}
+
+	// The name passed at dispatch is ignored; the handler stays bound to "echo".
+	res, err := handler(wantCtx, "some-other-name", `{"city":"Paris","count":3,"units":"metric"}`)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if got := res.Content[0].Text; got != "Paris:3" {
+		t.Errorf("result = %q, want %q", got, "Paris:3")
+	}
+	if res.IsError {
+		t.Error("result should not be an error result")
+	}
+	if calls != 1 {
+		t.Errorf("fn called %d times, want 1", calls)
+	}
+}
+
+func TestInfer_HandlerReturnsFnErrorUnchanged(t *testing.T) {
+	sentinel := errors.New("boom")
+	def, handler := tool.Infer("fail", "", func(context.Context, inferArgs) (schema.ToolResult, error) {
+		return schema.TextResult("", "partial"), sentinel
+	})
+	_ = def
+
+	res, err := handler(context.Background(), "fail", `{"city":"x","count":1}`)
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error = %v, want the fn's sentinel error untouched", err)
+	}
+	if got := res.Content[0].Text; got != "partial" {
+		t.Errorf("result = %q, want fn's result untouched %q", got, "partial")
+	}
+}
+
+// TestInfer_HandlerInvalidArguments guards the decode contract: fn must not run,
+// the result must stay zero, and the error must carry the fixed tool-name
+// context plus the underlying json error on the chain.
+func TestInfer_HandlerInvalidArguments(t *testing.T) {
+	ran := false
+	_, handler := tool.Infer("echo", "", func(context.Context, inferArgs) (schema.ToolResult, error) {
+		ran = true
+		return schema.ToolResult{}, nil
+	})
+
+	malformed := []struct {
+		name string
+		args string
+		as   func(error) bool
+	}{
+		{"syntax error", `{"city":`, func(err error) bool {
+			var se *json.SyntaxError
+			return errors.As(err, &se)
+		}},
+		{"type mismatch", `{"city":"x","count":"not-an-int"}`, func(err error) bool {
+			var ue *json.UnmarshalTypeError
+			return errors.As(err, &ue)
+		}},
+	}
+
+	for _, tc := range malformed {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := handler(context.Background(), "echo", tc.args)
+			if err == nil {
+				t.Fatal("expected error for malformed arguments")
+			}
+			if !strings.Contains(err.Error(), `tool "echo": invalid arguments:`) {
+				t.Errorf("error %q missing the tool-name context", err.Error())
+			}
+			if !tc.as(err) {
+				t.Errorf("underlying JSON error not on the error chain: %v", err)
+			}
+			if !reflect.DeepEqual(res, schema.ToolResult{}) {
+				t.Errorf("result = %+v, want zero ToolResult", res)
+			}
+			if ran {
+				t.Fatal("fn must not be called when decoding fails")
+			}
+		})
+	}
+}
+
+func TestInfer_CoexistsWithHandWrittenTools(t *testing.T) {
+	reg := tool.NewRegistry()
+
+	def, handler := tool.Infer("inferred", "generated tool", func(ctx context.Context, a inferArgs) (schema.ToolResult, error) {
+		return schema.TextResult("", a.City), nil
+	})
+	if err := reg.Register(def, handler); err != nil {
+		t.Fatalf("Register(inferred): %v", err)
+	}
+
+	manualDef := schema.ToolDef{Name: "manual", Description: "hand written", Parameters: map[string]any{"type": "object"}}
+	if err := reg.Register(manualDef, func(context.Context, string, string) (schema.ToolResult, error) {
+		return schema.TextResult("", "pong"), nil
+	}); err != nil {
+		t.Fatalf("Register(manual): %v", err)
+	}
+
+	res, err := reg.Execute(context.Background(), "inferred", `{"city":"Rome","count":2}`)
+	if err != nil {
+		t.Fatalf("Execute(inferred): %v", err)
+	}
+	if got := res.Content[0].Text; got != "Rome" {
+		t.Errorf("inferred result = %q, want %q", got, "Rome")
+	}
+
+	res, err = reg.Execute(context.Background(), "manual", `{}`)
+	if err != nil {
+		t.Fatalf("Execute(manual): %v", err)
+	}
+	if got := res.Content[0].Text; got != "pong" {
+		t.Errorf("manual result = %q, want %q", got, "pong")
+	}
+}
+
+// requirePanic runs f and asserts it panics with a message containing wantSub.
+func requirePanic(t *testing.T, wantSub string, f func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic containing %q, got none", wantSub)
+		}
+		if msg := fmt.Sprint(r); !strings.Contains(msg, wantSub) {
+			t.Fatalf("panic %q does not contain %q", msg, wantSub)
+		}
+	}()
+	f()
+}
+
+func TestInfer_PanicsOnUnsupportedTopLevel(t *testing.T) {
+	requirePanic(t, `tool "x": unsupported argument type int`, func() {
+		tool.Infer("x", "", func(context.Context, int) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+	})
+
+	requirePanic(t, `tool "x": unsupported argument type *tool_test.inferArgs`, func() {
+		tool.Infer("x", "", func(context.Context, *inferArgs) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+	})
+
+	requirePanic(t, "requires a non-pointer struct type", func() {
+		tool.Infer("x", "", func(context.Context, []inferArgs) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+	})
+}
+
+func TestInfer_PanicsOnUnsupportedFieldType(t *testing.T) {
+	t.Run("non-string map key", func(t *testing.T) {
+		type bad struct {
+			M map[int]string `json:"m"`
+		}
+		requirePanic(t, `tool "x": field "M": unsupported type map[int]string`, func() {
+			tool.Infer("x", "", noopFn[bad]())
+		})
+	})
+
+	t.Run("interface field", func(t *testing.T) {
+		type bad struct {
+			V any `json:"v"`
+		}
+		requirePanic(t, `tool "x": field "V": unsupported type interface`, func() {
+			tool.Infer("x", "", noopFn[bad]())
+		})
+	})
+
+	t.Run("custom JSON marshaling", func(t *testing.T) {
+		type bad struct {
+			T time.Time `json:"t"`
+		}
+		requirePanic(t, `tool "x": field "T": unsupported type time.Time: custom JSON marshaling`, func() {
+			tool.Infer("x", "", noopFn[bad]())
+		})
+	})
+
+	t.Run("chan field", func(t *testing.T) {
+		type bad struct {
+			Ch chan int `json:"ch"`
+		}
+		requirePanic(t, `tool "x": field "Ch": unsupported type chan int`, func() {
+			tool.Infer("x", "", noopFn[bad]())
+		})
+	})
+
+	t.Run("root with custom marshaling", func(t *testing.T) {
+		requirePanic(t, `tool "x": unsupported argument type tool_test.marshalRoot: custom JSON marshaling`, func() {
+			tool.Infer("x", "", noopFn[marshalRoot]())
+		})
+	})
+
+	t.Run("recursive type", func(t *testing.T) {
+		type treeNode struct {
+			Value    string      `json:"value"`
+			Children []*treeNode `json:"children,omitempty"`
+		}
+		requirePanic(t, `tool "x": unsupported recursive type tool_test.treeNode`, func() {
+			tool.Infer("x", "", noopFn[treeNode]())
+		})
+	})
+}
+
+// marshalRoot is a struct with a custom MarshalJSON method; its JSON shape
+// cannot be inferred from its fields.
+type marshalRoot struct {
+	X int `json:"x"`
+}
+
+func (marshalRoot) MarshalJSON() ([]byte, error) { return []byte("1"), nil }
+
+// noopFn returns a handler that does nothing; used to exercise construction
+// panics without paying attention to the result.
+func noopFn[T any]() func(context.Context, T) (schema.ToolResult, error) {
+	return func(context.Context, T) (schema.ToolResult, error) { return schema.ToolResult{}, nil }
+}
+
+type inferCtxKey string
