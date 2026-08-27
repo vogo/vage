@@ -56,6 +56,11 @@ func (a *Agent) executeToolCall(ctx context.Context, tc schema.ToolCall) schema.
 // emitResultEvent controls whether EventToolResult is sent after each guard
 // pass — true for the streaming path, false for the sync path (which
 // appends the result message directly without a user-facing event).
+//
+// The returned results slice holds each call's guard-passed ToolResult,
+// aligned with toolCalls by index, so callers (the ReturnDirect decision in
+// runReactLoop) can judge success after the full registry chain and guard
+// pass without re-deriving it from the tool messages.
 func (a *Agent) executeToolBatch(
 	ctx context.Context,
 	rc *runContext,
@@ -63,10 +68,10 @@ func (a *Agent) executeToolBatch(
 	toolCalls []schema.ToolCall,
 	emitResultEvent bool,
 	eventSink func(schema.Event) error,
-) ([]schema.Message, error) {
+) ([]schema.Message, []schema.ToolResult, error) {
 	n := len(toolCalls)
 	if n == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Expose sessionID and a stream emitter to tool handlers that want to
@@ -92,7 +97,7 @@ func (a *Agent) executeToolBatch(
 			ToolName:   tc.Name,
 			Arguments:  tc.Arguments,
 		})); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		starts[i] = time.Now()
 	}
@@ -138,13 +143,17 @@ func (a *Agent) executeToolBatch(
 			ToolName:   tc.Name,
 			Duration:   durations[i].Milliseconds(),
 		})); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		res, guardEvt := a.runToolResultGuards(ctx, rc, tc, results[i])
+		// Feed the guard-passed result back into the results slice so the
+		// direct-return decision downstream judges the same content the model
+		// would have seen (a rewrite or an error replacement changes it).
+		results[i] = res
 		if guardEvt != nil {
 			if err := eventSink(*guardEvt); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -154,7 +163,7 @@ func (a *Agent) executeToolBatch(
 				ToolName:   tc.Name,
 				Result:     res,
 			})); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -163,5 +172,5 @@ func (a *Agent) executeToolBatch(
 		))
 	}
 
-	return toolMsgs, nil
+	return toolMsgs, results, nil
 }

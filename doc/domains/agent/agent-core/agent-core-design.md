@@ -20,6 +20,7 @@
 - **一次 Run 一个装饰器接缝,同步/流式同链**:`agent.Middleware` 以 `Wrap(next RunFunc) RunFunc` 装饰整次 ReAct 执行,TaskAgent 在 `Run` 与 `RunStream` 上各驱动同一条链恰好一次(第一个注册者最外层,`ChainMiddleware` 跳过 nil)。不引入 before/after/wrap_model/wrap_tool 等分阶段巨型接口,也不合并模型、事件与工具执行中间件。
 - **草拟与终态分离**:链内只产生「草拟 `RunResponse`」,输出护栏、消息记忆写入与成功终态事件都在链之后对最终响应执行,因此短路或改写后的消息与 ReAct 产物受完全相同的约束,并成为 `AgentEnd.Message` 的唯一来源。`SessionID`/`Duration` 在终态阶段由框架回写,不能伪造;`nil, nil` 转 `ErrNilMiddlewareResponse`。
 - **真实终态与报告的 stop reason 分离**:`runContext` 记录 ReAct 循环实际达成的 `stopReason` 与是否真实跑过(`reactRan`),与响应里可被中间件改写的 `StopReason` 分开。护栏对部分结果的宽容、预算耗尽事件都只看真实循环状态,避免伪造的 stop reason 触发假预算事件或放行护栏。
+- **直返工具作为 Agent 控制流而非工具层策略**:`taskagent.WithReturnDirectTools(names...)` 按名称声明哪些工具的成功结果可直接作为最终答案。判定收敛在共享 `runReactLoop` 的工具批处理之后(`executeToolBatch` 额外回传护栏后的 `ToolResult` 切片),因此 `Run` / `RunStream` / `Resume` 复用同一语义,不另建同步专用循环。批内全部工具照常执行完毕,再按模型 `ToolCalls` 顺序选第一个「名称已配置且成功」的候选;失败绝不短路。`schema.ToolDef` / `ToolResult` / `RunResponse` / StopReason 均不扩展,`complete` 只是多了一条到达路径。选「名字配置」而非扩 schema,是因为直返决定的是某个 Agent 的结束策略——同一工具可在一个 Agent 直返、在另一个继续推理。
 - **上下文先于链构建**:`RunStream` 提前构建上下文以保持构建错误同步浮现;`prepareContext` 在链之前完成,中间件改写 `req.Messages` 不回溯影响模型输入,需要改输入走输入护栏或 `vctx` 源。`Resume` 复用与 Run 相同的循环与终态路径但刻意不进链。
 - **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件(内置事件直接用 Emitter,应用自定义事件走 `EmitCustomData`)、在一次运行内互传临时值。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。

@@ -156,11 +156,30 @@ func (a *Agent) runReactLoop(
 		// Execute tool calls with bounded concurrency; events and messages
 		// emerge in ToolCalls order.
 		emitResultEvent, sink := mode.toolBatchSink()
-		toolMsgs, err := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls(), emitResultEvent, sink)
+		toolMsgs, results, err := a.executeToolBatch(ctx, rc, agentID, assistantMsg.ToolCalls(), emitResultEvent, sink)
 		if err != nil {
 			return "", err
 		}
 		messages = append(messages, toolMsgs...)
+
+		// A successful ReturnDirect tool short-circuits the ReAct loop after
+		// the batch: its guard-passed result becomes the final assistant
+		// message and no further model round happens. Selection follows the
+		// model's ToolCalls order — the first configured-and-successful call
+		// wins, the batch's completion order does not participate. Failures
+		// never short-circuit, and unconfigured tools keep the existing
+		// behaviour.
+		if result, ok := a.returnDirectResult(assistantMsg.ToolCalls(), results); ok {
+			directMsg := schema.NewTextMessage(a.Protocol(), schema.RoleAssistant, result.Text())
+			rc.lastMsg = directMsg
+			messages = append(messages, directMsg)
+
+			// Final terminal checkpoint straight away: this turn already
+			// carries the complete batch plus the direct-return message, so
+			// no non-terminal snapshot worth resuming is left behind.
+			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonComplete)
+			return schema.StopReasonComplete, nil
+		}
 
 		a.saveIterationCheckpoint(ctx, rc, messages, false, "")
 	}
@@ -169,6 +188,33 @@ func (a *Agent) runReactLoop(
 	rc.iteration = p.maxIter - 1
 	a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonMaxIterations)
 	return schema.StopReasonMaxIterations, nil
+}
+
+// returnDirectResult selects the first tool call, in the model's ToolCalls
+// order, whose name is configured for direct return and whose guard-passed
+// result succeeded. results is the parallel slice executeToolBatch produced,
+// aligned with toolCalls by index. The second result is false when no call in
+// the batch qualifies — the loop then continues normally with the batch's
+// messages. An empty configuration short-circuits immediately so the default
+// ReAct path pays nothing.
+func (a *Agent) returnDirectResult(toolCalls []schema.ToolCall, results []schema.ToolResult) (schema.ToolResult, bool) {
+	if len(a.returnDirectTools) == 0 {
+		return schema.ToolResult{}, false
+	}
+
+	for i, tc := range toolCalls {
+		if _, ok := a.returnDirectTools[tc.Name]; !ok {
+			continue
+		}
+
+		if i >= len(results) || results[i].IsError {
+			continue
+		}
+
+		return results[i], true
+	}
+
+	return schema.ToolResult{}, false
 }
 
 // syncMode is the non-streaming reactMode. It calls Caller.Call, reads the

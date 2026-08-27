@@ -225,6 +225,51 @@ run-level control point that both entry points share. Existing Hook and
 StreamMiddleware users do not need to migrate; move logic that changes a run's
 outcome to Agent Middleware instead.
 
+## Returning a Tool Result as the Final Answer
+
+For tools that already *are* the answer — fetching a document, generating a
+report — the extra model round that paraphrases the result adds cost and can
+rewrite text you wanted delivered verbatim. `taskagent.WithReturnDirectTools`
+marks such tools: when one of them succeeds, the ReAct loop skips the next
+model call and returns the tool result as the final assistant answer
+(`StopReasonComplete`).
+
+```go
+reg := tool.NewRegistry()
+_ = reg.Register(schema.ToolDef{Name: "fetch_report"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+	return schema.TextResult("", "Q3 report ..."), nil
+})
+
+a := taskagent.New(
+	agent.Config{ID: "assistant"},
+	taskagent.WithCaller(model),
+	taskagent.WithModel("claude-sonnet-4-5"),
+	taskagent.WithToolRegistry(reg),
+	taskagent.WithReturnDirectTools("fetch_report"),
+)
+
+resp, err := agent.RunText(context.Background(), a, "Pull the Q3 report")
+// resp.Messages[0].Text() == the report verbatim, and the model ran exactly once.
+```
+
+The option is off by default; an agent that never calls it behaves exactly as
+before. Rules:
+
+- The loop ends on the first tool, in the model's call order, whose name is
+  configured and whose guard-passed result succeeded. The whole batch still
+  runs under the existing concurrency rules, and the batch's completion order
+  does not participate in the selection. A tool-result guard rewrite is
+  exactly what gets returned.
+- A failed tool never short-circuits: handler/registry errors, `IsError`
+  results and tool-result guards that block or turn the result into an error
+  all keep the existing loop behaviour.
+- Direct return only skips further model rounds. Output guards, session
+  memory, Agent middleware and `AgentEnd.Message` still run on the returned
+  text.
+- Names match by exact string equality; empty names are ignored and repeated
+  calls merge. Names that are not registered, or that a request or skill
+  filter removes, stay inert — nothing fails at construction.
+
 ## Sharing State Across Tools in One Run
 
 Tools in the same run can hand each other temporary state through the run-value

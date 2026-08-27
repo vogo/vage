@@ -68,6 +68,13 @@ type Agent struct {
 	// tool dispatch. 0 uses defaultMaxParallelToolCalls; values <= 1 force
 	// serial execution (byte-identical to the pre-P1-7 behaviour).
 	maxParallelToolCalls int
+	// returnDirectTools holds tool names whose successful result ends the
+	// ReAct loop immediately, returning the tool result as the final answer
+	// without a further model round. nil / empty disables direct return
+	// entirely. Names match model tool calls by exact string equality;
+	// unregistered or request/skill-filtered names stay inert until the
+	// model actually invokes them.
+	returnDirectTools map[string]struct{}
 	// promptCaching, when true, marks the system prompt and the last tool
 	// definition with cache breakpoints so Anthropic prompt caching kicks
 	// in on the repeat ReAct iterations. No on-wire effect for OpenAI.
@@ -229,6 +236,38 @@ func WithMaxParallelToolCalls(n int) Option {
 			n = 0
 		}
 		a.maxParallelToolCalls = n
+	}
+}
+
+// WithReturnDirectTools marks the named tools as direct-return: when one of
+// them executes successfully, the ReAct loop skips the next model round and
+// wraps the tool result as the final assistant answer (StopReasonComplete).
+//
+// Names match model tool calls by exact string equality; empty names are
+// ignored and repeated calls merge (idempotent). Names that are not
+// registered, or that a request or skill filter removes, stay inert — nothing
+// fails at construction and only a real, successful invocation can
+// short-circuit. Tools not named here keep the existing ReAct behaviour, and
+// the default set is empty so agents that never call this option behave
+// exactly as before.
+//
+// Direct return only skips further model rounds: output guards, message
+// memory, Agent middleware post-processing and AgentEnd still run on the
+// returned text. A failed tool — handler/registry error, IsError result, or a
+// tool-result guard turning it into an error — never short-circuits.
+func WithReturnDirectTools(names ...string) Option {
+	return func(a *Agent) {
+		for _, n := range names {
+			if n == "" {
+				continue
+			}
+
+			if a.returnDirectTools == nil {
+				a.returnDirectTools = make(map[string]struct{})
+			}
+
+			a.returnDirectTools[n] = struct{}{}
+		}
 	}
 }
 
