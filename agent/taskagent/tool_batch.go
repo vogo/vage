@@ -159,19 +159,9 @@ func (a *Agent) executeToolBatch(
 		}
 
 		toolMsgs = append(toolMsgs, schema.NewToolResultMessage(
-			a.Protocol(), res.ToolCallID, toolResultText(res), res.IsError,
+			a.Protocol(), res.ToolCallID, res.Text(), res.IsError,
 		))
 	}
 
 	return toolMsgs, nil
-}
-
-// toolResultText extracts the text content from a ToolResult.
-func toolResultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-	return ""
 }

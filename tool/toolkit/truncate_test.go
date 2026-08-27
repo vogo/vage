@@ -17,15 +17,26 @@
 
 package toolkit
 
-import "github.com/vogo/vage/tool"
+import (
+	"testing"
 
-// TruncateUTF8 truncates s to at most maxBytes bytes while preserving
-// valid UTF-8 boundaries. If s is already within the limit, it is returned
-// unchanged.
-//
-// Deprecated: use tool.TruncateUTF8, the framework-level entry point for
-// byte-bounded truncation. This alias stays for existing callers and forwards
-// to it unchanged.
-func TruncateUTF8(s string, maxBytes int) string {
-	return tool.TruncateUTF8(s, maxBytes)
+	"github.com/vogo/vage/tool"
+)
+
+// TestTruncateUTF8_MatchesFrameworkEntryPoint pins the deprecated alias to the
+// framework entry point, so callers can migrate to tool.TruncateUTF8 without
+// re-verifying behaviour.
+func TestTruncateUTF8_MatchesFrameworkEntryPoint(t *testing.T) {
+	inputs := []string{"", "hello", "世界", "ok🚀", "id=世界", "a\nb\tc"}
+	limits := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 64}
+
+	for _, s := range inputs {
+		for _, limit := range limits {
+			got := TruncateUTF8(s, limit)
+			want := tool.TruncateUTF8(s, limit)
+			if got != want {
+				t.Errorf("toolkit.TruncateUTF8(%q, %d) = %q, want %q", s, limit, got, want)
+			}
+		}
+	}
 }

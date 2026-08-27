@@ -22,6 +22,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/vogo/vage/schema"
 )
@@ -70,6 +71,67 @@ func (m *mockRegistry) Execute(ctx context.Context, name, args string) (schema.T
 		return m.executeFn(ctx, name, args)
 	}
 	return schema.ToolResult{}, nil
+}
+
+func TestTruncateUTF8(t *testing.T) {
+	tests := []struct {
+		name     string
+		s        string
+		maxBytes int
+		want     string
+	}{
+		{name: "empty string", s: "", maxBytes: 8, want: ""},
+		{name: "under limit", s: "hello", maxBytes: 8, want: "hello"},
+		{name: "exactly at limit", s: "hello", maxBytes: 5, want: "hello"},
+		{name: "ascii cut one byte short", s: "hello", maxBytes: 4, want: "hell"},
+		{name: "zero limit", s: "hello", maxBytes: 0, want: ""},
+		{name: "zero limit on empty string", s: "", maxBytes: 0, want: ""},
+		{
+			// "世" is 3 bytes: a 4-byte limit lands mid-rune and must back off
+			// to the previous boundary rather than emit a broken rune.
+			name:     "cjk cut mid-rune",
+			s:        "世界",
+			maxBytes: 4,
+			want:     "世",
+		},
+		{name: "cjk cut on boundary", s: "世界", maxBytes: 3, want: "世"},
+		{name: "cjk below first rune", s: "世界", maxBytes: 2, want: ""},
+		{name: "cjk at limit", s: "世界", maxBytes: 6, want: "世界"},
+		{
+			// The emoji is a single 4-byte rune; every partial limit drops it.
+			name:     "emoji cut mid-rune",
+			s:        "ok🚀",
+			maxBytes: 5,
+			want:     "ok",
+		},
+		{name: "emoji at limit", s: "ok🚀", maxBytes: 6, want: "ok🚀"},
+		{name: "mixed ascii and cjk", s: "id=世界", maxBytes: 7, want: "id=世"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TruncateUTF8(tt.s, tt.maxBytes)
+			if got != tt.want {
+				t.Errorf("TruncateUTF8(%q, %d) = %q, want %q", tt.s, tt.maxBytes, got, tt.want)
+			}
+			if len(got) > tt.maxBytes {
+				t.Errorf("len(result) = %d, exceeds maxBytes %d", len(got), tt.maxBytes)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("result %q is not valid UTF-8", got)
+			}
+		})
+	}
+}
+
+func TestTruncateUTF8_LeavesInputUnchanged(t *testing.T) {
+	s := "世界 hello"
+	if got := TruncateUTF8(s, 4); got != "世" {
+		t.Errorf("TruncateUTF8 = %q, want %q", got, "世")
+	}
+	if s != "世界 hello" {
+		t.Errorf("input mutated: %q", s)
+	}
 }
 
 func TestTruncatingToolRegistry_NoTruncationBelowLimit(t *testing.T) {

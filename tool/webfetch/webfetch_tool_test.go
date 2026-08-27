@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/vogo/vage/tool"
-	"github.com/vogo/vage/tool/toolkit"
 )
 
 func TestWebFetchTool_HTMLSuccess(t *testing.T) {
@@ -45,10 +44,10 @@ func TestWebFetchTool_HTMLSuccess(t *testing.T) {
 		t.Fatalf("unexpected go error: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.Title != "Example Doc" {
 		t.Fatalf("title = %q, want Example Doc", env.Title)
 	}
@@ -73,7 +72,7 @@ func TestWebFetchTool_DomainFilters(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "domain_not_allowed" {
 		t.Fatalf("error_code = %q, want domain_not_allowed", env.ErrorCode)
 	}
@@ -94,7 +93,7 @@ func TestWebFetchTool_RobotsDenied(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "robots_disallowed" {
 		t.Fatalf("error_code = %q, want robots_disallowed", env.ErrorCode)
 	}
@@ -119,7 +118,7 @@ func TestWebFetchTool_DynamicPageRejected(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "dynamic_content_requires_browser" {
 		t.Fatalf("error_code = %q, want dynamic_content_requires_browser", env.ErrorCode)
 	}
@@ -138,10 +137,10 @@ func TestWebFetchTool_PDFExtraction(t *testing.T) {
 		t.Fatalf("unexpected go error: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if !strings.Contains(env.Markdown, "Hello PDF World") {
 		t.Fatalf("markdown = %q, want PDF text", env.Markdown)
 	}
@@ -166,7 +165,7 @@ func TestWebFetchTool_RequestAllowedDomainsCannotWiden(t *testing.T) {
 	if called {
 		t.Fatal("transport should not be invoked when domain blocked by tool allow-list")
 	}
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "domain_not_allowed" {
 		t.Fatalf("error_code = %q, want domain_not_allowed", env.ErrorCode)
 	}
@@ -179,7 +178,7 @@ func TestWebFetchTool_RequestAllowedDomainsCannotWiden(t *testing.T) {
 	if !result2.IsError {
 		t.Fatal("expected IsError=true even with caller-supplied allow-list")
 	}
-	env2 := decodeEnvelope(t, toolkit.ResultText(result2))
+	env2 := decodeEnvelope(t, result2.Text())
 	if env2.ErrorCode != "domain_not_allowed" {
 		t.Fatalf("error_code = %q, want domain_not_allowed", env2.ErrorCode)
 	}
@@ -204,7 +203,7 @@ func TestWebFetchTool_RequestAllowedDomainsCanNarrow(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("expected narrow allow-list to reject host outside it")
 	}
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "domain_not_allowed" {
 		t.Fatalf("error_code = %q, want domain_not_allowed", env.ErrorCode)
 	}
@@ -212,7 +211,7 @@ func TestWebFetchTool_RequestAllowedDomainsCanNarrow(t *testing.T) {
 	// Same caller-narrowed list still allows hosts inside the intersection.
 	ok, _ := wt.Handler()(context.Background(), "", `{"url":"https://b.example.com/x","allowed_domains":["b.example.com"]}`)
 	if ok.IsError {
-		t.Fatalf("expected success when host is in tool ∩ caller allow-list, got: %s", toolkit.ResultText(ok))
+		t.Fatalf("expected success when host is in tool ∩ caller allow-list, got: %s", ok.Text())
 	}
 }
 
@@ -240,7 +239,7 @@ func TestWebFetchTool_PrivateNetworkBlockedByDefault(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("expected SSRF guard to block %s", srv.URL)
 	}
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if env.ErrorCode != "private_network_blocked" {
 		t.Fatalf("error_code = %q, want private_network_blocked", env.ErrorCode)
 	}
@@ -263,9 +262,9 @@ func TestWebFetchTool_PrivateNetworkAllowedWhenOptedIn(t *testing.T) {
 		t.Fatalf("unexpected go error: %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("expected success when private network allowed, got: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success when private network allowed, got: %s", result.Text())
 	}
-	env := decodeEnvelope(t, toolkit.ResultText(result))
+	env := decodeEnvelope(t, result.Text())
 	if !strings.Contains(env.Markdown, "internal-ok") {
 		t.Fatalf("markdown = %q, want internal-ok", env.Markdown)
 	}
