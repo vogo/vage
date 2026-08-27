@@ -2,7 +2,7 @@
 
 ## 定位
 
-vage 是**库优先**的框架:每个子系统是一个可独立引入、以接口解耦的 Go 包。它们通过 `schema` 契约层互相通信 —— 该层承载厂商原生 wire 形态的消息,并附带协议标识。使用方按需组装,或直接用 `service` 包把组装好的 Agent 作为 HTTP 运行时部署。
+vage 是**库优先**的框架:每个子系统是一个可独立引入、以接口解耦的 Go 包。它们通过 `schema` 契约层互相通信 —— 该层以 provider-neutral 的 `Message`(canonical `role`/`parts` + 可选 `origin` 回放缓存)为通用语言,并附带协议标识。使用方按需组装,或直接用 `service` 包把组装好的 Agent 作为 HTTP 运行时部署。
 
 ## 分层
 
@@ -34,7 +34,6 @@ graph TD
         workspace[workspace 工作区]
         orchestrate[orchestrate DAG]
         checkpoint[checkpoint 断点]
-        vector[vector 召回]
     end
     subgraph L0[契约层]
         schema[schema 契约层]
@@ -48,9 +47,11 @@ graph TD
     L1 --> L0
 ```
 
+> `vector` 归属 platform `service` 领域(可插拔召回后端),不在 L1 编排层;见 [overview.md](../overview.md) 领域地图。
+
 ## 依赖拓扑核心规则
 
-1. **`schema` 是根契约包**:只依赖外部 `aimodel` 的 provider wire 类型与标准库,零内部依赖。所有其他包依赖它,反向依赖被章程禁止。
+1. **`schema` 是根契约包**:只依赖标准库,零 vage 内部依赖、零 `aimodel` 依赖。厂商 wire 编解码收敛在 `largemodel/provider/*`。所有其他包依赖它,反向依赖被禁止。
 2. **TaskAgent 是集成中枢**:四种 Agent 中,只有任务型直接依赖模型、工具、记忆、护栏、技能、检查点、hook、context。其余三型只依赖 `agent` + `schema`(工作流型另依赖 `orchestrate`)。它只**编排**这些能力,不实现它们 —— 全部以接口/管理器形式注入。
 3. **能力以接口注入**:各子系统对 TaskAgent 暴露的都是接口(ToolRegistry、memory.Manager、Guard、IterationStore、largemodel.Caller 链……),因此每一项都可被替换或 mock。
 
@@ -101,6 +102,7 @@ sequenceDiagram
 架构级、有长期影响或多种权衡的决策记录于 `architecture/adr/`(编号 `NNNN-title.md`)。ADR 需人工评审通过后方可写入,新建默认 `proposed` 状态。当前尚无 ADR;后续可将以下已体现在代码中的关键决策补记为 ADR:
 
 - 以 `largemodel.Caller` 作为唯一模型接入点,其后端是 `largemodel/router` 池(单端点即一个端点的池);重试、端点健康与同协议故障转移取自 router 而非自研。
-- `schema` 作为零内部依赖的根契约包。
+- `schema` 作为仅依赖标准库的根契约包(`Message` 为 provider-neutral canonical + 可选 `origin`)。
 - `checkpoint` 与 `orchestrate` checkpoint 双轨分离。
 - 上下文编辑采用"收敛策略单一判定点"折叠旧工具结果。
+- DAG 执行器"锁契约收尾单点"(错误与取消收敛到同一收尾路径)。

@@ -7,9 +7,9 @@
 | **Agent(智能体)** | 满足统一 `Run(请求)→响应` 契约、带身份三元组(ID/名称/描述)的执行单元。有任务型、路由型、工作流型、自定义型四种形态。详见 [agent-core](domains/agent/agent-core/agent-core.md)。 |
 | **ReAct 循环** | 任务型 Agent 的推理-行动循环:提示 → LLM → 若产生工具调用则执行并回喂 → 直至收敛。三种终止:得到最终答案、达到最大迭代、token 预算耗尽。 |
 | **RunRequest / RunResponse** | 一次 Agent 调用的输入/输出信封。请求含消息列表、会话 ID 与单次覆盖项;响应含消息、用量、耗时与终止原因(StopReason)。 |
-| **StopReason(终止原因)** | 标记一次 Agent 运行为何结束:complete(完成)/ max-iterations(达上限)/ budget-exhausted(预算耗尽)等。 |
-| **Message(消息)** | 以厂商原生 wire 形态(OpenAI / Anthropic)保存、并叠加 Agent 语义元数据(所属 Agent、时间戳、附加元数据)与协议标识的对话消息。读取统一走访问器。 |
-| **Protocol(协议)** | 模型绑定的厂商 wire 协议(openai-chat / openai-responses / anthropic-messages),配置期确定,并标记在每条持久化消息上。 |
+| **StopReason(终止原因)** | 标记一次 Agent 运行为何结束:wire 值为 `complete`(完成)/ `max_iterations_exceeded`(达上限)/ `token_budget_exhausted`(预算耗尽)。 |
+| **Message(消息)** | provider-neutral 的对话消息:canonical 状态为 `role` + `parts`,叠加 Agent 语义元数据(所属 Agent、时间戳、附加元数据)与协议标识;可选 `origin` 缓存未修改的厂商原生 wire 供同协议回放。读取统一走访问器。 |
+| **Protocol(协议)** | 模型绑定的厂商 wire 协议,配置期确定并标记在每条消息上。当前实现:openai-chat、anthropic-messages;`openai-responses` 已命名预留但尚未接入公开 Caller。 |
 | **工具(Tool)** | 可被 Agent 调用的能力单元,带名称、描述与 JSON Schema 参数。来源分本地函数、MCP 远程、agent-as-tool 三类。 |
 | **ToolDef / ToolResult** | 工具的可注册描述 / 工具执行的中立结果(支持文本、JSON、图片、文件多态,带错误标记)。 |
 | **护栏(Guard)** | 对消息作检查并返回 Pass / Rewrite / Block 三态结果的安全构件,作用于输入、输出、工具结果三个位置。 |

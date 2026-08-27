@@ -24,7 +24,7 @@
 
 ## 核心实体(概念层)
 
-- **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。取值为 openai-chat / openai-responses / anthropic-messages。
+- **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。当前公开 Caller 支持 openai-chat / anthropic-messages;`openai-responses` 常量已预留,provider 侧有 Responses 路由,但尚未接入公开 Caller(`Protocol.Valid` 拒绝)。
 - **Caller(调用接缝)**:一次模型调用的协议无关接口;每种协议一个实现,拥有该厂商的请求构造、响应解析、流解码与错误归一化。
 - **Backend(后端接口)**:Caller 调用的最小方法集,由 `largemodel/provider/{openais,anthropics}` 路由池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
 - **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `largemodel/router`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
@@ -65,7 +65,7 @@
 
 ## 与其他领域的交互
 
-- **agent-core**:任务型 Agent 通过组装好的 Caller 链发起每轮 LLM 调用,并接入上下文编辑中间件与预算中间件;Agent 的 Protocol 决定其消息以哪种 wire 形态构造与存储。
+- **agent-core**:任务型 Agent 通过组装好的 Caller 链发起每轮 LLM 调用,并接入上下文编辑中间件与预算中间件;Agent 的 Protocol 决定 provider codec 如何编解码消息。
 - **tooling**:上下文编辑的 stale_resource 判定需查询工具的资源语义(ResourceTracker),识别"被后续写作废的旧读结果"。
 - **memory**:与记忆压缩互补 —— 编辑管"每轮少付 token",压缩管"记多少历史"(见 [memory-design](../../memory/memory/memory-design.md))。
 

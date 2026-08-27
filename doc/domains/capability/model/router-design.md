@@ -107,4 +107,4 @@ stats := caller.EndpointStats()
 
 - **无跨协议 failover** — OpenAI 池与 Anthropic 池独立
 - **中间件链不含 retry** — 避免与 router 重试相乘
-- **Responses API** — `composes/openais` 已实现;vage `Caller` 当前仅接 Chat / Messages
+- **Responses API** — `largemodel/provider/openais` 已实现 Responses 路由;vage 公开 `Caller` 当前仅接 Chat / Messages

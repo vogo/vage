@@ -3,7 +3,7 @@
 | 元数据 | 值 |
 |--------|----|
 | 业务组 | agent |
-| 一句话 | Agent 统一抽象与四种形态、承载厂商原生 wire 的数据契约、提示词模板 |
+| 一句话 | Agent 统一抽象与四种形态、provider-neutral 数据契约、提示词模板 |
 | 负责人 | vogo 维护者 |
 | 状态 | active |
 | 依赖领域 | model、tooling、memory、guard、orchestration(仅 TaskAgent/WorkflowAgent 依赖) |
@@ -14,7 +14,7 @@
 
 本领域回答两个根本问题:**"什么是一个 Agent"** 与 **"Agent 之间说什么语言"**。
 
-- `schema` 是**数据契约层**:定义 Agent 的输入/输出/消息/事件/工具描述/流式通道。消息以厂商原生 wire 形态存放并带协议标识,读取统一走访问器(Role/Text/ToolCalls/…),因此上层业务代码无需按厂商分叉。它是全框架最底层、零内部依赖的包。
+- `schema` 是**数据契约层**:定义 Agent 的输入/输出/消息/事件/工具描述/流式通道。`Message` 以 provider-neutral 的 canonical 状态(`role` + `parts`)为唯一事实源,可选 `origin` 缓存未修改的厂商原生 wire 供同协议回放;读取统一走访问器(Role/Text/ToolCalls/…),因此上层业务代码无需按厂商分叉。它是全框架最底层、仅依赖标准库的包。
 - `agent` 定义 Agent 统一接口与四种编排形态。
 - `prompt` 提供系统提示词的模板化与版本化抽象。
 

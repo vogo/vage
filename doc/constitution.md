@@ -9,7 +9,7 @@
 **价值优先级(冲突时按序裁决):**
 
 1. **契约稳定 > 功能扩张** —— `schema` 契约层与各子系统公共接口的向后兼容优先于新增能力。
-2. **协议保真 > 便利** —— 消息以厂商原生 wire 形态存取,不为了统一而做有损归一;跨厂商差异在调用边界显式处理,不用一层中立抽象掩盖。
+2. **协议保真 > 便利** —— `schema.Message` 以 provider-neutral 的 canonical 状态(`role` + `parts`)为唯一事实源;厂商 wire 差异只在 `largemodel` 的 provider codec 边界编解码,同协议未修改时可经可选 `origin` 无损回放,不得用有损归一掩盖跨厂商差异。
 3. **正确性与安全 > 性能** —— 护栏、预算、幂等、断点续跑的正确性优先于吞吐。
 4. **可组合 > 大一统** —— 宁可提供小而可替换的构件,也不做无法拆分的单体。
 
@@ -17,15 +17,14 @@
 
 ## 技术栈基线
 
-- **语言**:Go(当前基线 1.26),仅使用标准库 + `go.mod` 已声明依赖。
-- **大模型接入**:唯一入口是 `largemodel` 的 `Caller` 协议调用层,其后端是 `github.com/vogo/aimodel` 各 provider 的 native 客户端(OpenAI Chat / OpenAI Responses / Anthropic Messages)。厂商协议细节只允许出现在 `largemodel` 的 provider 实现与 `schema` 的 wire 承载类型中,不得散落到其他核心包。
+- **大模型接入**:唯一入口是 `largemodel` 的 `Caller` 协议调用层,其后端是 `github.com/vogo/aimodel` 各 provider 的 native 客户端。当前公开 Caller 仅接 OpenAI Chat 与 Anthropic Messages;`openai-responses` 常量已预留,provider 侧有路由能力,但尚未接入公开 Caller(`Protocol.Valid` 拒绝)。厂商协议细节只允许出现在 `largemodel` 的 provider 实现中,不得散落到 `schema` 或其他核心包。
 - **重试与路由不自研**:调用内重试、端点存活判定与同协议多端点的选择策略一律取 `largemodel/router`,vage 只负责把它接到 `Caller` 后端接口上并承载并发,不得再提供第二套重试或熔断机制。跨协议的路由与故障转移不做。
 - **引入新核心依赖**:需经维护者评审(说明必要性、许可证兼容性、维护活跃度)。
 - **禁止**:在核心库中硬编码厂商私有端点、模型名或鉴权方式;凭证与 base URL 一律由调用方注入。
 
 ## 分层与依赖红线
 
-- **`schema` 是最底层契约包**,只依赖 `aimodel` 的 provider wire 类型与标准库,不得依赖任何其他 vage 内部包。所有子系统依赖 `schema`,反向依赖被禁止。
+- **`schema` 是最底层契约包**,只依赖标准库,不得依赖 `aimodel` 或任何其他 vage 内部包。所有子系统依赖 `schema`,反向依赖被禁止。
 - **WHAT / HOW 分离**:业务行为写在 `<domain>.md`,技术实现写在 `<domain>-design.md`,二者不混。
 - **文档不含实现细节**:凡读代码可还原的内容不写入文档(见 `overview.md` 使用规则)。
 

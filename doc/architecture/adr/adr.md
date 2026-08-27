@@ -28,8 +28,8 @@
 
 以下决策已体现在代码中,建议后续补记(见 [../architecture.md](../architecture.md)):
 
-- 以 `largemodel.Caller` 作为唯一模型接入点,其下按协议直连各厂商 native 客户端。
-- `schema` 作为零内部依赖的根契约包。
+- 以 `largemodel.Caller` 作为唯一模型接入点,其下按协议直连各厂商 native 客户端(当前公开:Chat / Messages;`openai-responses` 预留未接)。
+- `schema` 作为仅依赖标准库的根契约包(`Message` 为 provider-neutral canonical + 可选 `origin`)。
 - `checkpoint`(迭代级)与 `orchestrate` checkpoint(DAG 级)双轨分离。
 - 上下文编辑采用"收敛策略单一判定点 + V1 兼容层隔离"。
 - DAG 执行器"锁契约收尾单点"(错误与取消收敛到同一收尾路径)。
