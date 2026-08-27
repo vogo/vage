@@ -59,7 +59,7 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 		t.Fatal("expected IsError=true when file has not been read")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file must be read before editing") {
 		t.Errorf("expected 'file must be read before editing' in output, got: %s", text)
 	}
@@ -83,7 +83,7 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 	}
 
 	if readResult.IsError {
-		t.Fatalf("read failed: %s", toolkit.ResultText(readResult))
+		t.Fatalf("read failed: %s", readResult.Text())
 	}
 
 	// Step 3: Edit the file after reading -- should now succeed.
@@ -95,7 +95,7 @@ func TestEndToEndReadThenEdit(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success after reading, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success after reading, got error: %s", result.Text())
 	}
 
 	// Verify file was modified.
@@ -133,7 +133,7 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 	}
 
 	if readResult.IsError {
-		t.Fatalf("read A failed: %s", toolkit.ResultText(readResult))
+		t.Fatalf("read A failed: %s", readResult.Text())
 	}
 
 	// Edit file A should succeed.
@@ -145,7 +145,7 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success editing A, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success editing A, got error: %s", result.Text())
 	}
 
 	// Edit file B should fail (not read yet).
@@ -160,7 +160,7 @@ func TestEndToEndReadTrackerMultipleFiles(t *testing.T) {
 		t.Fatal("expected IsError=true for unread file B")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file must be read before editing") {
 		t.Errorf("expected 'file must be read before editing' in output, got: %s", text)
 	}
@@ -183,7 +183,7 @@ func TestEndToEndNoTrackerBackwardCompat(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success without tracker, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success without tracker, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -218,7 +218,7 @@ func TestDenyRuleBlocksEnvFile(t *testing.T) {
 		t.Fatal("expected IsError=true for denied .env file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
 	}
@@ -258,7 +258,7 @@ func TestDenyRuleBlocksLockFile(t *testing.T) {
 		t.Fatal("expected IsError=true for denied lock file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
 	}
@@ -284,7 +284,7 @@ func TestDenyRuleBlocksCredentials(t *testing.T) {
 		t.Fatal("expected IsError=true for denied credentials file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
 	}
@@ -307,7 +307,7 @@ func TestDenyRuleAllowsNonMatchingFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -340,7 +340,7 @@ func TestDenyRuleMultiplePatterns(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "*.env") {
 		t.Errorf("expected matching pattern '*.env' in output, got: %s", text)
 	}
@@ -379,7 +379,7 @@ func TestDenyRuleCombinedWithReadTracker(t *testing.T) {
 		t.Fatal("expected IsError=true -- deny rule should take precedence")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected deny rule error, got: %s", text)
 	}
@@ -402,7 +402,7 @@ func TestUNCPathBackslashRejected(t *testing.T) {
 		t.Fatal("expected IsError=true for UNC backslash path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "UNC paths are not allowed") {
 		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
 	}
@@ -423,7 +423,7 @@ func TestUNCPathSlashRejected(t *testing.T) {
 		t.Fatal("expected IsError=true for UNC slash path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "UNC paths are not allowed") {
 		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
 	}
@@ -453,7 +453,7 @@ func TestFileSizeLimitEnforced(t *testing.T) {
 		t.Fatal("expected IsError=true for file exceeding max size")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file size") {
 		t.Errorf("expected 'file size' in output, got: %s", text)
 	}
@@ -489,7 +489,7 @@ func TestFileSizeLimitAllowsSmallFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 }
 
@@ -523,7 +523,7 @@ func TestReadOnlyFileRejected(t *testing.T) {
 		t.Fatal("expected IsError=true for read-only file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file appears to be read-only") {
 		t.Errorf("expected 'file appears to be read-only' in output, got: %s", text)
 	}
@@ -566,7 +566,7 @@ func TestReplaceAllWithDenyRulesAndTracker(t *testing.T) {
 	}
 
 	if readResult.IsError {
-		t.Fatalf("read failed: %s", toolkit.ResultText(readResult))
+		t.Fatalf("read failed: %s", readResult.Text())
 	}
 
 	// Edit with replace_all, deny rules that don't match, and tracker satisfied.
@@ -584,10 +584,10 @@ func TestReplaceAllWithDenyRulesAndTracker(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "replaced 3 occurrence(s)") {
 		t.Errorf("expected 'replaced 3 occurrence(s)' in output, got: %s", text)
 	}
@@ -624,7 +624,7 @@ func TestNotFoundErrorGuidance(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "old_string not found in file") {
 		t.Errorf("expected 'old_string not found in file' in output, got: %s", text)
 	}
@@ -658,7 +658,7 @@ func TestNonUniqueMatchWithoutReplaceAll(t *testing.T) {
 		t.Fatal("expected IsError=true for non-unique match")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "matches 3 locations") {
 		t.Errorf("expected 'matches 3 locations' in output, got: %s", text)
 	}
@@ -694,7 +694,7 @@ func TestFileNotFoundError(t *testing.T) {
 		t.Fatal("expected IsError=true for non-existent file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -727,7 +727,7 @@ func TestSafetyPipelineOrder(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected path validation error, got: %s", text)
 	}
@@ -746,7 +746,7 @@ func TestSafetyPipelineOrder(t *testing.T) {
 		t.Fatal("expected IsError=true for denied file")
 	}
 
-	text = toolkit.ResultText(result)
+	text = result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected deny rule error (not read tracker error), got: %s", text)
 	}
@@ -765,7 +765,7 @@ func TestSafetyPipelineOrder(t *testing.T) {
 		t.Fatal("expected IsError=true for unread file")
 	}
 
-	text = toolkit.ResultText(result)
+	text = result.Text()
 	if !strings.Contains(text, "file must be read before editing") {
 		t.Errorf("expected read tracker error, got: %s", text)
 	}

@@ -45,10 +45,10 @@ func TestEditTool_SingleReplace(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "replaced 1 occurrence(s)") {
 		t.Errorf("expected 'replaced 1 occurrence(s)' in output, got: %s", text)
 	}
@@ -83,10 +83,10 @@ func TestEditTool_ReplaceAll(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "replaced 3 occurrence(s)") {
 		t.Errorf("expected 'replaced 3 occurrence(s)' in output, got: %s", text)
 	}
@@ -116,7 +116,7 @@ func TestEditTool_ReplaceWithEmpty(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -144,7 +144,7 @@ func TestEditTool_MultilineStrings(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -175,7 +175,7 @@ func TestEditTool_NotFound(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "old_string not found in file") {
 		t.Errorf("expected 'old_string not found in file' in output, got: %s", text)
 	}
@@ -203,7 +203,7 @@ func TestEditTool_AmbiguousMatch(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "matches 3 locations") {
 		t.Errorf("expected 'matches 3 locations' in output, got: %s", text)
 	}
@@ -231,7 +231,7 @@ func TestEditTool_SameStrings(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must differ") {
 		t.Errorf("expected 'must differ' in output, got: %s", text)
 	}
@@ -255,7 +255,7 @@ func TestEditTool_EmptyOldString(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "old_string must not be empty") {
 		t.Errorf("expected 'old_string must not be empty' in output, got: %s", text)
 	}
@@ -274,7 +274,7 @@ func TestEditTool_FileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -296,7 +296,7 @@ func TestEditTool_DirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "directory") {
 		t.Errorf("expected 'directory' in output, got: %s", text)
 	}
@@ -315,7 +315,7 @@ func TestEditTool_EmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -334,7 +334,7 @@ func TestEditTool_RelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -353,7 +353,7 @@ func TestEditTool_MalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -378,7 +378,7 @@ func TestEditTool_ExceedsMaxFileBytes(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file size") {
 		t.Errorf("expected 'file size' in output, got: %s", text)
 	}
@@ -482,7 +482,7 @@ func TestEditTool_AllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -528,7 +528,7 @@ func TestEditTool_Concurrent(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("edit %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+			t.Errorf("edit %d returned IsError=true: %s", i, results[i].Text())
 		}
 
 		content, readErr := os.ReadFile(paths[i])
@@ -561,7 +561,7 @@ func TestEditTool_ContextCancel(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -610,7 +610,7 @@ func TestEditTool_ConcurrentSameFile(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("edit %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+			t.Errorf("edit %d returned IsError=true: %s", i, results[i].Text())
 		}
 	}
 
@@ -646,7 +646,7 @@ func TestEditTool_DenyRule_ExactMatch(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
 	}
@@ -674,7 +674,7 @@ func TestEditTool_DenyRule_GlobMatch(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "protected by deny rule") {
 		t.Errorf("expected 'protected by deny rule' in output, got: %s", text)
 	}
@@ -695,7 +695,7 @@ func TestEditTool_DenyRule_NoMatch(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 }
 
@@ -718,7 +718,7 @@ func TestEditTool_ReadPrerequisite_Blocked(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file must be read before editing") {
 		t.Errorf("expected 'file must be read before editing' in output, got: %s", text)
 	}
@@ -748,7 +748,7 @@ func TestEditTool_ReadPrerequisite_Allowed(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 }
 
@@ -768,7 +768,7 @@ func TestEditTool_ReadPrerequisite_NoTracker(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 }
 
@@ -800,7 +800,7 @@ func TestEditTool_ReadOnlyFile(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file appears to be read-only") {
 		t.Errorf("expected 'file appears to be read-only' in output, got: %s", text)
 	}
@@ -823,7 +823,7 @@ func TestEditTool_UNCPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "UNC paths are not allowed") {
 		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
 	}
@@ -842,7 +842,7 @@ func TestEditTool_UNCPathSlash(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "UNC paths are not allowed") {
 		t.Errorf("expected 'UNC paths are not allowed' in output, got: %s", text)
 	}
@@ -869,10 +869,10 @@ func TestEditTool_SnippetInResult(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 
 	// The snippet should contain surrounding lines.
 	if !strings.Contains(text, "--- snippet ---") {

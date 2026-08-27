@@ -23,6 +23,7 @@
 ## 核心实体(概念层)
 
 - **ToolRegistry(工具注册表)**:工具的注册与按名查找/执行入口。有截断变体,对过大工具输出做治理。
+- **结果取值与截断助手**:工具结果取文本(`ToolResult.Text`)与字节级 UTF-8 截断(`TruncateUTF8`)是框架自带的通用能力,与"多大算大"的治理策略分开;前者只解释数据,后者才是策略。
 - **工具三来源**:本地函数、MCP 远程、agent-as-tool(把一个 Agent 当工具)。
 - **ResourceTracker(资源追踪)**:工具声明其读/写的资源(如文件),供上下文编辑判定 stale_resource、供编排做资源限流。
 - **内建工具族**:文件类(read/write/edit/glob/grep)、执行类(bash,进程隔离)、协作类(agenttool 子代理、askuser 询问用户)、状态类(todo、workspace、sessiontree)、检索类(vectorsearch、webfetch、websearch)。
@@ -39,6 +40,7 @@
 | TOOL-4 | **工具输出可截断**:过大工具输出经截断注册表治理,避免撑爆上下文。 |
 | TOOL-5 | **技能只注入不实现**:技能向 Agent 注入提示、筛选可用工具集,不承载工具执行逻辑。 |
 | TOOL-6 | **agent-as-tool 隔离**:子代理通过 `sessionview` 只读快照运行,scratch 隔离(见 [session](../../memory/session/session.md) SES-6)。 |
+| TOOL-7 | **取文本与截断走框架入口**:"从工具结果取文本"与"按字节安全截断"是通用能力,只有一个推荐入口(`schema.ToolResult.Text` / `tool.TruncateUTF8`),调用方不再自建重复助手。字节上限与 token 预算是两件事,不可互换(详见 [tooling-design](tooling-design.md))。 |
 
 ## 状态与转换
 

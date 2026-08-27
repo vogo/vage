@@ -26,6 +26,32 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
+// TruncateUTF8 returns the longest prefix of s that is at most maxBytes bytes
+// long and remains valid UTF-8, never splitting a multi-byte rune. When s
+// already fits, it is returned unchanged; a maxBytes of zero yields the empty
+// string. Negative limits are a caller precondition violation and carry no
+// promise.
+//
+// maxBytes counts BYTES, not characters, runes or tokens. This is the entry
+// point for byte-bounded sinks (logs, displays, command output). Context
+// budgets are a different concern and must keep using token-level governance
+// such as TruncatingToolRegistry; the two are not interchangeable.
+//
+// The result carries no ellipsis or truncation marker: attaching one is the
+// caller's decision, since a marker is only meaningful where it is displayed.
+func TruncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+
+	t := s[:maxBytes]
+	for len(t) > 0 && !utf8.Valid([]byte(t)) {
+		t = t[:len(t)-1]
+	}
+
+	return t
+}
+
 // TruncatingToolRegistry wraps a ToolRegistry and truncates tool results
 // that exceed maxTokens.
 //
@@ -95,16 +121,12 @@ func (t *TruncatingToolRegistry) Execute(ctx context.Context, name, args string)
 			continue
 		}
 
-		// Truncate to approximately maxTokens * 4 characters,
-		// ensuring we don't split a multi-byte UTF-8 rune.
-		maxChars := min(t.maxTokens*4, len(part.Text))
-
-		// Back up to a valid rune boundary if we landed mid-rune.
-		for maxChars > 0 && !utf8.RuneStart(part.Text[maxChars]) {
-			maxChars--
-		}
-
-		truncated := part.Text[:maxChars]
+		// Keep roughly maxTokens worth of text (the estimator's 4 bytes per
+		// token), delegating the rune-boundary cut to TruncateUTF8 so both
+		// entry points share one algorithm. The marker is appended here and
+		// not in TruncateUTF8: it is governance feedback, not a string helper
+		// concern.
+		truncated := TruncateUTF8(part.Text, t.maxTokens*4)
 		marker := fmt.Sprintf("\n[truncated: showing first %d of %d estimated tokens]", t.maxTokens, estimated)
 		result.Content[i].Text = truncated + marker
 	}

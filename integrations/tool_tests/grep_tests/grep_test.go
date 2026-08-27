@@ -91,10 +91,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "hello") {
 		t.Errorf("expected 'hello' in output, got: %s", text)
 	}
@@ -143,7 +143,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "not allowed") {
 		t.Errorf("expected 'not allowed' in output, got: %s", text)
 	}
@@ -158,10 +158,10 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text = toolkit.ResultText(result)
+	text = result.Text()
 	if !strings.Contains(text, "findme") {
 		t.Errorf("expected 'findme' in output, got: %s", text)
 	}
@@ -188,10 +188,10 @@ func TestGrepSuccessfulSearch(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "hello") {
 		t.Errorf("expected 'hello' in output, got: %s", text)
 	}
@@ -220,10 +220,10 @@ func TestGrepWithIncludeFilter(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "code.go") {
 		t.Errorf("expected code.go in output, got: %s", text)
 	}
@@ -253,7 +253,7 @@ func TestGrepNoMatches(t *testing.T) {
 
 	// No matches should NOT be an error.
 	if result.IsError {
-		t.Fatalf("expected success (no matches), got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success (no matches), got error: %s", result.Text())
 	}
 }
 
@@ -275,10 +275,10 @@ func TestGrepSingleFileSearch(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "line two") {
 		t.Errorf("expected 'line two' in output, got: %s", text)
 	}
@@ -301,10 +301,10 @@ func TestGrepRegexPattern(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "error:") {
 		t.Errorf("expected 'error:' in output, got: %s", text)
 	}
@@ -336,10 +336,10 @@ func TestGrepWorkingDirFallback(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "findme") {
 		t.Errorf("expected 'findme' in output, got: %s", text)
 	}
@@ -363,10 +363,10 @@ func TestGrepOutputFormat(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 
 	// Output should contain line number (grep -n / rg --line-number format).
 	if !strings.Contains(text, "2") {
@@ -397,7 +397,7 @@ func TestGrepMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -419,7 +419,7 @@ func TestGrepEmptyPattern(t *testing.T) {
 		t.Fatal("expected IsError=true for empty pattern")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -442,7 +442,7 @@ func TestGrepNoWorkingDir(t *testing.T) {
 		t.Fatal("expected IsError=true when no path and no working dir")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "no search path") {
 		t.Errorf("expected 'no search path' in output, got: %s", text)
 	}
@@ -470,7 +470,7 @@ func TestGrepContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "cancel") {
 		t.Errorf("expected 'cancel' in output, got: %s", text)
 	}
@@ -501,7 +501,7 @@ func TestGrepOutputTruncation(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if strings.Contains(text, "output truncated") {
 		// Truncation is expected for small maxOutput.
 		return
@@ -550,7 +550,7 @@ func TestGrepConcurrentExecution(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("invocation %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+			t.Errorf("invocation %d returned IsError=true: %s", i, results[i].Text())
 		}
 	}
 }
@@ -649,10 +649,10 @@ func TestGrepErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second grep to succeed, got error: %s", toolkit.ResultText(result2))
+		t.Fatalf("expected second grep to succeed, got error: %s", result2.Text())
 	}
 
-	text := toolkit.ResultText(result2)
+	text := result2.Text()
 	if !strings.Contains(text, "findme") {
 		t.Errorf("expected 'findme' in output, got: %s", text)
 	}
@@ -689,7 +689,7 @@ func TestGrepSymlinkOutsideAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for symlink escape")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "not allowed") && !strings.Contains(text, "symlink resolves outside") {
 		t.Errorf("expected path rejection in output, got: %s", text)
 	}
@@ -747,10 +747,10 @@ func TestGlobAndGrepCoexist(t *testing.T) {
 	}
 
 	if globResult.IsError {
-		t.Fatalf("glob expected success, got error: %s", toolkit.ResultText(globResult))
+		t.Fatalf("glob expected success, got error: %s", globResult.Text())
 	}
 
-	globText := toolkit.ResultText(globResult)
+	globText := globResult.Text()
 	if !strings.Contains(globText, "code.go") {
 		t.Errorf("expected code.go in glob output, got: %s", globText)
 	}
@@ -763,10 +763,10 @@ func TestGlobAndGrepCoexist(t *testing.T) {
 	}
 
 	if grepResult.IsError {
-		t.Fatalf("grep expected success, got error: %s", toolkit.ResultText(grepResult))
+		t.Fatalf("grep expected success, got error: %s", grepResult.Text())
 	}
 
-	grepText := toolkit.ResultText(grepResult)
+	grepText := grepResult.Text()
 	if !strings.Contains(grepText, "func main") {
 		t.Errorf("expected 'func main' in grep output, got: %s", grepText)
 	}

@@ -20,6 +20,7 @@ package schema
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -294,6 +295,92 @@ func TestTextResult(t *testing.T) {
 	}
 	if r.Content[0].Text != "sunny weather" {
 		t.Errorf("Content[0].Text = %q, want %q", r.Content[0].Text, "sunny weather")
+	}
+}
+
+func TestToolResultText(t *testing.T) {
+	tests := []struct {
+		name   string
+		result ToolResult
+		want   string
+	}{
+		{
+			name:   "single text part",
+			result: TextResult("call-1", "sunny weather"),
+			want:   "sunny weather",
+		},
+		{
+			name: "skips leading non-text parts",
+			result: ToolResult{Content: []ContentPart{
+				{Type: "image", Data: []byte{0x89, 0x50}, MimeType: "image/png"},
+				{Type: "json", Text: `{"ignored":true}`},
+				{Type: "text", Text: "after the payload"},
+			}},
+			want: "after the payload",
+		},
+		{
+			name: "returns first of several text parts",
+			result: ToolResult{Content: []ContentPart{
+				{Type: "text", Text: "first"},
+				{Type: "text", Text: "second"},
+			}},
+			want: "first",
+		},
+		{
+			// Stopping at an empty first part is the contract, not an
+			// oversight: it keeps what the model receives verbatim.
+			name: "stops at empty first text part",
+			result: ToolResult{Content: []ContentPart{
+				{Type: "text", Text: ""},
+				{Type: "text", Text: "not reached"},
+			}},
+			want: "",
+		},
+		{
+			name: "no text part",
+			result: ToolResult{Content: []ContentPart{
+				{Type: "image", MimeType: "image/png"},
+			}},
+			want: "",
+		},
+		{
+			name:   "nil content",
+			result: ToolResult{ToolCallID: "call-9"},
+			want:   "",
+		},
+		{
+			name:   "error result reads like any other",
+			result: ErrorResult("call-2", "something failed"),
+			want:   "something failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.result.Text(); got != tt.want {
+				t.Errorf("Text() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToolResultTextDoesNotMutateReceiver(t *testing.T) {
+	r := ToolResult{ToolCallID: "call-1", Content: []ContentPart{
+		{Type: "json", Text: `{"a":1}`},
+		{Type: "text", Text: "hello"},
+	}}
+	before := append([]ContentPart(nil), r.Content...)
+
+	_ = r.Text()
+
+	if r.ToolCallID != "call-1" || r.IsError {
+		t.Errorf("envelope changed: %+v", r)
+	}
+	if len(r.Content) != len(before) {
+		t.Fatalf("len(Content) = %d, want %d", len(r.Content), len(before))
+	}
+	if !reflect.DeepEqual(r.Content, before) {
+		t.Errorf("Content = %+v, want %+v", r.Content, before)
 	}
 }
 

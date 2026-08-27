@@ -44,10 +44,10 @@ func TestWriteTool_CreateNew(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "wrote 11 bytes") {
 		t.Errorf("expected 'wrote 11 bytes' in output, got: %s", text)
 	}
@@ -75,7 +75,7 @@ func TestWriteTool_Overwrite(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -101,7 +101,7 @@ func TestWriteTool_CreateParentDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -127,7 +127,7 @@ func TestWriteTool_EmptyContent(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -153,7 +153,7 @@ func TestWriteTool_CreateOnly_NewFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -182,7 +182,7 @@ func TestWriteTool_CreateOnly_ExistingFile(t *testing.T) {
 		t.Fatal("expected IsError=true for create_only with existing file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file already exists") {
 		t.Errorf("expected 'file already exists' in output, got: %s", text)
 	}
@@ -211,7 +211,7 @@ func TestWriteTool_EmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -230,7 +230,7 @@ func TestWriteTool_RelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -249,7 +249,7 @@ func TestWriteTool_MalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -271,7 +271,7 @@ func TestWriteTool_ExceedsMaxWriteBytes(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -361,7 +361,7 @@ func TestWriteTool_AllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -401,7 +401,7 @@ func TestWriteTool_Concurrent(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("write %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+			t.Errorf("write %d returned IsError=true: %s", i, results[i].Text())
 		}
 
 		path := filepath.Join(dir, fmt.Sprintf("file%d.txt", i))
@@ -436,7 +436,7 @@ func TestWriteTool_ContextCancel(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -455,7 +455,7 @@ func TestWriteTool_AtomicWrite_NoTempFilesLeftBehind(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	// Verify no temp files are left behind.

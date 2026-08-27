@@ -92,10 +92,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "a.txt") {
 		t.Errorf("expected a.txt in output, got: %s", text)
 	}
@@ -148,7 +148,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "not allowed") {
 		t.Errorf("expected 'not allowed' in output, got: %s", text)
 	}
@@ -163,10 +163,10 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text = toolkit.ResultText(result)
+	text = result.Text()
 	if !strings.Contains(text, "allowed.txt") {
 		t.Errorf("expected allowed.txt in output, got: %s", text)
 	}
@@ -194,10 +194,10 @@ func TestGlobSuccessfulSearch(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "main.go") {
 		t.Errorf("expected main.go in output, got: %s", text)
 	}
@@ -237,10 +237,10 @@ func TestGlobRecursivePattern(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "nested.txt") {
 		t.Errorf("expected nested.txt in output, got: %s", text)
 	}
@@ -279,10 +279,10 @@ func TestGlobSortedByModTime(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 
 	if len(lines) != 3 {
@@ -317,10 +317,10 @@ func TestGlobNoMatches(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success (empty result), got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success (empty result), got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if strings.TrimSpace(text) != "" {
 		t.Errorf("expected empty output for no matches, got: %s", text)
 	}
@@ -348,10 +348,10 @@ func TestGlobMaxResults(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 
 	// Filter out truncation notice lines (starting with "...").
@@ -390,10 +390,10 @@ func TestGlobWorkingDirFallback(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "test.txt") {
 		t.Errorf("expected test.txt in output, got: %s", text)
 	}
@@ -418,7 +418,7 @@ func TestGlobMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -440,7 +440,7 @@ func TestGlobEmptyPattern(t *testing.T) {
 		t.Fatal("expected IsError=true for empty pattern")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -463,7 +463,7 @@ func TestGlobPatternWithDotDot(t *testing.T) {
 		t.Fatal("expected IsError=true for pattern with '..'")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "..") {
 		t.Errorf("expected '..' error in output, got: %s", text)
 	}
@@ -485,7 +485,7 @@ func TestGlobAbsolutePattern(t *testing.T) {
 		t.Fatal("expected IsError=true for absolute pattern")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be absolute") {
 		t.Errorf("expected 'must not be absolute' in output, got: %s", text)
 	}
@@ -512,7 +512,7 @@ func TestGlobPathMustBeDirectory(t *testing.T) {
 		t.Fatal("expected IsError=true for file path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "not a directory") {
 		t.Errorf("expected 'not a directory' in output, got: %s", text)
 	}
@@ -536,7 +536,7 @@ func TestGlobNonexistentPath(t *testing.T) {
 		t.Fatal("expected IsError=true for nonexistent path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "does not exist") {
 		t.Errorf("expected 'does not exist' in output, got: %s", text)
 	}
@@ -559,7 +559,7 @@ func TestGlobNoWorkingDir(t *testing.T) {
 		t.Fatal("expected IsError=true when no path and no working dir")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "no search directory") {
 		t.Errorf("expected 'no search directory' in output, got: %s", text)
 	}
@@ -587,7 +587,7 @@ func TestGlobContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "cancel") {
 		t.Errorf("expected 'cancel' in output, got: %s", text)
 	}
@@ -615,7 +615,7 @@ func TestGlobOutputTruncation(t *testing.T) {
 	}
 
 	// Even with truncated output, parsing should not fail.
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if strings.Contains(text, "output truncated") {
 		// Truncation is expected for small maxOutput with many files.
 		return
@@ -665,7 +665,7 @@ func TestGlobConcurrentExecution(t *testing.T) {
 		}
 
 		if results[i].IsError {
-			t.Errorf("invocation %d returned IsError=true: %s", i, toolkit.ResultText(results[i]))
+			t.Errorf("invocation %d returned IsError=true: %s", i, results[i].Text())
 		}
 	}
 }
@@ -765,10 +765,10 @@ func TestGlobErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second glob to succeed, got error: %s", toolkit.ResultText(result2))
+		t.Fatalf("expected second glob to succeed, got error: %s", result2.Text())
 	}
 
-	text := toolkit.ResultText(result2)
+	text := result2.Text()
 	if !strings.Contains(text, "good.txt") {
 		t.Errorf("expected 'good.txt' in output, got: %s", text)
 	}
@@ -803,7 +803,7 @@ func TestGlobSymlinkOutsideAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for symlink escape")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "not allowed") && !strings.Contains(text, "symlink resolves outside") {
 		t.Errorf("expected path rejection in output, got: %s", text)
 	}

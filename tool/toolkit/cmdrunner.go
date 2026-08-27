@@ -26,6 +26,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/vogo/vage/tool"
 )
 
 // RunResult holds the output from a command execution.
@@ -95,7 +97,7 @@ func RunCommand(cmd *exec.Cmd, cancel context.CancelFunc, parentCtx, childCtx co
 
 	stdout := buf.String()
 	if truncated {
-		stdout = TruncateUTF8(stdout, maxOutputBytes)
+		stdout = tool.TruncateUTF8(stdout, maxOutputBytes)
 	}
 
 	stderrStr := stderrBuf.String()
