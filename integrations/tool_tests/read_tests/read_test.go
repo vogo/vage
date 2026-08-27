@@ -81,10 +81,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != "hello world" {
+	if got := result.Text(); got != "hello world" {
 		t.Errorf("expected 'hello world', got %q", got)
 	}
 }
@@ -131,7 +131,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -146,10 +146,10 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != "allowed content" {
+	if got := result.Text(); got != "allowed content" {
 		t.Errorf("expected 'allowed content', got %q", got)
 	}
 }
@@ -175,10 +175,10 @@ func TestReadEntireFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != content {
+	if got := result.Text(); got != content {
 		t.Errorf("expected %q, got %q", content, got)
 	}
 }
@@ -208,10 +208,10 @@ func TestReadWithOffsetAndLimit(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != "line3\nline4\nline5" {
+	if got := result.Text(); got != "line3\nline4\nline5" {
 		t.Errorf("expected 'line3\\nline4\\nline5', got %q", got)
 	}
 }
@@ -233,10 +233,10 @@ func TestReadEmptyFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != "" {
+	if got := result.Text(); got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
 }
@@ -259,10 +259,10 @@ func TestReadOffsetBeyondEnd(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	if got := toolkit.ResultText(result); got != "" {
+	if got := result.Text(); got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
 }
@@ -286,10 +286,10 @@ func TestReadLargeFileTruncation(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "output truncated") {
 		t.Errorf("expected 'output truncated' in output, got: %s", text)
 	}
@@ -319,7 +319,7 @@ func TestReadFileNotFound(t *testing.T) {
 		t.Fatal("expected IsError=true for non-existent file")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "file does not exist") {
 		t.Errorf("expected 'file does not exist' in output, got: %s", text)
 	}
@@ -353,7 +353,7 @@ func TestReadDirectoryPath(t *testing.T) {
 		t.Fatal("expected IsError=false for directory listing")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "Directory:") {
 		t.Errorf("expected 'Directory:' header, got: %s", text)
 	}
@@ -383,7 +383,7 @@ func TestReadEmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -406,7 +406,7 @@ func TestReadRelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true for relative path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -428,7 +428,7 @@ func TestReadMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -454,7 +454,7 @@ func TestReadNegativeOffset(t *testing.T) {
 		t.Fatal("expected IsError=true for negative offset")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "offset must be >= 1") {
 		t.Errorf("expected 'offset must be >= 1' in output, got: %s", text)
 	}
@@ -480,7 +480,7 @@ func TestReadNegativeLimit(t *testing.T) {
 		t.Fatal("expected IsError=true for negative limit")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "limit must be >= 1") {
 		t.Errorf("expected 'limit must be >= 1' in output, got: %s", text)
 	}
@@ -506,7 +506,7 @@ func TestReadContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -541,7 +541,7 @@ func TestReadSymlinkOutsideAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for symlink escape")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "path not allowed") && !strings.Contains(text, "symlink resolves outside") {
 		t.Errorf("expected path rejection in output, got: %s", text)
 	}
@@ -637,10 +637,10 @@ func TestReadErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second read to succeed, got error: %s", toolkit.ResultText(result2))
+		t.Fatalf("expected second read to succeed, got error: %s", result2.Text())
 	}
 
-	if got := toolkit.ResultText(result2); got != "good content" {
+	if got := result2.Text(); got != "good content" {
 		t.Errorf("expected 'good content', got %q", got)
 	}
 }

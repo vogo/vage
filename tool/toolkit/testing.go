@@ -27,14 +27,12 @@ import (
 
 // ResultText extracts the first text content part from a ToolResult.
 // It is intended for use in tests only.
+//
+// Deprecated: use schema.ToolResult.Text, which carries the same semantics
+// and is available to production code too. This alias stays for existing
+// tests and forwards to it unchanged.
 func ResultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
-	}
-
-	return ""
+	return r.Text()
 }
 
 // WriteTestFile creates a file in dir with the given name and content,

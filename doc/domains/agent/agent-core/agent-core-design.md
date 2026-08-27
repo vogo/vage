@@ -9,7 +9,7 @@
 | `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`MessagePart`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | provider-neutral 契约层;`Message` 以私有 canonical 状态和访问器统一读写,不解释 provider wire |
 | `largemodel/provider/openais`、`provider/anthropics` | provider 路由绑定与 message codec | 按 provider 聚合 native wire ↔ canonical message 转换、原生回放、协议结构校验与 Backend 路由绑定 |
 | `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`Middleware`/`MiddlewareFunc`/`ChainMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 + Agent Run 中间件契约 |
-| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Run`/`RunStream`/`Resume`、`WithMiddleware` | ReAct 循环实现,集成中枢 |
+| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Quick`、`Run`/`RunStream`/`Resume`、`WithMiddleware` | ReAct 循环实现,集成中枢;`New + Option` 是完整构造契约,`Quick` 是其高频参数薄包装 |
 | `agent/routeragent` | `Route`/`RouteFunc`、内置 `FirstFunc`/`IndexFunc`/`KeywordFunc`/`RandomFunc`/`LLMFunc` | 分发策略 |
 | `agent/workflowagent` | `New`/`NewDAG`/`NewDAGWithEdges`/`NewLoop` | 顺序/图/循环编排,委托 `orchestrate` |
 | `prompt` | `PromptTemplate`、`StringPrompt`、`NewPromptTemplate` | 基于 `text/template` 的提示词渲染 |
@@ -24,6 +24,7 @@
 - **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件(内置事件直接用 Emitter,应用自定义事件走 `EmitCustomData`)、在一次运行内互传临时值。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。
+- **便捷构造只做薄包装,不做第二套实现**:TaskAgent 的入门构造(身份 + 调用器 + 模型 + 系统提示词)被收进 `Quick`,但它只负责组装参数并委托 `New` —— 不复制默认值、不自行推导协议、不包装调用器、不吞掉额外选项、不新增校验或错误返回。这样默认值、协议保真与后续选项演进只有 `New` 一个事实来源,不会出现两条构造路径漂移。代价是 `Quick` 只覆盖高频入口:需要描述、具名/版本化提示词或其他 `Config` 字段时仍走 `New`。预置选项排在调用方选项之前,沿用本包「后应用者生效」的规则,因此额外能力可叠加、预置项可被显式覆盖。nil 调用器与空模型的失败时机与等价 `New` 调用完全一致(仍在首次运行时暴露)。
 - **消息模型单事实源 + 原生回放缓存**:`schema.Message` 的私有 canonical 状态(`role` + `parts`)是唯一事实源;可选 `origin` 保存未经修改的 provider native wire。同协议且未修改时直接回放 `origin`;任何 `SetText`/`SetRole`/`ReplaceParts`/`AppendPart` mutation 都立即清空它,随后由 provider codec 从 canonical 状态重新编码。
 - **provider codec 边界**:`schema` 不导入或解析 `aimodel` wire 类型。OpenAI/Anthropic 的 decode、encode、role 映射、content block 规则和 Anthropic tool-result 合并分别收敛在 `largemodel/provider/openais` 与 `provider/anthropics`。
 

@@ -93,16 +93,34 @@ model := largemodel.New(caller,
 	),
 )
 
+// Quick carries the identity, endpoint, model and system prompt an
+// entry-level agent needs anyway.
+a := taskagent.Quick("assistant", "Assistant", model, "claude-sonnet-4-5", "You are helpful.")
+```
+
+`Quick` is a shorthand for the frequent parameters, not a reduced agent: it
+delegates to `taskagent.New`, so the six lines below build exactly the same
+thing — same defaults, same protocol derived from the caller, same ReAct loop.
+
+```go
 a := taskagent.New(
-	agent.Config{ID: "assistant", Protocol: model.Protocol()},
+	agent.Config{ID: "assistant", Name: "Assistant"},
 	taskagent.WithCaller(model),
 	taskagent.WithModel("claude-sonnet-4-5"),
+	taskagent.WithSystemPrompt(prompt.StringPrompt("You are helpful.")),
 )
 ```
 
-There is no retry middleware in that chain, and no circuit breaker: a caller
-reaches its endpoint through a **router pool** inside `largemodel`, and the
-pool owns the retries, the endpoint health and the failover.
+`New + Option` stays the full construction contract — use it whenever the agent
+needs a description, a named or versioned prompt template, or any other
+`agent.Config` field. Every remaining option (tools, memory, guards, budgets,
+checkpointing) also layers onto `Quick` as trailing arguments, where a trailing
+option overrides the matching preset.
+
+There is no retry middleware in the `largemodel.New` chain above, and no
+circuit breaker: a caller reaches its endpoint through a **router pool** inside
+`largemodel`, and the pool owns the retries, the endpoint health and the
+failover.
 `WithRetryPolicy` and `WithRecoverTime` tune them:
 
 ```go
@@ -131,7 +149,9 @@ Messages are stored in the wire form of the vendor that produced them, so an
 agent's `Protocol` must match its caller's; replaying a conversation against a
 different protocol fails with `schema.ErrProtocolMismatch` rather than being
 silently converted. Runnable versions of these snippets live in
-[`largemodel/example_test.go`](largemodel/example_test.go).
+[`largemodel/example_test.go`](largemodel/example_test.go); the `Quick` and
+`New` constructions above run side by side in
+[`agent/taskagent/example_test.go`](agent/taskagent/example_test.go).
 
 ### Several endpoints behind one model
 

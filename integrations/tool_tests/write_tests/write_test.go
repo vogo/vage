@@ -82,10 +82,10 @@ func TestRegisterAndExecuteViaRegistry(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "wrote 11 bytes") {
 		t.Errorf("expected 'wrote 11 bytes' in output, got: %s", text)
 	}
@@ -143,7 +143,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 		t.Fatal("expected IsError=true for path outside allowed dirs")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "path not allowed") {
 		t.Errorf("expected 'path not allowed' in output, got: %s", text)
 	}
@@ -158,7 +158,7 @@ func TestRegisterWithAllowedDirs(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 }
 
@@ -182,7 +182,7 @@ func TestWriteCreateNewFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -217,7 +217,7 @@ func TestWriteOverwriteExistingFile(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -248,7 +248,7 @@ func TestWriteCreateParentDirectories(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -278,7 +278,7 @@ func TestWriteEmptyContent(t *testing.T) {
 	}
 
 	if result.IsError {
-		t.Fatalf("expected success, got error: %s", toolkit.ResultText(result))
+		t.Fatalf("expected success, got error: %s", result.Text())
 	}
 
 	content, err := os.ReadFile(path)
@@ -310,7 +310,7 @@ func TestWriteEmptyPath(t *testing.T) {
 		t.Fatal("expected IsError=true for empty path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must not be empty") {
 		t.Errorf("expected 'must not be empty' in output, got: %s", text)
 	}
@@ -333,7 +333,7 @@ func TestWriteRelativePath(t *testing.T) {
 		t.Fatal("expected IsError=true for relative path")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "must be absolute") {
 		t.Errorf("expected 'must be absolute' in output, got: %s", text)
 	}
@@ -355,7 +355,7 @@ func TestWriteMalformedJSON(t *testing.T) {
 		t.Fatal("expected IsError=true for malformed JSON")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "invalid arguments") {
 		t.Errorf("expected 'invalid arguments' in output, got: %s", text)
 	}
@@ -382,7 +382,7 @@ func TestWriteExceedsMaxWriteBytes(t *testing.T) {
 		t.Fatal("expected IsError=true for content exceeding max")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "exceeds maximum size") {
 		t.Errorf("expected 'exceeds maximum size' in output, got: %s", text)
 	}
@@ -409,7 +409,7 @@ func TestWriteContextCancellation(t *testing.T) {
 		t.Fatal("expected IsError=true for cancelled context")
 	}
 
-	text := toolkit.ResultText(result)
+	text := result.Text()
 	if !strings.Contains(text, "context canceled") {
 		t.Errorf("expected 'context canceled' in output, got: %s", text)
 	}
@@ -510,7 +510,7 @@ func TestWriteErrorThenSuccess(t *testing.T) {
 	}
 
 	if result2.IsError {
-		t.Fatalf("expected second write to succeed, got error: %s", toolkit.ResultText(result2))
+		t.Fatalf("expected second write to succeed, got error: %s", result2.Text())
 	}
 
 	content, err := os.ReadFile(path)

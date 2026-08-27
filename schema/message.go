@@ -477,6 +477,25 @@ type ToolResult struct {
 	IsError    bool          `json:"is_error,omitempty"`
 }
 
+// Text returns the tool result's textual content: the first content part
+// whose Type is "text", or the empty string when the result carries none.
+//
+// It reports only the first text part, even when the part is empty and later
+// parts are not, so callers see exactly what the framework sends to the model.
+// This deliberately differs from Message.Text, which concatenates every text
+// part. IsError does not change the rule. Results carrying multiple text parts
+// or non-text payloads (json, image, file) must be read from Content directly;
+// Text does not claim to be a complete textual rendering of the result.
+func (r ToolResult) Text() string {
+	for _, part := range r.Content {
+		if part.Type == "text" {
+			return part.Text
+		}
+	}
+
+	return ""
+}
+
 // TextResult creates a successful text tool result.
 func TextResult(toolCallID, text string) ToolResult {
 	return ToolResult{
