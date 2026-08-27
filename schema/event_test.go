@@ -18,6 +18,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -92,6 +93,46 @@ func TestEventData_SealedInterface(t *testing.T) {
 	var _ EventData = SkillActivateData{}
 	var _ EventData = SkillDeactivateData{}
 	var _ EventData = SkillResourceLoadData{}
+	var _ EventData = CustomEventData{}
+}
+
+// TestCustomEventData_WireShape pins the wire contract consumers dispatch on:
+// a fixed "custom" top-level type plus a name/payload data object. Payload
+// must survive the round trip untouched — the framework normalizes nothing.
+func TestCustomEventData_WireShape(t *testing.T) {
+	e := NewEvent(EventCustom, "", "sess-1", CustomEventData{
+		Name:    "document.parse.progress",
+		Payload: map[string]any{"page": 3, "of": 10},
+	})
+
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded struct {
+		Type string `json:"type"`
+		Data struct {
+			Name    string         `json:"name"`
+			Payload map[string]any `json:"payload"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Type != "custom" {
+		t.Errorf("type = %q, want %q", decoded.Type, "custom")
+	}
+	if decoded.Data.Name != "document.parse.progress" {
+		t.Errorf("data.name = %q, want %q", decoded.Data.Name, "document.parse.progress")
+	}
+	if got := decoded.Data.Payload["page"]; got != float64(3) {
+		t.Errorf("data.payload.page = %v, want 3", got)
+	}
+	if got := decoded.Data.Payload["of"]; got != float64(10) {
+		t.Errorf("data.payload.of = %v, want 10", got)
+	}
 }
 
 func TestPhaseEndData_NewFields(t *testing.T) {

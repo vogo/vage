@@ -194,6 +194,47 @@ and there is no compare-and-swap or ordering guarantee. Nothing here is
 persisted or checkpointed — use `memory` or `workspace` for state that must
 outlive the run.
 
+## Reporting Progress From Inside a Tool
+
+A tool that runs for a while can push its own events onto the active stream
+with `schema.EmitCustomData`, so the caller sees progress before the tool
+returns:
+
+```go
+_ = reg.Register(schema.ToolDef{Name: "ingest"},
+	func(ctx context.Context, _, _ string) (schema.ToolResult, error) {
+		for i, stage := range []string{"fetch", "parse", "index"} {
+			schema.EmitCustomData(ctx, "ingest.progress", map[string]any{
+				"stage": stage,
+				"step":  i + 1,
+			})
+		}
+		return schema.TextResult("", "ok"), nil
+	},
+)
+```
+
+Consumers receive these on `RunStream` as `schema.EventCustom` with a
+`schema.CustomEventData{Name, Payload}` body, between that tool call's
+`tool_call_start` and `tool_call_end`:
+
+```go
+if e.Type == schema.EventCustom {
+	d := e.Data.(schema.CustomEventData)
+	if d.Name == "ingest.progress" {
+		// interpret d.Payload
+	}
+}
+```
+
+The top-level event type is always `custom`, so dispatch on the type *and* the
+name — `EventData` stays sealed and applications cannot add event types. Use a
+stable, namespaced name and a JSON-serializable payload with no credentials in
+it: neither is validated, and the payload is stored as given, not copied. The
+call is best-effort and returns nothing — with no emitter bound to the context
+it is a silent no-op, and a closing stream simply drops the event — so treat
+custom events as observability, never as the only trigger for a state change.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

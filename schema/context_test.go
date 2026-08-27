@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestWithSessionID_Empty(t *testing.T) {
@@ -77,6 +78,100 @@ func TestMissingValues_ReturnZero(t *testing.T) {
 	}
 	if got := EmitterFromContext(ctx); got != nil {
 		t.Fatalf("expected nil emitter for bare ctx")
+	}
+}
+
+// TestEmitCustomData_EmitsOnce covers the happy path: exactly one EventCustom,
+// typed CustomEventData, SessionID inherited from ctx and AgentID left empty
+// (the context carries no agent identity to synthesize it from).
+func TestEmitCustomData_EmitsOnce(t *testing.T) {
+	var got []Event
+	ctx := WithEmitter(
+		WithSessionID(context.Background(), "sess-custom"),
+		func(e Event) error {
+			got = append(got, e)
+			return nil
+		},
+	)
+
+	before := time.Now()
+	payload := map[string]any{"stage": "parse", "pct": 40}
+	EmitCustomData(ctx, "document.parse.progress", payload)
+	after := time.Now()
+
+	if len(got) != 1 {
+		t.Fatalf("emitted %d events, want exactly 1", len(got))
+	}
+	e := got[0]
+	if e.Type != EventCustom {
+		t.Errorf("Type = %q, want %q", e.Type, EventCustom)
+	}
+	if e.SessionID != "sess-custom" {
+		t.Errorf("SessionID = %q, want %q", e.SessionID, "sess-custom")
+	}
+	if e.AgentID != "" {
+		t.Errorf("AgentID = %q, want empty", e.AgentID)
+	}
+	if e.Timestamp.Before(before) || e.Timestamp.After(after) {
+		t.Errorf("Timestamp %v not in range [%v, %v]", e.Timestamp, before, after)
+	}
+
+	data, ok := e.Data.(CustomEventData)
+	if !ok {
+		t.Fatalf("Data type = %T, want CustomEventData", e.Data)
+	}
+	if data.Name != "document.parse.progress" {
+		t.Errorf("Name = %q, want %q", data.Name, "document.parse.progress")
+	}
+	m, ok := data.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("Payload type = %T, want map[string]any", data.Payload)
+	}
+	if m["stage"] != "parse" || m["pct"] != 40 {
+		t.Errorf("Payload = %v, want stage=parse pct=40", m)
+	}
+}
+
+// TestEmitCustomData_NoEmitter pins the documented no-op: a tool calling this
+// under an executor that never bound an emitter must not panic or error, so
+// the same handler stays reusable outside a streaming agent.
+func TestEmitCustomData_NoEmitter(t *testing.T) {
+	EmitCustomData(context.Background(), "some.name", "payload")
+}
+
+// TestEmitCustomData_EmitterError asserts the emitter's error is swallowed:
+// a closing or cancelled stream drops the auxiliary event instead of
+// surfacing anything into the tool's hot path.
+func TestEmitCustomData_EmitterError(t *testing.T) {
+	calls := 0
+	ctx := WithEmitter(context.Background(), func(Event) error {
+		calls++
+		return fmt.Errorf("stream closed")
+	})
+
+	EmitCustomData(ctx, "some.name", nil)
+
+	if calls != 1 {
+		t.Fatalf("emitter called %d times, want 1", calls)
+	}
+}
+
+// TestEmitCustomData_NoSessionID documents that SessionID is inherited, not
+// required — an emitter without WithSessionID still receives the event.
+func TestEmitCustomData_NoSessionID(t *testing.T) {
+	var got Event
+	ctx := WithEmitter(context.Background(), func(e Event) error {
+		got = e
+		return nil
+	})
+
+	EmitCustomData(ctx, "n", 1)
+
+	if got.Type != EventCustom {
+		t.Fatalf("Type = %q, want %q", got.Type, EventCustom)
+	}
+	if got.SessionID != "" {
+		t.Errorf("SessionID = %q, want empty", got.SessionID)
 	}
 }
 
@@ -171,7 +266,7 @@ func TestRunValues_Concurrent(t *testing.T) {
 
 	wg.Add(workers)
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		go func(i int) {
 			defer wg.Done()
 
@@ -184,7 +279,7 @@ func TestRunValues_Concurrent(t *testing.T) {
 
 	wg.Wait()
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		v, ok := GetRunValue(ctx, fmt.Sprintf("k-%d", i))
 		if !ok || v != i {
 			t.Fatalf("k-%d = %v (ok=%v), want %d", i, v, ok, i)
