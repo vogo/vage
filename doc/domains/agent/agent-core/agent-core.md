@@ -66,7 +66,7 @@
 | Agent Run 层 | `agent.Middleware`(+`MiddlewareFunc`/`ChainMiddleware`,装配入口 `taskagent.WithMiddleware`) | 装饰整次 ReAct 执行;可短路、可改写/替换终态响应;同步与流式共用同一条链 | 不做单次模型调用治理,不做逐事件变换 |
 | Agent 事件层 | `hook.Hook` / `hook.AsyncHook`、`agent.StreamMiddleware` | Hook 只读观察生命周期事件;StreamMiddleware 拦截/变换/丢弃发往流消费者的事件 | 不改变运行结果,不能短路 |
 | 模型调用层 | `largemodel.Middleware` | 包裹每轮 `Caller.Call`/`CallStream`:缓存、限流、超时、日志、指标 | retry / failover 只属于 `largemodel/router` 端点池 |
-| 工具执行层 | 工具 Registry 执行中间件(独立能力,本领域不实现) | 工具调用前后的拦截 | — |
+| 工具执行层 | `tool.ExecuteMiddleware`(+`WithExecuteMiddleware`,见 [tooling](../../capability/tooling/tooling.md)) | 工具调用前后的拦截、短路与结果/错误改写;覆盖本地/外部/分派错误 | 不装饰整次 Agent Run,不变换流事件,不包裹模型调用 |
 
 执行语义:
 
@@ -81,7 +81,7 @@
 - **只处理流式事件**(增量文本改写、事件丢弃)→ `StreamMiddleware`。既有用法无需迁移。
 - **单次模型调用治理**(缓存、限流、超时、日志、指标)→ `largemodel.Middleware`;重试与故障转移留在端点池,不得在 Agent 中间件重复实现。
 - **整次运行的审计、短路、合成应答、终态改写,且要同步/流式同链** → `agent.Middleware`。需要把 Hook 中「改变运行结果」的逻辑迁到这里;事件采集可留在 Hook。
-- **工具调用前后拦截** → 工具 Registry 执行中间件(另行提供)。
+- **工具调用前后拦截** → `tool.WithExecuteMiddleware`(见 [tooling](../../capability/tooling/tooling.md))。
 
 ## 状态与转换
 

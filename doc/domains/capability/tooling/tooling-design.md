@@ -7,7 +7,8 @@
 | 包/关键类型 | 设计角色 |
 |-------------|----------|
 | `tool`(`Registry`/`ToolRegistry`/`ToolExecutor`/`ExternalToolCaller`) | 工具注册与执行契约 |
-| `tool`(`TruncatingToolRegistry`) | 过大输出截断治理(token 级) |
+| `tool`(`ExecuteMiddleware`/`WithExecuteMiddleware`) | Registry 执行链装饰:审计、权限、结果/错误改写 |
+| `tool`(`TruncatingToolRegistry`) | 过大输出截断治理(token 级);位于 Registry 中间件之外 |
 | `tool`(`TruncateUTF8`) | 字节级 UTF-8 安全截断的统一入口 |
 | `schema`(`ToolResult.Text`) | 工具结果取文本的唯一推荐入口(契约层,见 [agent-core](../../agent/agent-core/agent-core.md)) |
 | `tool`(`ResourceTracker`/`ResourceRef`) | 工具资源语义,供上下文编辑与编排限流 |
@@ -24,6 +25,8 @@
 ## 关键设计决策
 
 - **注册表作为唯一工具入口**:Agent 只认 `ToolRegistry` 接口,三种来源(本地/MCP/agent-as-tool)对 Agent 无差别。
+- **执行中间件包裹完整分派,而非逐 handler 装饰**:`ExecuteMiddleware` 以 `func(next ToolHandler) ToolHandler` 装饰 `Registry.Execute` 的查找+执行路径,因此同一条策略覆盖本地、MCP、agent-as-tool,也能审计被拒绝或无法路由的尝试。第一个注册者最外层(`A.before → B.before → dispatch → B.after → A.after`);`nil` 跳过;链在 `NewRegistry` 后固定,分派仍每次读取当下注册表状态。`TruncatingToolRegistry` 仍是外层结果治理:Registry 中间件完成后再截断。不向 `ToolExecutor`/`ToolRegistry` 接口加方法。
+- **并发与绕过责任在实现者**:并发 `Execute` 共享同一组中间件实例,可变状态须自保安全;锁只用于取得分派快照。直接调用某个 `ToolHandler` 绕过中间件 —— 需要强制策略时须在统一构造 Registry 时配置。中间件可见原始参数与结果,审计不得无差别记录敏感载荷。
 - **内建工具刻意收窄参数面**:多数文件/状态工具做严格校验、不接受任意路径,把危险操作面缩到最小(纵深防御,配合 bash 进程隔离)。
 - **资源语义显式化**:工具通过 `ResourceTracker` 声明读/写资源,使上下文编辑能识别"后写作废前读",使编排能按资源标签限流 —— 一处声明,多处复用。
 - **MCP 边界是攻击面**:client/server 两端都内置 `ScanEvent` 凭证扫描,与 `security`(credscrub)协作,防止第三方 I/O 泄露凭证。
@@ -46,6 +49,6 @@
 
 ## 非功能考量
 
-- **安全**:bash 进程隔离;文件工具路径校验集中在 `toolkit`;MCP I/O 脱敏。
+- **安全**:bash 进程隔离;文件工具路径校验集中在 `toolkit`;MCP I/O 脱敏;执行中间件是可选策略接缝而非自动安全边界。
 - **上下文治理**:截断注册表防止单个工具输出撑爆提示;通用字节截断与之分工明确,不承担 token 预算职责。
-- **可扩展**:新增工具 = 实现执行契约并注册;新增技能 = 提供符合标准的技能包。
+- **可扩展**:新增工具 = 实现执行契约并注册;新增技能 = 提供符合标准的技能包;横切策略 = `WithExecuteMiddleware`。

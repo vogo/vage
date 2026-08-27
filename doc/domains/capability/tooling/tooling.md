@@ -23,6 +23,7 @@
 ## 核心实体(概念层)
 
 - **ToolRegistry(工具注册表)**:工具的注册与按名查找/执行入口。有截断变体,对过大工具输出做治理。
+- **ExecuteMiddleware(工具执行中间件)**:Registry 级装饰器,包裹完整分派(本地 handler / 外部 caller / 注册表自身错误)。是工具调用级横切策略(审计、权限阻断、结果/错误改写)的入口;不合并 Agent / Stream / 模型中间件。
 - **结果取值与截断助手**:工具结果取文本(`ToolResult.Text`)与字节级 UTF-8 截断(`TruncateUTF8`)是框架自带的通用能力,与"多大算大"的治理策略分开;前者只解释数据,后者才是策略。
 - **工具三来源**:本地函数、MCP 远程、agent-as-tool(把一个 Agent 当工具)。
 - **ResourceTracker(资源追踪)**:工具声明其读/写的资源(如文件),供上下文编辑判定 stale_resource、供编排做资源限流。
@@ -41,6 +42,7 @@
 | TOOL-5 | **技能只注入不实现**:技能向 Agent 注入提示、筛选可用工具集,不承载工具执行逻辑。 |
 | TOOL-6 | **agent-as-tool 隔离**:子代理通过 `sessionview` 只读快照运行,scratch 隔离(见 [session](../../memory/session/session.md) SES-6)。 |
 | TOOL-7 | **取文本与截断走框架入口**:"从工具结果取文本"与"按字节安全截断"是通用能力,只有一个推荐入口(`schema.ToolResult.Text` / `tool.TruncateUTF8`),调用方不再自建重复助手。字节上限与 token 预算是两件事,不可互换(详见 [tooling-design](tooling-design.md))。 |
+| TOOL-8 | **执行中间件包裹完整分派**:`WithExecuteMiddleware` 装饰 `Registry.Execute` 的整段查找与执行;本地、外部与"未找到/无 handler"等分派错误都在链内可观察可改写。第一个注册者最外层;nil 跳过;链在构造时固定。并发 `Execute` 共享同一组中间件实例,有状态实现须自保并发安全。直接调用某个 `ToolHandler` 会绕过该链。 |
 
 ## 状态与转换
 

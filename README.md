@@ -14,6 +14,7 @@ A Go framework for building LLM-based intelligent agent systems.
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
 - **Agent Middleware** — One decorator chain shared by sync and streaming runs: short-circuit, audit, or rewrite the final response once per run (hooks stay read-only, stream middleware stays event-level)
 - **LLM Middleware** — Decorator chain: logging, rate limiting, timeout, cache, metrics (retries and endpoint health live in the caller's router pool)
+- **Tool Execute Middleware** — Registry-level decorator around each tool dispatch: audit, deny, or rewrite results/errors for local, MCP, and agent-as-tool calls
 - **Tool System** — Local functions, MCP remote tools, agent-as-tool, built-in bash tool with process isolation
 - **Agent Skills** — Compatible with the [Agent Skills](https://agentskills.io) open standard
 - **MCP Protocol** — Client (consume external tools) and server (expose agent capabilities)
@@ -220,10 +221,50 @@ with `taskagent.ErrNilMiddlewareResponse`.
 Decide between the neighbouring seams by layer: `hook.Hook` observes events
 (read-only), `agent.StreamMiddleware` transforms events on their way to a
 stream consumer (streaming only), `largemodel.Middleware` wraps a single model
-call (caching, rate limiting, timeouts), and Agent Middleware is the one
-run-level control point that both entry points share. Existing Hook and
-StreamMiddleware users do not need to migrate; move logic that changes a run's
-outcome to Agent Middleware instead.
+call (caching, rate limiting, timeouts), `tool.ExecuteMiddleware` wraps one
+tool dispatch, and Agent Middleware is the one run-level control point that
+both entry points share. Existing Hook and StreamMiddleware users do not need
+to migrate; move logic that changes a run's outcome to Agent Middleware instead.
+
+## Tool Execute Middleware (Audit and Redaction)
+
+`tool.WithExecuteMiddleware` wraps every `Registry.Execute` — local handlers,
+external (MCP) callers, and registry dispatch errors — in one onion chain.
+First registered is outermost. It does not replace Agent, stream, or model
+middleware; put policies that must hold for a single tool call here.
+
+Audit without logging raw arguments, then redact result text before it returns
+to the model:
+
+```go
+audit := tool.ExecuteMiddleware(func(next tool.ToolHandler) tool.ToolHandler {
+	return func(ctx context.Context, name, args string) (schema.ToolResult, error) {
+		// Log tool name and arg length only — never the raw payload.
+		slog.Info("tool.execute", "tool", name, "args_bytes", len(args))
+		result, err := next(ctx, name, args)
+		slog.Info("tool.execute.done", "tool", name, "err", err != nil)
+		return result, err
+	}
+})
+
+redact := tool.ExecuteMiddleware(func(next tool.ToolHandler) tool.ToolHandler {
+	return func(ctx context.Context, name, args string) (schema.ToolResult, error) {
+		result, err := next(ctx, name, args)
+		if err != nil {
+			return result, err
+		}
+		text := result.Text()
+		// Caller-owned redaction: strip secrets from returned content.
+		safe := strings.ReplaceAll(text, "SECRET", "[REDACTED]")
+		return schema.TextResult(result.ToolCallID, safe), nil
+	}
+})
+
+reg := tool.NewRegistry(tool.WithExecuteMiddleware(audit, redact))
+```
+
+No middleware keeps today’s `Execute` behaviour. Direct `ToolHandler` calls
+bypass the chain — configure middleware when you construct the shared Registry.
 
 ## Returning a Tool Result as the Final Answer
 
