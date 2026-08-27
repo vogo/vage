@@ -31,12 +31,12 @@ import (
 // keeping the schema and the argument decoding contract in one place.
 //
 // Parameters is a JSON object schema inferred from T's exported fields: names
-// follow json tags, fields without omitempty are required, and
-// jsonschema_description tags become property descriptions. Scalars, structs,
-// slices/arrays and string-keyed maps map recursively; pointer fields keep
-// their element type and also allow null. The returned handler is bound to
-// name and fn: it decodes args into a fresh T per call and forwards the
-// original context and decoded value to fn.
+// follow json tags, fields without omitempty are required, and descriptions
+// come from the jsonschema_description tag (falling back to description).
+// Scalars, structs, slices/arrays and string-keyed maps map recursively;
+// pointer fields keep their element type and also allow null. The returned
+// handler is bound to name and fn: it decodes args into a fresh T per call and
+// forwards the original context and decoded value to fn.
 //
 // Types whose JSON shape cannot be derived — non-struct roots, non-string map
 // keys, interfaces, recursive types, custom JSON marshaling — panic at
@@ -177,7 +177,12 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 		}
 
 		node := b.typeSchema(fp, sf.Type)
-		if desc := sf.Tag.Get("jsonschema_description"); desc != "" {
+		// Prefer jsonschema_description, falling back to description.
+		desc := sf.Tag.Get("jsonschema_description")
+		if desc == "" {
+			desc = sf.Tag.Get("description")
+		}
+		if desc != "" {
 			pm, ok := node.(map[string]any)
 			if !ok {
 				pm = map[string]any{"type": node}

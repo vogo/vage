@@ -102,6 +102,30 @@ func TestInfer_BuildsObjectSchema(t *testing.T) {
 	}
 }
 
+// TestInfer_DescriptionTagFallback asserts descriptions come from
+// jsonschema_description, falling back to the plain description tag.
+func TestInfer_DescriptionTagFallback(t *testing.T) {
+	type args struct {
+		FromDesc     string `json:"from_desc" description:"from description tag"`
+		PreferSchema string `json:"prefer_schema" jsonschema_description:"from jsonschema_description" description:"from description tag"`
+		None         string `json:"none"`
+	}
+	def, _ := tool.Infer("x", "", func(context.Context, args) (schema.ToolResult, error) {
+		return schema.ToolResult{}, nil
+	})
+	props := def.Parameters.(map[string]any)["properties"].(map[string]any)
+
+	if got := props["from_desc"].(map[string]any)["description"]; got != "from description tag" {
+		t.Errorf("description tag fallback = %v, want %q", got, "from description tag")
+	}
+	if got := props["prefer_schema"].(map[string]any)["description"]; got != "from jsonschema_description" {
+		t.Errorf("jsonschema_description must win over description, got %v", got)
+	}
+	if _, ok := props["none"].(map[string]any)["description"]; ok {
+		t.Error("no description expected without a description tag")
+	}
+}
+
 func TestInfer_FlattensEmbeddedStructs(t *testing.T) {
 	t.Run("unnamed embedded struct is flattened", func(t *testing.T) {
 		type embedded struct {
