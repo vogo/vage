@@ -19,6 +19,8 @@ package schema
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -75,5 +77,122 @@ func TestMissingValues_ReturnZero(t *testing.T) {
 	}
 	if got := EmitterFromContext(ctx); got != nil {
 		t.Fatalf("expected nil emitter for bare ctx")
+	}
+}
+
+func TestRunValues_SetGetRoundTrip(t *testing.T) {
+	ctx := WithRunValues(context.Background())
+
+	if !SetRunValue(ctx, "k", 42) {
+		t.Fatalf("SetRunValue must report true when a store is bound")
+	}
+
+	v, ok := GetRunValue(ctx, "k")
+	if !ok {
+		t.Fatalf("expected key %q to be present", "k")
+	}
+	if v != 42 {
+		t.Fatalf("value = %v, want 42", v)
+	}
+}
+
+func TestRunValues_Overwrite(t *testing.T) {
+	ctx := WithRunValues(context.Background())
+
+	SetRunValue(ctx, "k", "first")
+	if !SetRunValue(ctx, "k", "second") {
+		t.Fatalf("overwrite must report true")
+	}
+
+	v, ok := GetRunValue(ctx, "k")
+	if !ok || v != "second" {
+		t.Fatalf("value = %v (ok=%v), want %q", v, ok, "second")
+	}
+}
+
+func TestRunValues_MissingKey(t *testing.T) {
+	ctx := WithRunValues(context.Background())
+	SetRunValue(ctx, "present", 1)
+
+	v, ok := GetRunValue(ctx, "absent")
+	if ok {
+		t.Fatalf("expected absent key to report ok=false")
+	}
+	if v != nil {
+		t.Fatalf("expected nil value for absent key, got %v", v)
+	}
+}
+
+// TestRunValues_NoStore pins the no-op/miss semantics chosen over panic or
+// error, so a tool written for TaskAgent stays usable under an executor that
+// binds no run values.
+func TestRunValues_NoStore(t *testing.T) {
+	ctx := context.Background()
+
+	if SetRunValue(ctx, "k", 1) {
+		t.Fatalf("SetRunValue on a bare ctx must report false")
+	}
+
+	v, ok := GetRunValue(ctx, "k")
+	if ok {
+		t.Fatalf("GetRunValue on a bare ctx must report false")
+	}
+	if v != nil {
+		t.Fatalf("GetRunValue on a bare ctx must return nil, got %v", v)
+	}
+}
+
+// TestRunValues_ShadowsParentStore covers the run-boundary rule: a nested run
+// binding its own store must neither see nor corrupt the parent's values.
+func TestRunValues_ShadowsParentStore(t *testing.T) {
+	parent := WithRunValues(context.Background())
+	SetRunValue(parent, "k", "parent")
+
+	child := WithRunValues(parent)
+	if _, ok := GetRunValue(child, "k"); ok {
+		t.Fatalf("a freshly bound store must start empty")
+	}
+
+	SetRunValue(child, "k", "child")
+
+	if v, _ := GetRunValue(parent, "k"); v != "parent" {
+		t.Fatalf("parent value = %v, want %q", v, "parent")
+	}
+}
+
+// TestRunValues_Concurrent exercises the parallel-tool access pattern; run
+// under -race it guards the sync.Map contract.
+func TestRunValues_Concurrent(t *testing.T) {
+	ctx := WithRunValues(context.Background())
+
+	const workers = 16
+
+	var wg sync.WaitGroup
+
+	wg.Add(workers)
+
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			SetRunValue(ctx, fmt.Sprintf("k-%d", i), i)
+			SetRunValue(ctx, "shared", i)
+			_, _ = GetRunValue(ctx, "shared")
+			_, _ = GetRunValue(ctx, fmt.Sprintf("k-%d", (i+1)%workers))
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := 0; i < workers; i++ {
+		v, ok := GetRunValue(ctx, fmt.Sprintf("k-%d", i))
+		if !ok || v != i {
+			t.Fatalf("k-%d = %v (ok=%v), want %d", i, v, ok, i)
+		}
+	}
+
+	// The shared key has no promised winner — only presence is contractual.
+	if _, ok := GetRunValue(ctx, "shared"); !ok {
+		t.Fatalf("expected the contended key to be present")
 	}
 }
