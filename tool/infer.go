@@ -27,36 +27,23 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// Infer derives a schema.ToolDef and a ToolHandler from a parameter struct T,
-// keeping the JSON Schema and the argument decoding contract in one place.
+// Infer derives a schema.ToolDef and ToolHandler from a parameter struct T,
+// keeping the schema and the argument decoding contract in one place.
 //
-// The returned ToolDef carries the given name and description, marks itself as a
-// local tool, and carries a JSON object schema inferred from T's exported
-// fields; it can be registered through the existing Registry.Register (or
-// RegisterIfAbsent), and any existing ToolDef metadata such as ReadOnly can be
-// filled in before registration. The returned handler is bound to name and fn:
-// it ignores the name passed at dispatch, decodes args into a fresh T per call,
-// and forwards the original context and decoded value to fn.
+// Parameters is a JSON object schema inferred from T's exported fields: names
+// follow json tags, fields without omitempty are required, and
+// jsonschema_description tags become property descriptions. Scalars, structs,
+// slices/arrays and string-keyed maps map recursively; pointer fields keep
+// their element type and also allow null. The returned handler is bound to
+// name and fn: it decodes args into a fresh T per call and forwards the
+// original context and decoded value to fn.
 //
-// # Schema inference rules
+// Types whose JSON shape cannot be derived — non-struct roots, non-string map
+// keys, interfaces, recursive types, custom JSON marshaling — panic at
+// construction with the tool name and offending type.
 //
-// Only fields visible to encoding/json participate: field names follow the
-// json tag (falling back to the Go field name), json:"-" and unexported fields
-// are excluded, and fields without omitempty are listed in the schema's
-// required array while fields with omitempty stay optional. A jsonschema_description
-// tag on a field is written into that property's description. Scalars, structs,
-// slices/arrays, and string-keyed maps map recursively to the corresponding JSON
-// Schema types; pointer fields keep their element type and additionally allow
-// null. Anonymous struct fields are flattened exactly as encoding/json promotes
-// them, with directly declared fields taking precedence over promoted ones.
-//
-// Types whose JSON shape cannot be derived — non-struct root types, non-string
-// map keys, interfaces, recursive types, and types with custom JSON marshaling —
-// panic at construction with the tool name and offending type, rather than
-// emitting a schema that would disagree with the real decoding behavior.
-//
-// Infer is purely additive: hand-written ToolDef/ToolHandler pairs, the
-// Registry, and existing tools are unaffected.
+// Infer is purely additive: existing hand-written ToolDef/ToolHandler pairs,
+// the Registry, and existing tools are unaffected.
 func Infer[T any](name, desc string, fn func(context.Context, T) (schema.ToolResult, error)) (schema.ToolDef, ToolHandler) {
 	if fn == nil {
 		panic(fmt.Sprintf("tool %q: Infer requires a non-nil handler function", name))
@@ -92,9 +79,8 @@ var (
 	jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 )
 
-// implementsCustomJSON reports whether the value or its pointer type declares
-// custom JSON marshaling, in which case encoding/json does not walk the struct
-// fields and no schema can be inferred from them.
+// implementsCustomJSON reports whether t or *t has custom JSON marshaling;
+// encoding/json then bypasses field walking, so no schema can be inferred.
 func implementsCustomJSON(t reflect.Type) bool {
 	return t.Implements(jsonMarshalerType) ||
 		reflect.PointerTo(t).Implements(jsonMarshalerType) ||
@@ -102,16 +88,15 @@ func implementsCustomJSON(t reflect.Type) bool {
 		reflect.PointerTo(t).Implements(jsonUnmarshalerType)
 }
 
-// fieldSpec is one JSON-visible struct field mapped to a JSON Schema property.
+// fieldSpec is one JSON-visible field mapped to a schema property.
 type fieldSpec struct {
 	name     string
 	schema   any
 	required bool
 }
 
-// schemaBuilder reflects a parameter struct into a JSON Schema node. It carries
-// the tool name (used in panic messages) and the set of struct types currently
-// being expanded, which detects recursive types such as []*Node.
+// schemaBuilder reflects a struct into a JSON schema. It carries the tool name
+// for panic messages and a visiting set that detects recursive types.
 type schemaBuilder struct {
 	name     string
 	visiting map[reflect.Type]bool
@@ -129,9 +114,7 @@ func (b *schemaBuilder) structSchema(t reflect.Type) any {
 	required := []string{}
 	for _, f := range b.fields(t, "") {
 		if _, exists := properties[f.name]; exists {
-			// Direct fields precede promoted embedded fields in the list, so
-			// the first occurrence wins: direct over promoted, and the
-			// shallower embedded field over a deeper one.
+			// Direct fields precede promoted ones, so the first wins.
 			continue
 		}
 		properties[f.name] = f.schema
@@ -151,18 +134,14 @@ func (b *schemaBuilder) structSchema(t reflect.Type) any {
 	return node
 }
 
-// fields returns the JSON-visible fields of a struct in precedence order:
-// directly declared fields first, then fields promoted from anonymous embedded
-// structs. fieldSpec.name is the JSON name used during encoding/json decode.
-// path is the dotted field path used in panic messages.
+// fields returns JSON-visible fields in precedence order: direct fields first,
+// then fields promoted from anonymous embedded structs. path is for panics.
 func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 	var direct, promoted []fieldSpec
 
 	for sf := range t.Fields() {
-		// Like encoding/json, anonymous embedded struct fields (and pointers to
-		// them) participate even when the embedded type name is unexported,
-		// because their exported sub-fields are promoted; every other unexported
-		// field is invisible to JSON.
+		// Anonymous embedded structs (even with an unexported type name) are
+		// flattened by encoding/json; other unexported fields are invisible.
 		et := sf.Type
 		if et.Kind() == reflect.Pointer {
 			et = et.Elem()
@@ -183,8 +162,7 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 			fp = path + "." + sf.Name
 		}
 
-		// Flatten anonymous embedded structs (and pointers to them) that have
-		// no explicit json name and no custom marshaling, matching encoding/json.
+		// Flatten unnamed anonymous structs like encoding/json.
 		if sf.Anonymous {
 			if jsonName == "" && !implementsCustomJSON(sf.Type) && et.Kind() == reflect.Struct {
 				promoted = append(promoted, b.fields(et, fp)...)
@@ -218,8 +196,7 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 	return append(direct, promoted...)
 }
 
-// typeSchema maps a Go type to a JSON Schema node. path is the dotted field
-// path used in panic messages so failures name the offending field.
+// typeSchema maps a Go type to a JSON schema node.
 func (b *schemaBuilder) typeSchema(path string, t reflect.Type) any {
 	if implementsCustomJSON(t) {
 		panic(fmt.Sprintf("tool %q: field %q: unsupported type %v: custom JSON marshaling cannot be inferred", b.name, path, t))
@@ -260,9 +237,8 @@ type jsonTagOpts struct {
 	omitempty bool
 }
 
-// parseJSONTag extracts the JSON name and options from a field's json tag.
-// skip is true for fields excluded from JSON (json:"-"). An empty name with
-// skip false means the tag gave no explicit name and the Go field name applies.
+// parseJSONTag extracts the JSON name and options from a field's json tag;
+// skip marks fields excluded via json:"-".
 func parseJSONTag(sf reflect.StructField) (name string, skip bool, opts jsonTagOpts) {
 	tag := sf.Tag.Get("json")
 	if tag == "-" {
@@ -278,8 +254,8 @@ func parseJSONTag(sf reflect.StructField) (name string, skip bool, opts jsonTagO
 	return name, false, opts
 }
 
-// makeNullable marks a schema node as also accepting null, the JSON encoding of
-// a nil pointer. Pointers collapse to a single null level, matching encoding/json.
+// makeNullable marks a node as also accepting null (a nil pointer). Pointer
+// nesting collapses to one null level, matching encoding/json.
 func makeNullable(node any) any {
 	m, ok := node.(map[string]any)
 	if !ok {

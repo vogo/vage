@@ -25,13 +25,9 @@ import (
 	"github.com/vogo/vage/tool"
 )
 
-// ExampleInfer shows the full "define a parameter struct -> call Infer ->
-// register through the existing Registry" flow. The inferred tool lives side by
-// side with a hand-written tool in the same registry.
+// ExampleInfer shows the struct -> Infer -> Register flow, with the inferred
+// tool coexisting alongside a hand-written one in the same registry.
 func ExampleInfer() {
-	// The parameter struct is the single source of truth: field names come from
-	// the json tags, fields without omitempty are required, and
-	// jsonschema_description becomes the property description.
 	type grepArgs struct {
 		Pattern string `json:"pattern" jsonschema_description:"Regular expression to search for"`
 		Path    string `json:"path,omitempty"`
@@ -42,7 +38,6 @@ func ExampleInfer() {
 			return schema.TextResult("", fmt.Sprintf("search %q under %q", a.Pattern, a.Path)), nil
 		})
 
-	// A hand-written tool, registered in the same registry as the inferred one.
 	manualDef := schema.ToolDef{
 		Name:        "ping",
 		Description: "respond with pong",

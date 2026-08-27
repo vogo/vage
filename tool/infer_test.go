@@ -51,10 +51,8 @@ type inferArgs struct {
 	Pointer *inferInner       `json:"pointer,omitempty"`
 }
 
-// TestInfer_BuildsObjectSchema asserts the reflected schema matches the rules:
-// object root with additionalProperties:false, json-tag names, required only for
-// non-omitempty fields, jsonschema_description written through, and recursive
-// mapping for nested structs, slices, maps, and nullable pointers.
+// TestInfer_BuildsObjectSchema asserts the reflected schema matches the
+// inference rules for tags, required, descriptions, and nested types.
 func TestInfer_BuildsObjectSchema(t *testing.T) {
 	noop := func(context.Context, inferArgs) (schema.ToolResult, error) { return schema.ToolResult{}, nil }
 	def, _ := tool.Infer("weather", "look up weather", noop)
@@ -98,8 +96,7 @@ func TestInfer_BuildsObjectSchema(t *testing.T) {
 		t.Errorf("Parameters mismatch:\n got: %#v\nwant: %#v", def.Parameters, want)
 	}
 
-	// The schema must survive JSON serialization (the OpenAI/Anthropic/MCP
-	// adapters pass Parameters through as raw JSON).
+	// Must survive JSON serialization (the adapters pass Parameters through).
 	if _, err := json.Marshal(def.Parameters); err != nil {
 		t.Errorf("json.Marshal(Parameters) error: %v", err)
 	}
@@ -201,7 +198,7 @@ func TestInfer_HandlerSuccess(t *testing.T) {
 		t.Errorf("def.Name = %q, want %q", def.Name, "echo")
 	}
 
-	// The name passed at dispatch is ignored; the handler stays bound to "echo".
+	// The name passed at dispatch is ignored.
 	res, err := handler(wantCtx, "some-other-name", `{"city":"Paris","count":3,"units":"metric"}`)
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -233,9 +230,7 @@ func TestInfer_HandlerReturnsFnErrorUnchanged(t *testing.T) {
 	}
 }
 
-// TestInfer_HandlerInvalidArguments guards the decode contract: fn must not run,
-// the result must stay zero, and the error must carry the fixed tool-name
-// context plus the underlying json error on the chain.
+// TestInfer_HandlerInvalidArguments guards the decode-failure contract.
 func TestInfer_HandlerInvalidArguments(t *testing.T) {
 	ran := false
 	_, handler := tool.Infer("echo", "", func(context.Context, inferArgs) (schema.ToolResult, error) {
@@ -314,7 +309,7 @@ func TestInfer_CoexistsWithHandWrittenTools(t *testing.T) {
 	}
 }
 
-// requirePanic runs f and asserts it panics with a message containing wantSub.
+// requirePanic asserts f panics with a message containing wantSub.
 func requirePanic(t *testing.T, wantSub string, f func()) {
 	t.Helper()
 	defer func() {
@@ -403,16 +398,14 @@ func TestInfer_PanicsOnUnsupportedFieldType(t *testing.T) {
 	})
 }
 
-// marshalRoot is a struct with a custom MarshalJSON method; its JSON shape
-// cannot be inferred from its fields.
+// marshalRoot has a custom MarshalJSON, so its JSON shape is opaque.
 type marshalRoot struct {
 	X int `json:"x"`
 }
 
 func (marshalRoot) MarshalJSON() ([]byte, error) { return []byte("1"), nil }
 
-// noopFn returns a handler that does nothing; used to exercise construction
-// panics without paying attention to the result.
+// noopFn returns a handler that does nothing, for construction-panic tests.
 func noopFn[T any]() func(context.Context, T) (schema.ToolResult, error) {
 	return func(context.Context, T) (schema.ToolResult, error) { return schema.ToolResult{}, nil }
 }
