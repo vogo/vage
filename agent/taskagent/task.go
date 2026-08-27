@@ -455,6 +455,11 @@ func (a *Agent) dispatch(ctx context.Context, event schema.Event) {
 // is dispatched before prepareContext so its EventContextBuilt still follows
 // AgentStart, matching the historical non-streaming event order.
 func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
+	// One fresh run-value store per call, established before anything else so
+	// every stage of this run — and only this run — shares it. See
+	// schema.WithRunValues for the scoping contract.
+	ctx = schema.WithRunValues(ctx)
+
 	p, err := a.preflightRun(ctx, req)
 	if err != nil {
 		return nil, err
@@ -492,6 +497,11 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 // runs the stream execution mode inside the stream body, where AgentStart is
 // the first event sent through the middleware+hook pipeline.
 func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.RunStream, error) {
+	// The stream body's ctx derives from this one, so binding the store here
+	// keeps it alive for the whole production and gives back-to-back streams
+	// separate stores even on the same agent and session.
+	ctx = schema.WithRunValues(ctx)
+
 	p, err := a.preflightRun(ctx, req)
 	if err != nil {
 		return nil, err
