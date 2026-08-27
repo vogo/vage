@@ -62,6 +62,48 @@ func EmitterFromContext(ctx context.Context) Emitter {
 	return v
 }
 
+// EmitCustomData publishes an application-defined event onto the stream bound
+// to ctx: one EventCustom carrying CustomEventData{name, payload}, with the
+// SessionID inherited from ctx. It exists so a long-running tool handler can
+// report intermediate progress without EventData being opened up to external
+// implementations — the top-level event type stays fixed at EventCustom and
+// only name varies.
+//
+// It is best-effort and never fails the caller:
+//
+//   - No emitter bound to ctx (WithEmitter was never called, e.g. under a
+//     non-streaming executor): the call is a silent no-op, so the same tool
+//     stays reusable outside TaskAgent.
+//   - The emitter returns an error (stream closing, cancelled, rejected): the
+//     event is dropped and the error is swallowed. Nothing propagates to the
+//     tool handler and the tool result is unaffected.
+//
+// Because delivery is not confirmable, custom events are for observability
+// only; they must not be the sole trigger of a business state transition, and
+// nothing here promises persistence, replay, at-least-once delivery or
+// cross-process compatibility.
+//
+// Name and payload conventions are documented on CustomEventData: a non-empty,
+// stable, namespaced name and a JSON-serializable, credential-free payload are
+// the caller's responsibility — neither is validated here. The payload is not
+// copied, so mutating it afterwards can race with consumers.
+//
+// Calls from one tool are delivered through the same emitter in call order;
+// events from tools running in parallel may interleave, so callers that need
+// to correlate events back to a tool call should carry their own field in the
+// payload.
+func EmitCustomData(ctx context.Context, name string, payload any) {
+	em := EmitterFromContext(ctx)
+	if em == nil {
+		return
+	}
+
+	_ = em(NewEvent(EventCustom, "", SessionIDFromContext(ctx), CustomEventData{
+		Name:    name,
+		Payload: payload,
+	}))
+}
+
 type runValuesCtxKey struct{}
 
 // WithRunValues binds a fresh, empty run-scoped value store to ctx and returns

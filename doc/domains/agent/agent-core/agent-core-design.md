@@ -17,7 +17,7 @@
 ## 关键设计决策
 
 - **依赖注入而非硬编码**:TaskAgent 的模型、工具、记忆、护栏、技能、检查点、hook、上下文构建器全部通过 `With*` 选项以接口注入。默认值缺省时行为退化(如无迭代存储则不可 Resume),而非报错崩溃。
-- **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件、在一次运行内互传临时值。这使工具签名保持稳定。
+- **通过 context.Context 传递会话身份、Emitter 与 Run 值**:深层工具处理器无需显式参数即可读取 SessionID、向流写事件(内置事件直接用 Emitter,应用自定义事件走 `EmitCustomData`)、在一次运行内互传临时值。这使工具签名保持稳定。
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。
 - **消息模型单事实源 + 原生回放缓存**:`schema.Message` 的私有 canonical 状态(`role` + `parts`)是唯一事实源;可选 `origin` 保存未经修改的 provider native wire。同协议且未修改时直接回放 `origin`;任何 `SetText`/`SetRole`/`ReplaceParts`/`AppendPart` mutation 都立即清空它,随后由 provider codec 从 canonical 状态重新编码。
@@ -34,6 +34,17 @@
 - **运行边界即隔离边界**:新绑定的存储总是覆盖从父上下文继承的那一个,所以嵌套 Agent 启动自己的运行时不会与父运行串值。
 
 与相邻概念的区别:**SessionID** 只用于事件关联、会话记忆与检查点寻址,既不是 Run 值的键,也不是使用前提 —— 无 SessionID 的运行照样能存取,相同 SessionID 的两次运行也不共享;**memory / workspace** 才是跨运行、跨进程的长期存储,Run 值不写检查点,`Resume` 从空表开始,断点续跑所需的状态必须显式经长期存储重建。
+
+## 工具期自定义事件(custom event)
+
+`schema.EmitCustomData(ctx, name, payload)` 让工具处理器经既有 Emitter 链发出应用自定义事件,契约要点如下。
+
+- **为什么是一个受控入口而非放开 `EventData`**:`EventData` 用未导出方法密封,外部包无法实现,这是 schema 对「事件载荷集合」的控制点,不能为了自定义进度而废弃。折中方案是固定顶层类型 `custom` + 密封载荷 `CustomEventData{Name, Payload}`,把应用差异全部收进可扩展的 `Name`。代价是下游要做二级分派(先 `custom` 再 `Name`),名称与载荷的版本演进由应用自己负责。
+- **发射流程**:从 ctx 取发射器,没有就直接返回;有就构造**恰好一次** `custom` 事件,`SessionID` 取自 ctx,时间戳沿用 `NewEvent`。当前 ctx 不携带 Agent 身份,因此不合成 `AgentID`(留空),需要归因的调用方把标识写进 Payload。
+- **缺省与失败语义**:无发射器时是静默 no-op —— 与 Run 值同样的取舍,让工具在 TaskAgent 之外的执行器里可复用;发射器返回的错误被吞掉,不向 handler 传播、不改变工具结果。函数无返回值,调用方**无法据此确认投递成功**,需要可靠交付就换机制(AC-9)。
+- **不校验什么**:空名称与不可序列化载荷都不拦截,仍会在进程内发出,失败沿用消费者在序列化边界上的既有行为。「非空、稳定、可命名空间化的名称」和「JSON 兼容、不含凭证的载荷」是**调用约定**,不是框架保证。
+- **所有权**:Payload 原样保存、不复制。发射后继续并发修改被引用对象会与消费者产生竞态,同步由调用方负责。
+- **顺序**:工具批在调用 handler 前于单一注入点绑定 SessionID 与 Emitter,所以 handler 内同步发出的事件进入同一条 `RunStream`,且落在该工具的 `tool_call_start` 与 `tool_call_end` 之间。单个工具内按调用顺序投递;**并行工具之间可以交错**,不新增跨工具的确定性排序承诺,需要关联就在 Payload 里自带关联字段。
 
 ## LLM 路由输出契约
 

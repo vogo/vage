@@ -116,6 +116,14 @@ const (
 	EventSessionTreePromotionStarted   = "session_tree.promotion.started"
 	EventSessionTreePromotionCompleted = "session_tree.promotion.completed"
 	EventSessionTreePromotionFailed    = "session_tree.promotion.failed"
+
+	// Application-defined event emitted by callers (typically tool handlers)
+	// through EmitCustomData. Payload is CustomEventData, whose Name carries
+	// the application-level discriminator: unlike every other constant here,
+	// this type says nothing about framework lifecycle, so consumers must
+	// switch on EventCustom *and* CustomEventData.Name before interpreting
+	// the payload. The framework never mints new top-level types from Name.
+	EventCustom = "custom"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -578,6 +586,27 @@ type SessionTreePromotionFailedData struct {
 }
 
 func (SessionTreePromotionFailedData) eventData() {}
+
+// CustomEventData is the payload for EventCustom. It is the only sealed
+// payload whose shape is chosen by the caller rather than the framework.
+//
+// Name is the application-level discriminator under the fixed EventCustom
+// type — callers should use a non-empty, stable, namespaced value such as
+// "document.parse.progress", and consumers key on it to decide how to read
+// Payload. This is a calling convention, not a framework guarantee: no name
+// registry exists and empty names are not rejected.
+//
+// Payload is stored as given — not copied, normalized or validated. Callers
+// whose events cross an HTTP, log or storage boundary should pass a
+// JSON-serializable value and are responsible for keeping credentials and
+// other sensitive data out of it. Because it is not copied, mutating the
+// referenced object after emitting can race with consumers.
+type CustomEventData struct {
+	Name    string `json:"name"`
+	Payload any    `json:"payload"`
+}
+
+func (CustomEventData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {
