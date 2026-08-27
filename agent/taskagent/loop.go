@@ -96,7 +96,7 @@ type reactMode interface {
 // stream paths. It runs iterations starting at startIter (0 for a fresh Run,
 // cp.Iteration+1 for a resumed run), delegating the mode-specific work to
 // mode, and returns the terminal stop reason once the loop exits. Callers map
-// the stop reason to their own finalize path (finalizeRun / finalizeStream).
+// the stop reason into rc so the shared terminal path can read it.
 //
 // A non-nil error aborts the loop; the caller propagates it verbatim (Run
 // returns it as the second result, RunStream returns it from the stream body).
@@ -309,106 +309,133 @@ func (a *Agent) buildResponseMsgs(lastMsg schema.Message, partial bool) []schema
 	return []schema.Message{withAgentID(lastMsg, a.ID())}
 }
 
-// finalizeRun is the unified termination path for Run(). It runs output guards,
-// stores messages, dispatches events, and builds the RunResponse.
-func (a *Agent) finalizeRun(ctx context.Context, rc *runContext, stopReason schema.StopReason) *schema.RunResponse {
-	partial := stopReason != schema.StopReasonComplete
-	respMsgs := a.buildResponseMsgs(rc.lastMsg, partial)
+// draftResponse assembles the RunResponse the Agent middleware chain sees.
+// It is deliberately a draft: output guards, memory persistence and the
+// terminal events all run afterwards on whatever the chain returns, so a
+// middleware's rewrite is subject to the same guard and persistence rules as
+// a plain ReAct answer.
+func (a *Agent) draftResponse(rc *runContext) *schema.RunResponse {
+	partial := rc.stopReason != schema.StopReasonComplete
 
+	return &schema.RunResponse{
+		Messages:   a.buildResponseMsgs(rc.lastMsg, partial),
+		SessionID:  rc.sessionID,
+		Usage:      &rc.totalUsage,
+		Duration:   time.Since(rc.start).Milliseconds(),
+		StopReason: rc.stopReason,
+	}
+}
+
+// partialResult reports whether the terminal path should treat the response as
+// an interrupted result, which only downgrades output-guard failures to
+// warnings. It reads the loop's own outcome rather than resp.StopReason: a
+// middleware may rewrite the reported stop reason, and guard strictness is not
+// a middleware's to relax.
+func (rc *runContext) partialResult() bool {
+	return rc.reactRan && rc.stopReason != schema.StopReasonComplete
+}
+
+// budgetExhausted reports whether the ReAct loop really ran out of budget.
+// Same reasoning as partialResult: the event carries the tracker's own
+// numbers, so it must not fire for a synthesised stop reason.
+func (rc *runContext) budgetExhausted() bool {
+	return rc.reactRan && rc.stopReason == schema.StopReasonBudgetExhausted
+}
+
+// budgetExhaustedEvent builds the token-budget event for the terminal path.
+func (a *Agent) budgetExhaustedEvent(rc *runContext) schema.Event {
+	return schema.NewEvent(schema.EventTokenBudgetExhausted, a.ID(), rc.sessionID,
+		schema.TokenBudgetExhaustedData{
+			Budget:     rc.tracker.Budget(),
+			Used:       rc.tracker.Consumed(),
+			Iterations: rc.iteration + 1,
+			Estimated:  rc.estimated,
+		})
+}
+
+// terminalMessage returns the text AgentEnd reports, read from the final
+// (post-guard) response so the event and the response can never disagree.
+func terminalMessage(resp *schema.RunResponse) string {
+	if len(resp.Messages) == 0 {
+		return ""
+	}
+
+	return resp.Messages[0].Text()
+}
+
+// finalizeRun is the unified termination path for Run() and Resume(). It runs
+// output guards over the response the middleware chain produced, stores
+// messages, dispatches events, and stamps the framework-owned response fields.
+func (a *Agent) finalizeRun(ctx context.Context, rc *runContext, resp *schema.RunResponse) *schema.RunResponse {
 	// Run output guards. For partial results, log warnings instead of returning errors.
-	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, respMsgs)
+	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, resp.Messages)
 	if err != nil {
-		if partial {
-			slog.Warn("vage: output guard on partial result", "error", err, "stop_reason", stopReason)
+		if rc.partialResult() {
+			slog.Warn("vage: output guard on partial result", "error", err, "stop_reason", rc.stopReason)
 		}
 		// For normal completion, we still use the unguarded messages rather than failing.
 	} else {
-		respMsgs = guardedMsgs
+		resp.Messages = guardedMsgs
 	}
 
-	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, respMsgs, rc.br.sessionMsgCount)
+	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, resp.Messages, rc.br.sessionMsgCount)
 
 	// Emit budget exhaustion event if applicable.
-	if stopReason == schema.StopReasonBudgetExhausted {
-		a.dispatch(ctx, schema.NewEvent(schema.EventTokenBudgetExhausted, a.ID(), rc.sessionID,
-			schema.TokenBudgetExhaustedData{
-				Budget:     rc.tracker.Budget(),
-				Used:       rc.tracker.Consumed(),
-				Iterations: rc.iteration + 1,
-				Estimated:  rc.estimated,
-			}))
-	}
-
-	msg := ""
-	if len(respMsgs) > 0 {
-		msg = respMsgs[0].Text()
+	if rc.budgetExhausted() {
+		a.dispatch(ctx, a.budgetExhaustedEvent(rc))
 	}
 
 	duration := time.Since(rc.start).Milliseconds()
 
 	a.dispatch(ctx, schema.NewEvent(schema.EventAgentEnd, a.ID(), rc.sessionID, schema.AgentEndData{
 		Duration:   duration,
-		Message:    msg,
-		StopReason: stopReason,
+		Message:    terminalMessage(resp),
+		StopReason: resp.StopReason,
 	}))
 
-	return &schema.RunResponse{
-		Messages:   respMsgs,
-		SessionID:  rc.sessionID,
-		Usage:      &rc.totalUsage,
-		Duration:   duration,
-		StopReason: stopReason,
-	}
+	// SessionID and duration are framework invariants. A middleware owns the
+	// messages, metadata, usage and stop reason it reports; it does not get to
+	// claim the run belonged to another session or took another amount of time.
+	resp.SessionID = rc.sessionID
+	resp.Duration = duration
+
+	return resp
 }
 
-// finalizeStream is the unified termination path for RunStream(). It runs output guards,
-// stores messages, dispatches events via send, and returns nil for clean stream close.
+// finalizeStream is the unified termination path for RunStream(). It mirrors
+// finalizeRun over the stream's send function and returns nil for a clean
+// stream close.
 func (a *Agent) finalizeStream(
 	ctx context.Context,
 	send func(schema.Event) error,
 	rc *runContext,
-	req *schema.RunRequest,
-	stopReason schema.StopReason,
+	resp *schema.RunResponse,
 ) error {
-	partial := stopReason != schema.StopReasonComplete
-	respMsgs := a.buildResponseMsgs(rc.lastMsg, partial)
-
 	// Run output guards. For partial results, log warnings instead of returning errors.
-	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, respMsgs)
+	guardedMsgs, err := a.runOutputGuards(ctx, rc.sessionID, resp.Messages)
 	if err != nil {
-		if partial {
-			slog.Warn("vage: output guard on partial stream result", "error", err, "stop_reason", stopReason)
+		if rc.partialResult() {
+			slog.Warn("vage: output guard on partial stream result", "error", err, "stop_reason", rc.stopReason)
 		} else {
 			return err
 		}
 	} else {
-		respMsgs = guardedMsgs
+		resp.Messages = guardedMsgs
 	}
 
-	a.storeAndPromoteMessages(ctx, rc.sessionID, req.Messages, respMsgs, rc.br.sessionMsgCount)
+	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, resp.Messages, rc.br.sessionMsgCount)
 
 	// Emit budget exhaustion event if applicable.
-	if stopReason == schema.StopReasonBudgetExhausted {
-		if err := send(schema.NewEvent(schema.EventTokenBudgetExhausted, a.ID(), rc.sessionID,
-			schema.TokenBudgetExhaustedData{
-				Budget:     rc.tracker.Budget(),
-				Used:       rc.tracker.Consumed(),
-				Iterations: rc.iteration + 1,
-				Estimated:  rc.estimated,
-			})); err != nil {
+	if rc.budgetExhausted() {
+		if err := send(a.budgetExhaustedEvent(rc)); err != nil {
 			return err
 		}
 	}
 
-	msg := ""
-	if len(respMsgs) > 0 {
-		msg = respMsgs[0].Text()
-	}
-
 	return send(schema.NewEvent(schema.EventAgentEnd, a.ID(), rc.sessionID, schema.AgentEndData{
 		Duration:   time.Since(rc.start).Milliseconds(),
-		Message:    msg,
-		StopReason: stopReason,
+		Message:    terminalMessage(resp),
+		StopReason: resp.StopReason,
 	}))
 }
 
@@ -451,7 +478,7 @@ func (a *Agent) storeAndPromoteMessages(ctx context.Context, sessionID string, r
 func (a *Agent) buildSend(ctx context.Context, raw func(schema.Event) error) func(schema.Event) error {
 	send := raw
 	// Apply middlewares in reverse order so the first middleware is outermost.
-	for _, v := range slices.Backward(a.middlewares) {
+	for _, v := range slices.Backward(a.streamMiddleware) {
 		send = v(send)
 	}
 
