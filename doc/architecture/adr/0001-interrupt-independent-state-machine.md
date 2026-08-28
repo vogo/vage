@@ -15,7 +15,7 @@ Add an independent `interrupt` package that defines the `Record`/`Store` persist
 
 The suspend check lives in the shared `runReactLoop` — after the full assistant tool-call message is in hand, after the budget check, and before `executeToolBatch` — so sync and stream share one gate. On a hit the whole batch is frozen; ordinary sibling calls in that batch run only after every pending call has a decision. `ResumeInterrupt(ctx, req)` is the public resume entry: it addresses `interrupt_id + tool_call_id`, does not enter the Agent middleware chain, does not re-run input guards, and starts with empty Run values.
 
-`Pending` is a non-empty unique subset of the batch's tool-call IDs. `SubmitDecisions` never demotes `Resuming` back to `Ready` (an idempotent resubmit must not drop a live lease). FileStore `Delete` takes the same per-record cross-process lock as every other mutation.
+`Pending` is a non-empty unique subset of the batch's tool-call IDs. `SubmitDecisions` never demotes `Resuming` back to `Ready` (an idempotent resubmit must not drop a live lease), and returns the tool-call IDs it durably committed so a caller can attribute `interrupt_decision_stored` to real writes even when resumers submit concurrently. FileStore `Delete` takes the same per-record cross-process lock as every other mutation, and no mutation proceeds on a context that was canceled while it queued for that lock.
 
 ## Rationale
 

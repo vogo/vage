@@ -80,7 +80,7 @@ func TestFileStore_CrossInstance_SeesEachOthersWrites(t *testing.T) {
 		t.Fatalf("cross-instance Get mismatch: %+v", got)
 	}
 
-	updated, err := storeB.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "approved"}})
+	updated, _, err := storeB.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "approved"}})
 	if err != nil {
 		t.Fatalf("SubmitDecisions from B: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestFileStore_MalformedIDCannotEscapeRoot(t *testing.T) {
 		if _, err := s.Get(ctx, id); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("Get(%q) err = %v, want ErrInvalidArgument", id, err)
 		}
-		if _, err := s.SubmitDecisions(ctx, id, []Decision{{ToolCallID: "call-1", Content: "x"}}); !errors.Is(err, ErrInvalidArgument) {
+		if _, _, err := s.SubmitDecisions(ctx, id, []Decision{{ToolCallID: "call-1", Content: "x"}}); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("SubmitDecisions(%q) err = %v, want ErrInvalidArgument", id, err)
 		}
 		if _, err := s.AcquireLease(ctx, id, "owner", time.Minute); !errors.Is(err, ErrInvalidArgument) {
@@ -413,7 +413,7 @@ func TestFileStore_CrossInstance_LockBlocksDeleteAndWrite(t *testing.T) {
 		}
 		done := make(chan result, 1)
 		go func() {
-			updated, err := storeB.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+			updated, _, err := storeB.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
 			done <- result{updated, err}
 		}()
 
@@ -488,6 +488,76 @@ func TestFileStore_CrossInstance_LockBlocksDeleteAndWrite(t *testing.T) {
 			t.Errorf("record deleted despite canceled Delete: %v", err)
 		}
 	})
+}
+
+// TestFileStore_SameInstance_CanceledCtxDoesNotMutate covers the wait the
+// cross-instance cases above cannot reach: two callers on the *same*
+// FileStore queue on the in-process mutex, which sync.Mutex offers no way
+// to abandon. The waiter that is canceled while queued must fail instead
+// of writing, even though the file lock it finds on wake is free.
+func TestFileStore_SameInstance_CanceledCtxDoesNotMutate(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	s, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	rec := newTestRecord("sess-local-ctx", []string{"call-1"})
+	if err := s.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	hold := make(chan struct{})
+	held := make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- s.withExclusive(ctx, rec.ID, func() error {
+			close(held)
+			<-hold
+			return nil
+		})
+	}()
+	<-held
+
+	waitCtx, cancel := context.WithCancel(context.Background())
+	submitted := make(chan error, 1)
+	go func() {
+		_, _, submitErr := s.SubmitDecisions(waitCtx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+		submitted <- submitErr
+	}()
+
+	// Let the second caller reach the mutex, then cancel it while it is
+	// parked there and only afterwards hand over the critical section.
+	select {
+	case err := <-submitted:
+		close(hold)
+		t.Fatalf("SubmitDecisions returned while the lock was held: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	close(hold)
+
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+
+	select {
+	case err := <-submitted:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("SubmitDecisions err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SubmitDecisions did not return after the lock was released")
+	}
+
+	got, gerr := s.Get(ctx, rec.ID)
+	if gerr != nil {
+		t.Fatalf("Get: %v", gerr)
+	}
+	if len(got.Decisions) != 0 || got.Status != StatusPending {
+		t.Errorf("canceled submit mutated the record: status=%q decisions=%+v", got.Status, got.Decisions)
+	}
 }
 
 // TestFileStore_UnknownVersionRejected verifies a record written by a

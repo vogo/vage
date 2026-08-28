@@ -442,7 +442,7 @@ func TestInterrupt_ZeroDecisions_ProbesPendingAndRetriesReady(t *testing.T) {
 		t.Fatalf("pending probe started work: response=%+v calls=%d handlers=%d", probe, mock.Calls(), handlerRuns.Load())
 	}
 
-	if _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
+	if _, _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
 		ToolCallID: "tc-1",
 		Content:    "approved",
 	}}); err != nil {
@@ -979,6 +979,110 @@ func TestInterrupt_PrefixSubmit_EmitsEventsForCommittedDecisions(t *testing.T) {
 	}
 	if rec.Status != interrupt.StatusPending {
 		t.Errorf("status = %q, want pending", rec.Status)
+	}
+}
+
+// barrierStore delays every SubmitDecisions until `n` of them have arrived,
+// pinning the interleaving the race needs: all resumers finish their
+// pre-submit Get before any decision is written, so each of them would see
+// "absent before, present after" if the event were attributed by diffing
+// those two reads.
+type barrierStore struct {
+	interrupt.Store
+	arrive sync.WaitGroup
+}
+
+func newBarrierStore(inner interrupt.Store, n int) *barrierStore {
+	s := &barrierStore{Store: inner}
+	s.arrive.Add(n)
+	return s
+}
+
+func (s *barrierStore) SubmitDecisions(ctx context.Context, id string, decisions []interrupt.Decision) (*interrupt.Record, []string, error) {
+	s.arrive.Done()
+	s.arrive.Wait()
+	return s.Store.SubmitDecisions(ctx, id, decisions)
+}
+
+// TestInterrupt_ConcurrentIdenticalSubmit_EmitsOneEvent covers the racing
+// version of the idempotency contract: resumers submitting the same
+// decision at the same time must still produce exactly one
+// interrupt_decision_stored, because only one of them wrote it. They all
+// see the same post-submit record, so the event can only be attributed by
+// what the store reports each call committed.
+//
+// Only one of the two pending calls is decided, so the record stays Pending
+// and no resumer takes a lease or reaches the model.
+func TestInterrupt_ConcurrentIdenticalSubmit_EmitsOneEvent(t *testing.T) {
+	var handlerRuns atomic.Int32
+	mock := newMock(
+		makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-1", Name: "ask_user", Arguments: `{"question":"a?"}`},
+			schema.ToolCall{ID: "tc-2", Name: "ask_user", Arguments: `{"question":"b?"}`},
+		),
+	)
+	const resumers = 4
+	store := newBarrierStore(interrupt.NewMapStore(), resumers)
+	hookMgr, events := eventCollector()
+
+	a := taskagent.New(
+		agent.Config{ID: "agent-race-evt"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+		taskagent.WithHookManager(hookMgr),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-race-evt",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	start := make(chan struct{})
+	wg.Add(resumers)
+	for range resumers {
+		go func() {
+			defer wg.Done()
+			<-start
+			_, resumeErr := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+				InterruptID: first.Interrupt.InterruptID,
+				Decisions:   []schema.InterruptDecision{{ToolCallID: "tc-1", Content: "yes"}},
+			})
+			if resumeErr != nil {
+				mu.Lock()
+				errs = append(errs, resumeErr)
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if len(errs) > 0 {
+		t.Fatalf("concurrent ResumeInterrupt errors: %v", errs)
+	}
+
+	stored := 0
+	for _, e := range events() {
+		if e == schema.EventInterruptDecisionStored {
+			stored++
+		}
+	}
+	if stored != 1 {
+		t.Errorf("interrupt_decision_stored count = %d, want 1 across %d identical concurrent submits", stored, resumers)
+	}
+	if handlerRuns.Load() != 0 {
+		t.Errorf("ask_user handler ran %d times, want 0", handlerRuns.Load())
 	}
 }
 

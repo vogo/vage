@@ -148,6 +148,18 @@ func (s *FileStore) withExclusive(ctx context.Context, id string, fn func() erro
 	}
 	defer release()
 
+	// Both waits above can park this goroutine for as long as another
+	// critical section runs, and neither reports a cancellation that
+	// arrived while it waited: sync.Mutex.Lock is not cancelable at all,
+	// and acquireFileLock only consults ctx when its first attempt fails
+	// — which is exactly what happens to the same-instance caller that
+	// queued on the mutex and then finds the file lock free. Without this
+	// re-check, a caller whose context died while queueing would still
+	// mutate the record.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	return fn()
 }
 
@@ -305,32 +317,36 @@ func (s *FileStore) Get(ctx context.Context, id string) (*Record, error) {
 	return s.readRecord(id)
 }
 
-// SubmitDecisions applies decisions under the record lock.
-func (s *FileStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error) {
+// SubmitDecisions applies decisions under the record lock. A rejected
+// batch that committed a prefix first still has to be written, so the
+// error is carried out of the critical section rather than aborting it.
+func (s *FileStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, []string, error) {
 	if err := validateID(id); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	var decisionErr error
+	var (
+		decisionErr error
+		committed   []string
+	)
 	next, err := s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
 		if cur == nil {
 			return nil, ErrNotFound
 		}
 
-		revision := cur.Revision
-		decisionErr = applyDecisions(cur, decisions, time.Now())
-		if decisionErr != nil && cur.Revision == revision {
+		committed, decisionErr = applyDecisions(cur, decisions, time.Now())
+		if decisionErr != nil && len(committed) == 0 {
 			return nil, decisionErr
 		}
 		return cur, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if decisionErr != nil {
-		return next, decisionErr
+		return next, committed, decisionErr
 	}
-	return next, nil
+	return next, committed, nil
 }
 
 // AcquireLease transitions Ready (or an expired Resuming) to Resuming. The

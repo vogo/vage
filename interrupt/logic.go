@@ -26,8 +26,8 @@ import (
 // MapStore and FileStore, so the two backends cannot drift on validation,
 // idempotency or conflict rules — only their storage medium (a Go map vs a
 // JSON file plus a lock file) differs. Each function mutates rec in place;
-// applyDecisions deliberately retains the valid prefix before an error, as
-// required by Store.SubmitDecisions.
+// applyDecisions deliberately retains the valid prefix before an error, and
+// reports exactly what it committed, as required by Store.SubmitDecisions.
 
 // maxIDLen bounds an interrupt ID so a hostile caller cannot drive a store
 // into filesystem-dependent name-length errors. generateID emits 32 hex
@@ -117,12 +117,18 @@ func initialStatus(pending []string) Status {
 	return StatusPending
 }
 
-// applyDecisions merges decisions into rec.Decisions in slice order. If a
-// decision is rejected, decisions committed earlier in the slice remain and
-// the audit fields reflect that prefix before the error is returned.
-func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
+// applyDecisions merges decisions into rec.Decisions in slice order and
+// returns the ToolCallIDs this call durably committed, in that order. If a
+// decision is rejected, decisions committed earlier in the slice remain,
+// the audit fields reflect that prefix, and the returned slice names it.
+//
+// An idempotent resubmission is absent from the returned slice: it wrote
+// nothing. Callers rely on this being computed inside the store's critical
+// section — a before/after comparison of two independent reads cannot tell
+// a first write from a replay when two submitters race.
+func applyDecisions(rec *Record, decisions []Decision, now time.Time) ([]string, error) {
 	if rec.Status == StatusCompleted {
-		return ErrAlreadyCompleted
+		return nil, ErrAlreadyCompleted
 	}
 
 	pendingSet := make(map[string]struct{}, len(rec.Pending))
@@ -130,7 +136,7 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 		pendingSet[id] = struct{}{}
 	}
 
-	changed := false
+	var committed []string
 	commitAudit := func() {
 		// Pending → Ready only. An idempotent resubmit (or a prefix commit)
 		// must never demote Resuming back to Ready: that would drop a live
@@ -144,10 +150,10 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 
 	for _, d := range decisions {
 		if _, isPending := pendingSet[d.ToolCallID]; !isPending {
-			if changed {
+			if len(committed) > 0 {
 				commitAudit()
 			}
-			return fmt.Errorf("%w: %q", ErrUnknownToolCall, d.ToolCallID)
+			return committed, fmt.Errorf("%w: %q", ErrUnknownToolCall, d.ToolCallID)
 		}
 
 		existing, has := rec.Decisions[d.ToolCallID]
@@ -155,10 +161,10 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 			if existing.Content == d.Content && existing.IsError == d.IsError {
 				continue // idempotent resubmission
 			}
-			if changed {
+			if len(committed) > 0 {
 				commitAudit()
 			}
-			return fmt.Errorf("%w: %q", ErrDecisionConflict, d.ToolCallID)
+			return committed, fmt.Errorf("%w: %q", ErrDecisionConflict, d.ToolCallID)
 		}
 
 		if rec.Decisions == nil {
@@ -170,14 +176,14 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 			IsError:    d.IsError,
 			DecidedAt:  now,
 		}
-		changed = true
+		committed = append(committed, d.ToolCallID)
 	}
 
-	if changed {
+	if len(committed) > 0 {
 		commitAudit()
 	}
 
-	return nil
+	return committed, nil
 }
 
 // allDecided reports whether every id in pending has a committed decision.

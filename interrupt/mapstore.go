@@ -95,13 +95,13 @@ func (s *MapStore) Get(ctx context.Context, id string) (*Record, error) {
 }
 
 // SubmitDecisions applies decisions in order, retaining the valid prefix
-// when a later decision is rejected.
-func (s *MapStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error) {
+// when a later decision is rejected, and reports what it committed.
+func (s *MapStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, []string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateID(id); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	s.mu.Lock()
@@ -109,18 +109,19 @@ func (s *MapStore) SubmitDecisions(ctx context.Context, id string, decisions []D
 
 	r, ok := s.data[id]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	if r.Status == StatusCompleted {
-		return nil, ErrAlreadyCompleted
+		return nil, nil, ErrAlreadyCompleted
 	}
 
-	if err := applyDecisions(r, decisions, time.Now()); err != nil {
-		return cloneRecord(r), err
+	committed, err := applyDecisions(r, decisions, time.Now())
+	if err != nil {
+		return cloneRecord(r), committed, err
 	}
 
 	s.data[id] = r
-	return cloneRecord(r), nil
+	return cloneRecord(r), committed, nil
 }
 
 // AcquireLease transitions Ready (or an expired Resuming) to Resuming.

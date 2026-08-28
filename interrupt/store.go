@@ -62,19 +62,28 @@ type Store interface {
 	Get(ctx context.Context, id string) (*Record, error)
 
 	// SubmitDecisions atomically merges decisions into the record's
-	// Decisions map, keyed by ToolCallID, and returns the updated record.
+	// Decisions map, keyed by ToolCallID, and returns the updated record
+	// plus the ToolCallIDs this call durably committed, in submission
+	// order.
+	//
+	// The committed slice is the caller's only sound answer to "what did
+	// *I* write?": it is computed inside the same critical section as the
+	// write, so two callers submitting the same decision concurrently see
+	// it named by exactly one of them. Comparing a record read before the
+	// call against the one returned cannot do this — both racers would
+	// observe the same transition and both would claim it.
 	//
 	// Each decision must address a ToolCallID in the record's Pending
 	// set: ErrUnknownToolCall otherwise. Resubmitting an identical
 	// decision (same Content and IsError) for an already-decided
-	// ToolCallID is idempotent: it persists nothing and leaves Revision
-	// unchanged, which is how a caller distinguishes a real write from a
-	// replay. Resubmitting a different one returns ErrDecisionConflict
-	// without changing that decision. Decisions are
-	// applied one at a time in slice order, so a conflict or unknown ID on
-	// the Nth decision leaves the first N-1 committed. When a prefix was
-	// committed before the error, the returned *Record reflects that
-	// prefix and is non-nil alongside the error.
+	// ToolCallID is idempotent: it persists nothing, leaves Revision
+	// unchanged and is absent from committed. Resubmitting a different
+	// one returns ErrDecisionConflict without changing that decision.
+	// Decisions are applied one at a time in slice order, so a conflict
+	// or unknown ID on the Nth decision leaves the first N-1 committed.
+	// When a prefix was committed before the error, the returned *Record
+	// reflects that prefix, is non-nil alongside the error, and committed
+	// names exactly that prefix.
 	//
 	// When every Pending ID has a Decision after this call and Status is
 	// still StatusPending, Status transitions Pending → Ready. A record
@@ -82,7 +91,7 @@ type Store interface {
 	// revokes a live lease. During Resuming, identical resubmits are
 	// no-ops; conflicting or unknown IDs still error. Returns ErrNotFound
 	// for an unknown id, ErrAlreadyCompleted for a completed record.
-	SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error)
+	SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, []string, error)
 
 	// AcquireLease transitions a Ready record to Resuming under owner's
 	// name for ttl, and returns the updated record. Concurrent

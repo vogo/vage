@@ -20,6 +20,7 @@ package interrupt
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,7 +109,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Fatalf("Create: %v", err)
 		}
 
-		updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "yes"}})
+		updated, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "yes"}})
 		if err != nil {
 			t.Fatalf("SubmitDecisions partial: %v", err)
 		}
@@ -116,7 +117,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Errorf("Status after partial submit = %q, want %q", updated.Status, StatusPending)
 		}
 
-		updated, err = s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-2", Content: "no", IsError: true}})
+		updated, _, err = s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-2", Content: "no", IsError: true}})
 		if err != nil {
 			t.Fatalf("SubmitDecisions final: %v", err)
 		}
@@ -141,10 +142,10 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 
 		d := []Decision{{ToolCallID: "call-1", Content: "ok"}}
-		if _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
 			t.Fatalf("first submit: %v", err)
 		}
-		if _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
 			t.Errorf("idempotent resubmit err = %v, want nil", err)
 		}
 	})
@@ -158,10 +159,10 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Fatalf("Create: %v", err)
 		}
 
-		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
 			t.Fatalf("first submit: %v", err)
 		}
-		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "b"}})
+		_, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "b"}})
 		if !errors.Is(err, ErrDecisionConflict) {
 			t.Errorf("conflicting resubmit err = %v, want ErrDecisionConflict", err)
 		}
@@ -184,7 +185,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Fatalf("Create: %v", err)
 		}
 
-		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-999", Content: "x"}})
+		_, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-999", Content: "x"}})
 		if !errors.Is(err, ErrUnknownToolCall) {
 			t.Errorf("unknown tool call err = %v, want ErrUnknownToolCall", err)
 		}
@@ -249,7 +250,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		if _, err := s.AcquireLease(ctx, rec.ID, "owner-c", time.Minute); !errors.Is(err, ErrAlreadyCompleted) {
 			t.Errorf("AcquireLease on Completed err = %v, want ErrAlreadyCompleted", err)
 		}
-		if _, err := s.SubmitDecisions(ctx, rec.ID, nil); !errors.Is(err, ErrAlreadyCompleted) {
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, nil); !errors.Is(err, ErrAlreadyCompleted) {
 			t.Errorf("SubmitDecisions on Completed err = %v, want ErrAlreadyCompleted", err)
 		}
 	})
@@ -349,7 +350,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			if _, err := s.Get(ctx, id); !errors.Is(err, ErrInvalidArgument) {
 				t.Errorf("Get(%q) err = %v, want ErrInvalidArgument", id, err)
 			}
-			if _, err := s.SubmitDecisions(ctx, id, nil); !errors.Is(err, ErrInvalidArgument) {
+			if _, _, err := s.SubmitDecisions(ctx, id, nil); !errors.Is(err, ErrInvalidArgument) {
 				t.Errorf("SubmitDecisions(%q) err = %v, want ErrInvalidArgument", id, err)
 			}
 			if _, err := s.AcquireLease(ctx, id, "owner", time.Minute); !errors.Is(err, ErrInvalidArgument) {
@@ -377,12 +378,12 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		if err := s.Create(ctx, rec); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
 			t.Fatalf("seed decision: %v", err)
 		}
 
 		// call-2 is valid and undecided; call-1 conflicts with "a".
-		prefix, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+		prefix, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
 			{ToolCallID: "call-2", Content: "b"},
 			{ToolCallID: "call-1", Content: "different"},
 		})
@@ -411,7 +412,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		if err := s.Create(ctx, unknownRec); err != nil {
 			t.Fatalf("Create unknown-case record: %v", err)
 		}
-		unknownPrefix, err := s.SubmitDecisions(ctx, unknownRec.ID, []Decision{
+		unknownPrefix, _, err := s.SubmitDecisions(ctx, unknownRec.ID, []Decision{
 			{ToolCallID: "call-1", Content: "a"},
 			{ToolCallID: "call-999", Content: "x"},
 		})
@@ -445,7 +446,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Fatalf("Create: %v", err)
 		}
 
-		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+		_, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
 			{ToolCallID: "call-1", Content: "a"},
 			{ToolCallID: "call-1", Content: "b"},
 		})
@@ -460,7 +461,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Errorf("Decisions = %+v, want first duplicate committed", got.Decisions)
 		}
 
-		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
 			{ToolCallID: "call-1", Content: "a"},
 			{ToolCallID: "call-1", Content: "a"},
 		}); err != nil {
@@ -479,7 +480,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Fatalf("AcquireLease: %v", err)
 		}
 
-		updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+		updated, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
 		if err != nil {
 			t.Fatalf("idempotent SubmitDecisions during Resuming: %v", err)
 		}
@@ -503,6 +504,106 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 	})
 
+	// Exactly one concurrent submitter of the same decision may claim the
+	// write. The committed slice — not a before/after diff by the caller —
+	// is what makes this decidable: every racer observes the same final
+	// record, so a caller comparing its own pre-submit read against the
+	// result would have them all report a write and emit a duplicate
+	// interrupt_decision_stored event.
+	t.Run(name+"/concurrent_identical_submits_commit_once", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-race", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		const submitters = 8
+		var (
+			wg     sync.WaitGroup
+			mu     sync.Mutex
+			claims int
+			errs   []error
+		)
+		wg.Add(submitters)
+		for range submitters {
+			go func() {
+				defer wg.Done()
+				_, committed, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					errs = append(errs, err)
+					return
+				}
+				claims += len(committed)
+			}()
+		}
+		wg.Wait()
+
+		if len(errs) > 0 {
+			t.Fatalf("concurrent identical submits returned errors: %v", errs)
+		}
+		if claims != 1 {
+			t.Errorf("decisions reported as committed = %d, want 1 across %d identical submits", claims, submitters)
+		}
+
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Revision != 2 {
+			t.Errorf("Revision = %d, want 2 (Create + one commit)", got.Revision)
+		}
+		if got.Status != StatusReady {
+			t.Errorf("Status = %q, want %q", got.Status, StatusReady)
+		}
+	})
+
+	// A rejected batch reports only the prefix it actually wrote.
+	t.Run(name+"/submit_decisions_reports_committed_prefix", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-committed", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		_, committed, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}})
+		if err != nil {
+			t.Fatalf("seed decision: %v", err)
+		}
+		if len(committed) != 1 || committed[0] != "call-1" {
+			t.Fatalf("committed = %v, want [call-1]", committed)
+		}
+
+		// call-2 commits, then the conflicting call-1 aborts the batch.
+		_, committed, err = s.SubmitDecisions(ctx, rec.ID, []Decision{
+			{ToolCallID: "call-2", Content: "b"},
+			{ToolCallID: "call-1", Content: "different"},
+		})
+		if !errors.Is(err, ErrDecisionConflict) {
+			t.Fatalf("mixed batch err = %v, want ErrDecisionConflict", err)
+		}
+		if len(committed) != 1 || committed[0] != "call-2" {
+			t.Errorf("committed = %v, want [call-2]", committed)
+		}
+
+		// Everything is decided now, so a full replay writes nothing.
+		_, committed, err = s.SubmitDecisions(ctx, rec.ID, []Decision{
+			{ToolCallID: "call-1", Content: "a"},
+			{ToolCallID: "call-2", Content: "b"},
+		})
+		if err != nil {
+			t.Fatalf("replay: %v", err)
+		}
+		if len(committed) != 0 {
+			t.Errorf("committed on replay = %v, want empty", committed)
+		}
+	})
+
 	t.Run(name+"/delete_respects_canceled_context", func(t *testing.T) {
 		s := factory(t)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -520,7 +621,7 @@ func createReadyRecord(t *testing.T, s Store, sessionID string) *Record {
 	if err := s.Create(ctx, rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+	updated, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
 	if err != nil {
 		t.Fatalf("SubmitDecisions to Ready: %v", err)
 	}
