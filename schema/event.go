@@ -102,7 +102,8 @@ const (
 	// each external decision is durably committed, whether or not the
 	// batch is fully decided yet, including each item of a valid prefix
 	// that landed before a later decision in the same SubmitDecisions
-	// call was rejected. EventInterruptResumed fires once a resume has
+	// call was rejected — and only then: resubmitting a decision already
+	// stored writes nothing, so it emits nothing. EventInterruptResumed fires once a resume has
 	// acquired the store lease and is about to re-enter the ReAct loop.
 	// None of these payloads carry decision or message content — only
 	// identity, status and timing — so they are safe to log verbatim.
@@ -536,7 +537,8 @@ func (InterruptCreatedData) eventData() {}
 // EventInterruptDecisionStored, emitted once per decision after
 // interrupt.Store.SubmitDecisions durably commits it (including each
 // committed prefix item when a later decision in the same call is
-// rejected). Ready reports whether every pending tool call in the batch
+// rejected, and excluding an idempotent resubmission, which commits
+// nothing). Ready reports whether every pending tool call in the batch
 // now has a decision.
 type InterruptDecisionStoredData struct {
 	InterruptID string `json:"interrupt_id"`

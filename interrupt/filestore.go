@@ -39,12 +39,13 @@ const (
 	// lockRetryInterval / lockWaitTimeout bound how long a writer spins
 	// trying to acquire the per-record mutex file below before giving up.
 	// The mutex only ever guards a read-modify-write of one small JSON
-	// file, so contention is expected to clear in microseconds; a
-	// multi-second ceiling only protects against a crashed holder that
-	// left a stale lock file (cleaned up once its age exceeds this).
+	// file, so contention is expected to clear in microseconds; the
+	// multi-second ceiling exists so a caller that passed no deadline
+	// still gets an error instead of hanging. There is deliberately no
+	// age-based reclamation: a lock is released by the kernel, never by a
+	// waiter's guess about how long a holder "should" take.
 	lockRetryInterval = 2 * time.Millisecond
 	lockWaitTimeout   = 5 * time.Second
-	staleLockAge      = 30 * time.Second
 )
 
 // FileStore persists interrupt Records under a root directory as one JSON
@@ -56,14 +57,32 @@ const (
 // serialization because IterationStore.Save always races with itself, not
 // with another process), FileStore's AcquireLease must provide real mutual
 // exclusion across independent processes — that is the entire reason this
-// package exists. It gets this from an OS-level exclusive create
-// (O_CREATE|O_EXCL) on a companion `<id>.lock` file: atomic at the
-// filesystem level, so two FileStore instances — in the same process or in
-// two separate ones — opening the same root directory can never both
-// believe they hold it. The lock file is held only for the duration of one
-// read-modify-write of the record (a mutex, not the lease itself); the
-// lease's own identity and expiry live in the record's LeaseOwner /
-// LeaseExpiresAt fields, which is what AcquireLease actually contests.
+// package exists. It gets this from an OS advisory lock (flock / LockFileEx)
+// taken on a companion `<id>.lock` file: the kernel, not this code, decides
+// who holds it, so two FileStore instances — in the same process or in two
+// separate ones — opening the same root directory can never both believe
+// they do. Two properties follow, and both are load-bearing:
+//
+//   - A live holder is never preempted. Nothing reclaims a lock because it
+//     looks old: a critical section stalled by a slow fsync, a paused
+//     process or a busy scheduler keeps its exclusion for as long as it
+//     takes. Age-based reclamation would hand the same record to two
+//     resumers, which is precisely the failure this package exists to
+//     prevent.
+//   - A dead holder never wedges the store. The lock lives on the open file
+//     description, so the kernel drops it when the process exits for any
+//     reason, crash included.
+//
+// The lock is held only for the duration of one read-modify-write of the
+// record (a mutex, not the lease itself); the lease's own identity and
+// expiry live in the record's LeaseOwner / LeaseExpiresAt fields, which is
+// what AcquireLease actually contests.
+//
+// `<id>.lock` files are created on demand and never unlinked — not even by
+// Delete. Unlinking one would let a waiter that already opened that inode
+// and a newcomer that creates a fresh file lock two different inodes and
+// both enter, so the empty file is left behind deliberately; it is inert,
+// and List ignores it.
 //
 // In-process concurrent callers additionally serialize through a per-id
 // sync.Mutex so a single process never spins against its own lock file.
@@ -155,34 +174,42 @@ func (s *FileStore) withRecordLock(ctx context.Context, id string, fn func(cur *
 	return next, err
 }
 
-// acquireFileLock spins on an O_CREATE|O_EXCL create of <id>.lock until it
-// succeeds, the context is canceled, or lockWaitTimeout elapses. A lock
-// file older than staleLockAge is treated as abandoned (its holder crashed
-// mid-critical-section) and removed so the store cannot deadlock forever on
-// a dead process.
+// acquireFileLock opens <id>.lock and spins on a non-blocking exclusive
+// OS lock over it until it succeeds, the context is canceled, or
+// lockWaitTimeout elapses. The returned release drops only this
+// descriptor's own lock: it never unlinks the file, so it cannot revoke
+// exclusion that meanwhile belongs to somebody else. A lock file left by a
+// crashed process is reused as-is — its lock died with the process — which
+// is why no age heuristic is needed to avoid a permanent deadlock.
 func (s *FileStore) acquireFileLock(ctx context.Context, id string) (release func(), err error) {
 	path := s.lockPath(id)
 	deadline := time.Now().Add(lockWaitTimeout)
 
-	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, filestoreFilePerm)
-		if err == nil {
-			_ = f.Close()
-			return func() { _ = os.Remove(path) }, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("interrupt: create lock %q: %w", path, err)
-		}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, filestoreFilePerm)
+	if err != nil {
+		return nil, fmt.Errorf("interrupt: open lock %q: %w", path, err)
+	}
+	release = func() {
+		_ = unlockFile(f)
+		_ = f.Close()
+	}
 
-		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > staleLockAge {
-			_ = os.Remove(path)
-			continue
+	for {
+		locked, lockErr := tryLockFile(f)
+		if lockErr != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("interrupt: lock %q: %w", path, lockErr)
+		}
+		if locked {
+			return release, nil
 		}
 
 		if err := ctx.Err(); err != nil {
+			_ = f.Close()
 			return nil, err
 		}
 		if time.Now().After(deadline) {
+			_ = f.Close()
 			return nil, fmt.Errorf("interrupt: timed out waiting for lock on %q", id)
 		}
 		time.Sleep(lockRetryInterval)
@@ -414,10 +441,11 @@ func (s *FileStore) List(ctx context.Context, sessionID string) ([]*Meta, error)
 }
 
 // Delete removes the record file for id under the same exclusive lock as
-// every other mutation. The lock file itself is released by withExclusive
-// (never unlinked while another instance holds it). Idempotent on an
-// unknown — but well-formed — id; a malformed one is rejected rather than
-// resolved, so no id can ever name a file outside root.
+// every other mutation. The companion lock file is left in place on
+// purpose (see the type comment): unlinking it would break exclusion for
+// an instance already waiting on that inode. Idempotent on an unknown —
+// but well-formed — id; a malformed one is rejected rather than resolved,
+// so no id can ever name a file outside root.
 func (s *FileStore) Delete(ctx context.Context, id string) error {
 	return s.withExclusive(ctx, id, func() error {
 		if err := os.Remove(s.recordPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {

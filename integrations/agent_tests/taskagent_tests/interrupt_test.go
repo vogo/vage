@@ -982,6 +982,99 @@ func TestInterrupt_PrefixSubmit_EmitsEventsForCommittedDecisions(t *testing.T) {
 	}
 }
 
+// TestInterrupt_IdempotentResubmit_EmitsNoDuplicateEvents pins the other
+// half of the event contract: interrupt_decision_stored counts durable
+// writes, not submitted items. Resubmitting an identical decision is a
+// store no-op, so it must emit nothing — and a batch mixing an already
+// stored decision with a new one emits exactly one event, for the new one.
+func TestInterrupt_IdempotentResubmit_EmitsNoDuplicateEvents(t *testing.T) {
+	var handlerRuns atomic.Int32
+	mock := newMock(
+		makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-1", Name: "ask_user", Arguments: `{"question":"a?"}`},
+			schema.ToolCall{ID: "tc-2", Name: "ask_user", Arguments: `{"question":"b?"}`},
+		),
+		makeStopResponse("done", 20),
+	)
+	store := interrupt.NewMapStore()
+	hookMgr, events := eventCollector()
+
+	a := taskagent.New(
+		agent.Config{ID: "agent-idem-evt"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+		taskagent.WithHookManager(hookMgr),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-idem-evt",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	interruptID := first.Interrupt.InterruptID
+
+	storedCount := func() int {
+		n := 0
+		for _, e := range events() {
+			if e == schema.EventInterruptDecisionStored {
+				n++
+			}
+		}
+		return n
+	}
+
+	// First submit: one new decision, one event.
+	if _, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: interruptID,
+		Decisions:   []schema.InterruptDecision{{ToolCallID: "tc-1", Content: "yes"}},
+	}); err != nil {
+		t.Fatalf("first ResumeInterrupt: %v", err)
+	}
+	if got := storedCount(); got != 1 {
+		t.Fatalf("after first submit: stored events = %d, want 1", got)
+	}
+
+	// Replay of exactly the same decision: nothing is written, so nothing
+	// is emitted.
+	if _, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: interruptID,
+		Decisions:   []schema.InterruptDecision{{ToolCallID: "tc-1", Content: "yes"}},
+	}); err != nil {
+		t.Fatalf("replay ResumeInterrupt: %v", err)
+	}
+	if got := storedCount(); got != 1 {
+		t.Errorf("after idempotent replay: stored events = %d, want 1", got)
+	}
+
+	// Mixed batch: the replayed item stays silent, the new one emits. The
+	// batch is now fully decided, so this call really resumes.
+	if _, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: interruptID,
+		Decisions: []schema.InterruptDecision{
+			{ToolCallID: "tc-1", Content: "yes"},
+			{ToolCallID: "tc-2", Content: "no"},
+		},
+	}); err != nil {
+		t.Fatalf("mixed ResumeInterrupt: %v", err)
+	}
+	if got := storedCount(); got != 2 {
+		t.Errorf("after mixed batch: stored events = %d, want 2", got)
+	}
+
+	rec, gerr := store.Get(context.Background(), interruptID)
+	if gerr != nil {
+		t.Fatalf("store.Get: %v", gerr)
+	}
+	if len(rec.Decisions) != 2 {
+		t.Errorf("persisted decisions = %d, want 2", len(rec.Decisions))
+	}
+}
+
 func containsStr(list []string, want string) bool {
 	return slices.Contains(list, want)
 }

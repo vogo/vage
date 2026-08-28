@@ -58,7 +58,7 @@
 | AC-11 | **短路与改写都不绕过护栏**:不调用 `next` 即短路(保证无 LLM 调用、无工具执行、无 ReAct 检查点写入);调用 `next` 后原地修改或替换 `RunResponse`。两者产出的消息都仍须经过输出护栏、写入会话记忆,并成为 `AgentEnd.Message` 的唯一来源。 |
 | AC-12 | **框架所有的不变式**:`SessionID` 与 `Duration` 最终以请求会话与实测耗时为准,中间件不可伪造;中间件可决定消息、元数据、usage 与 stop reason。`nil, nil` 按 `ErrNilMiddlewareResponse` 失败,中间件错误按运行错误终止终态处理,不产生成功终态事件。 |
 | AC-13 | **直返工具(ReturnDirect)**:被 `taskagent.WithReturnDirectTools` 标记的工具成功后,ReAct 循环跳过下一轮模型调用,把护栏后的 `ToolResult.Text()` 包装为最终 assistant 消息并以 `complete` 终止。同批全部工具仍按既有并发规则执行完毕;在模型调用顺序中选第一个「名称已配置且最终结果成功」的工具,完成时序不参与裁决。失败路径(handler/Registry 错误、`IsError` 结果、工具结果护栏 Block)绝不短路,整批结果照常回填。直返只跳过模型轮次,输出护栏、消息记忆、Agent middleware 后置与 `AgentEnd` 照常运行;usage 只累计已发生的模型调用。 |
-| AC-14 | **Interrupt suspend point**: when `WithInterruptPolicy` (+ `WithInterruptStore`) flags any call in a tool batch, `runReactLoop` freezes the whole batch before `executeToolBatch` — no handler runs, no `tool_call_start/end`. `StopReasonInterrupted` is returned only after `interrupt.Store.Create` succeeds; a store failure is a hard Run error, never a fake suspend. `Pending` is a non-empty unique subset of the batch (duplicates and unknown IDs are rejected before persist). `ResumeInterrupt(ctx, req)` injects decisions by `interrupt_id + tool_call_id`; sibling calls in the original `ToolCalls` order run only once every pending call has a decision, inheriting the same logical Run's consumed token budget. Omitting decisions probes a Pending record and retries resume on a Ready record. Submit never demotes `Resuming` back to `Ready`. Each durably committed decision emits `interrupt_decision_stored`, including a valid prefix that landed before a later item in the same call was rejected. Does not enter the Agent middleware chain, does not re-run input guards, starts with empty Run values. Configuring only one of `WithInterruptStore` / `WithInterruptPolicy` is a construction error. |
+| AC-14 | **Interrupt suspend point**: when `WithInterruptPolicy` (+ `WithInterruptStore`) flags any call in a tool batch, `runReactLoop` freezes the whole batch before `executeToolBatch` — no handler runs, no `tool_call_start/end`. `StopReasonInterrupted` is returned only after `interrupt.Store.Create` succeeds; a store failure is a hard Run error, never a fake suspend. `Pending` is a non-empty unique subset of the batch (duplicates and unknown IDs are rejected before persist). `ResumeInterrupt(ctx, req)` injects decisions by `interrupt_id + tool_call_id`; sibling calls in the original `ToolCalls` order run only once every pending call has a decision, inheriting the same logical Run's consumed token budget. Omitting decisions probes a Pending record and retries resume on a Ready record. Submit never demotes `Resuming` back to `Ready`. Each durably committed decision emits `interrupt_decision_stored`, including a valid prefix that landed before a later item in the same call was rejected — and only those: an idempotent resubmission of an already stored decision writes nothing and emits nothing. Does not enter the Agent middleware chain, does not re-run input guards, starts with empty Run values. Configuring only one of `WithInterruptStore` / `WithInterruptPolicy` is a construction error. |
 
 ## Agent 运行中间件链
 
@@ -97,14 +97,14 @@ stateDiagram-v2
     Iteration --> LLMCall
     LLMCall --> ToolBatch: 有工具调用
     ToolBatch --> InterruptCheck
-    InterruptCheck --> Suspended: 策略命中
-    InterruptCheck --> ToolExec: 未命中
+    InterruptCheck --> Suspended: policy hit
+    InterruptCheck --> ToolExec: no hit
     ToolExec --> Checkpoint
     Checkpoint --> Iteration: 未终止
-    ToolExec --> Terminal: 成功直返工具
+    ToolExec --> Terminal: successful return-direct tool
     LLMCall --> Terminal: 无工具调用/达上限/预算耗尽
     Terminal --> AgentEnd
-    Suspended --> AgentEnd: interrupted(本次调用结束)
+    Suspended --> AgentEnd: interrupted (this call ends here)
     AgentEnd --> [*]
 ```
 

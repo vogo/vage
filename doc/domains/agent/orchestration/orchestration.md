@@ -33,7 +33,7 @@
 - **背压(Backpressure)**:按负载自适应调节并发度。
 - **Checkpoint(检查点)**:某次迭代的完整可恢复快照(消息列表、累计用量、Final/StopReason 标记)。
 - **Interrupt**: `interrupt.Record` — a pre-tool-batch suspend snapshot: full batch, pending unique subset, committed decisions, continuation, and the already-resolved effective Run parameters. State machine: Pending → Ready → Resuming → Completed. Submit never demotes Resuming to Ready.
-- **interrupt.Store**: persistence contract. `MapStore` (single-process tests) and `FileStore` (cross-process; `<id>.lock` serializes every mutation of that record, including `AcquireLease` and `Delete`).
+- **interrupt.Store**: persistence contract. `MapStore` (single-process tests) and `FileStore` (cross-process; an OS advisory lock on `<id>.lock` serializes every mutation of that record, including `AcquireLease` and `Delete` — a live holder is never preempted by age, and a dead one releases on process exit).
 
 ## 业务规则与不变式
 
@@ -59,7 +59,7 @@ DAG 执行通过事件处理器发出:节点开始、节点完成(带状态与�
 
 ## 与其他领域的交互
 
-- **agent-core**:节点里的 Runner 通常就是一个 Agent;工作流型 Agent 是本引擎的主要调用方。 TaskAgent uses `checkpoint` for crash resume and `interrupt.Store` for tool-batch suspend/resume. The suspend gate, `ResumeInterrupt` contract, and events belong to agent-core AC-14; see [agent-core](../agent-core/agent-core.md).
+- **agent-core**:节点里的 Runner 通常就是一个 Agent;工作流型 Agent 是本引擎的主要调用方。TaskAgent uses `checkpoint` for crash resume and `interrupt.Store` for tool-batch suspend/resume. The suspend gate, `ResumeInterrupt` contract, and events belong to agent-core AC-14; see [agent-core](../agent-core/agent-core.md).
 - 本领域仅依赖 `schema`,不反向依赖具体 Agent 实现。
 
 技术实现(调度器、优先级队列、资源限流、补偿流程)见 [orchestration-design](orchestration-design.md)。

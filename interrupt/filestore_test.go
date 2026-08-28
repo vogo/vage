@@ -170,9 +170,11 @@ func ownerName(i int) string {
 	return "owner-" + string(rune('a'+i))
 }
 
-// TestFileStore_StaleLockIsReclaimed verifies a crashed holder's leftover
-// <id>.lock file does not deadlock every future writer.
-func TestFileStore_StaleLockIsReclaimed(t *testing.T) {
+// TestFileStore_AbandonedLockFileDoesNotDeadlock verifies a crashed
+// holder's leftover <id>.lock file does not wedge every future writer: the
+// OS dropped that holder's lock when the process died, so the file is just
+// an empty inode to be relocked.
+func TestFileStore_AbandonedLockFileDoesNotDeadlock(t *testing.T) {
 	root := t.TempDir()
 	ctx := context.Background()
 
@@ -180,21 +182,85 @@ func TestFileStore_StaleLockIsReclaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	rec := createReadyRecord(t, s, "sess-stale")
+	rec := createReadyRecord(t, s, "sess-abandoned")
 
-	// Simulate a crashed holder: create the lock file directly and
-	// backdate its mtime past staleLockAge.
+	// Simulate a crashed holder: the lock file exists, but nobody holds
+	// an OS lock on it.
 	lockPath := s.lockPath(rec.ID)
 	if err := os.WriteFile(lockPath, nil, filestoreFilePerm); err != nil {
-		t.Fatalf("write stale lock: %v", err)
+		t.Fatalf("write abandoned lock: %v", err)
 	}
-	old := time.Now().Add(-2 * staleLockAge)
+	old := time.Now().Add(-2 * time.Hour)
 	if err := os.Chtimes(lockPath, old, old); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
 	if _, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute); err != nil {
-		t.Fatalf("AcquireLease past stale lock: %v", err)
+		t.Fatalf("AcquireLease past abandoned lock: %v", err)
+	}
+}
+
+// TestFileStore_LiveHolderIsNotPreemptedByLockAge is the regression for
+// age-based lock reclamation: however old the lock file looks, a second
+// instance must not enter while the first is still inside its critical
+// section, and the first instance's release must not revoke a lock it no
+// longer owns. The old mtime here stands in for any holder whose critical
+// section outlives an arbitrary staleness threshold — a slow fsync, a
+// paused process, a loaded machine.
+func TestFileStore_LiveHolderIsNotPreemptedByLockAge(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	storeA, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore A: %v", err)
+	}
+	storeB, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore B: %v", err)
+	}
+	rec := createReadyRecord(t, storeA, "sess-live-holder")
+
+	release, err := storeA.acquireFileLock(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("acquireFileLock: %v", err)
+	}
+
+	// Make the live lock look arbitrarily abandoned to any age heuristic.
+	lockPath := storeA.lockPath(rec.ID)
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		release()
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if _, err := storeB.AcquireLease(waitCtx, rec.ID, "owner-b", time.Minute); !errors.Is(err, context.DeadlineExceeded) {
+		release()
+		t.Fatalf("AcquireLease err = %v, want context.DeadlineExceeded while holder is live", err)
+	}
+
+	got, err := storeA.readRecord(rec.ID)
+	if err != nil {
+		release()
+		t.Fatalf("readRecord: %v", err)
+	}
+	if got.Status != StatusReady || got.LeaseOwner != "" {
+		release()
+		t.Fatalf("record mutated by a preempting waiter: status=%q owner=%q", got.Status, got.LeaseOwner)
+	}
+
+	release()
+
+	// Releasing drops only this descriptor's lock; the file itself stays,
+	// so no waiter can ever be locking a different inode than a newcomer.
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("lock file unlinked by release: %v", err)
+	}
+
+	if _, err := storeB.AcquireLease(ctx, rec.ID, "owner-b", time.Minute); err != nil {
+		t.Fatalf("AcquireLease after release: %v", err)
 	}
 }
 

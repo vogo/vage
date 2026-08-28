@@ -67,8 +67,10 @@ type Store interface {
 	// Each decision must address a ToolCallID in the record's Pending
 	// set: ErrUnknownToolCall otherwise. Resubmitting an identical
 	// decision (same Content and IsError) for an already-decided
-	// ToolCallID is idempotent; resubmitting a different one returns
-	// ErrDecisionConflict without changing that decision. Decisions are
+	// ToolCallID is idempotent: it persists nothing and leaves Revision
+	// unchanged, which is how a caller distinguishes a real write from a
+	// replay. Resubmitting a different one returns ErrDecisionConflict
+	// without changing that decision. Decisions are
 	// applied one at a time in slice order, so a conflict or unknown ID on
 	// the Nth decision leaves the first N-1 committed. When a prefix was
 	// committed before the error, the returned *Record reflects that

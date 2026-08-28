@@ -298,10 +298,15 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 	}
 
 	if len(req.Decisions) > 0 {
+		// prior is the pre-submit view: an event must describe a decision
+		// this call actually wrote, and only a before/after diff can tell
+		// a first write from an idempotent resubmission (the store's
+		// no-op, which persists nothing).
+		prior := rec
 		updated, submitErr := a.interruptStore.SubmitDecisions(ctx, rec.ID, toStoreDecisions(req.Decisions))
 		if updated != nil {
 			rec = updated
-			a.emitInterruptDecisionEvents(ctx, rec, req.Decisions)
+			a.emitInterruptDecisionEvents(ctx, prior, rec, req.Decisions)
 		}
 		if submitErr != nil {
 			return nil, submitErr
@@ -336,17 +341,29 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 	return a.resumeFromInterrupt(ctx, rec, owner)
 }
 
-// emitInterruptDecisionEvents fires interrupt_decision_stored for each
-// submitted decision that actually landed, in slice order, and stops at
-// the first entry that was not committed (the rejected Nth of a prefix
-// submit). This keeps the event count aligned with durable writes even
-// when SubmitDecisions returns an error after committing a valid prefix.
-func (a *Agent) emitInterruptDecisionEvents(ctx context.Context, rec *interrupt.Record, submitted []schema.InterruptDecision) {
+// emitInterruptDecisionEvents fires interrupt_decision_stored once per
+// decision this submit durably added, in slice order, walking prior (the
+// record as read before the submit) against rec (as returned by it):
+//
+//   - present in rec but not in prior — newly committed, emit;
+//   - already in prior with the same content — an idempotent resubmission
+//     the store turned into a no-op, so there is no write to report;
+//   - absent or different in rec — the rejected Nth entry of a prefix
+//     submit; nothing after it was committed either, so stop.
+//
+// This keeps the event count equal to the number of decisions actually
+// written, whether the batch was fully accepted, partially accepted, or
+// entirely a replay.
+func (a *Agent) emitInterruptDecisionEvents(ctx context.Context, prior, rec *interrupt.Record, submitted []schema.InterruptDecision) {
 	ready := rec.Status != interrupt.StatusPending
 	for _, d := range submitted {
-		existing, ok := rec.Decisions[d.ToolCallID]
-		if !ok || existing.Content != d.Content || existing.IsError != d.IsError {
+		stored, ok := rec.Decisions[d.ToolCallID]
+		if !ok || stored.Content != d.Content || stored.IsError != d.IsError {
 			return
+		}
+		if before, had := prior.Decisions[d.ToolCallID]; had &&
+			before.Content == d.Content && before.IsError == d.IsError {
+			continue
 		}
 		a.dispatch(ctx, schema.NewEvent(schema.EventInterruptDecisionStored, a.ID(), rec.SessionID, schema.InterruptDecisionStoredData{
 			InterruptID: rec.ID,

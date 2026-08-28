@@ -16,7 +16,7 @@
 | `orchestrate/aggregator.go` | 结果聚合 |
 | `orchestrate/checkpoint.go`(`CheckpointStore`/`InMemoryCheckpointStore`) | DAG 级存/取与回放 |
 | `checkpoint` 包(`IterationStore`) | ReAct 迭代级快照,文件系统后端 |
-| `interrupt` package (`Store`/`Record`/`MapStore`/`FileStore`) | Pre-tool-batch suspend state machine. `FileStore` uses an `<id>.lock` file for cross-process exclusion on every mutation of that record (`AcquireLease`, `SubmitDecisions`, `Delete`, …). |
+| `interrupt` package (`Store`/`Record`/`MapStore`/`FileStore`) | Pre-tool-batch suspend state machine. `FileStore` takes an OS advisory lock on an `<id>.lock` file for cross-process exclusion on every mutation of that record (`AcquireLease`, `SubmitDecisions`, `Delete`, …). |
 
 ## 关键设计决策
 
@@ -26,7 +26,7 @@
 - **收尾单点(锁契约)**:错误与取消路径收敛到同一收尾逻辑,确保加锁成对释放、事件一致通知 —— 这是近期"锁契约硬化 / 收敛错误与取消收尾路径"的核心改动,防止提前返回导致的持锁或重复解锁。
 - **双轨检查点**:迭代级(`checkpoint`)服务单个长时 Agent 的续跑;DAG 级(`orchestrate`)服务整图回放。两者刻意分离,仅目录布局巧合相似,不共享读路径。
 - **Interrupt is an independent state machine, not a checkpoint flag**: `interrupt.Store` and `checkpoint.IterationStore` are two persistence interfaces whose invariants conflict — checkpoint assumes "this is a complete finished-turn snapshot"; interrupt assumes "this is a pre-execution hang with an unfinished pending set and a lease". Stuffing the latter into the former would break checkpoint completeness and would make `Resume(sessionID)` unable to tell which the caller wanted. A new interface costs a second contract and state machine; it buys independent retention, backends, and resume semantics. See [ADR 0001](../../../architecture/adr/0001-interrupt-independent-state-machine.md).
-- **Lease over a permanent lock**: `interrupt.Store.AcquireLease` is owner + expiry, so a crashed resumer can be taken over; the cost is no end-to-end exactly-once (ordinary tools may replay after takeover; side-effecting tools still need caller-supplied idempotency keys or compensation). `FileStore` uses `O_CREATE|O_EXCL` on `<id>.lock` as the critical-section gate, held only for one read-modify-write (or Delete). Lease identity and expiry live on the Record, not in the lock file's existence. `SubmitDecisions` never demotes `Resuming` to `Ready`.
+- **Lease over a permanent lock**: `interrupt.Store.AcquireLease` is owner + expiry, so a crashed resumer can be taken over; the cost is no end-to-end exactly-once (ordinary tools may replay after takeover; side-effecting tools still need caller-supplied idempotency keys or compensation). `FileStore` gates the critical section with an OS advisory lock (flock / LockFileEx) on `<id>.lock`, held only for one read-modify-write (or Delete). The kernel owns that lock, which is what makes the gate trustworthy: a live holder is never preempted because its lock "looks old" (an age heuristic would admit a second resumer to a still-running critical section), and a dead holder never wedges the record because the lock dies with its file descriptor. Release drops only the holder's own lock; lock files are never unlinked, since replacing the inode would let a waiter and a newcomer lock different files and both enter. Lease identity and expiry live on the Record, not in the lock file's existence. `SubmitDecisions` never demotes `Resuming` to `Ready`.
 
 ## 状态机
 
