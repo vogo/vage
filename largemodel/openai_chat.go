@@ -161,7 +161,30 @@ func (c *openAIChatCaller) buildRequest(req *Request) (*openai.ChatCompletionReq
 		wire.ToolChoice = choice
 	}
 
+	if req.ResponseSchema != nil {
+		wire.ResponseFormat = openAIResponseFormat(req.ResponseSchema)
+	}
+
 	return wire, nil
+}
+
+// responseSchemaFormatName is the fixed name vage sends in every OpenAI
+// json_schema response_format, so the same ResponseSchema always produces the
+// same wire shape and identical requests keep hitting prompt cache.
+const responseSchemaFormatName = "vage_response_schema"
+
+// openAIResponseFormat builds OpenAI Chat Completions' response_format for a
+// caller-supplied JSON Schema: strict json_schema mode under a stable name.
+// The schema is passed through unmodified.
+func openAIResponseFormat(respSchema any) map[string]any {
+	return map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   responseSchemaFormatName,
+			"schema": respSchema,
+			"strict": true,
+		},
+	}
 }
 
 // forcedToolChoice returns OpenAI's tool_choice value when a tool is marked

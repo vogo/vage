@@ -35,6 +35,7 @@
 - **预算中间件(budget)**:在调用前后核算 token 消耗,配合 Agent 的预算终止。
 - **溢出处理(overflow)**:上下文超限时的处置。
 - **上下文编辑器(ContextEditor)**:请求到达模型前,把较早的工具结果折叠为短占位符,并可将超大工具结果外置到工件存储。
+- **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段;无原生映射的 codec 走 `DegradeResponseSchemaPrompt` 降级为确定性 system 指令。三态互斥,一次调用只选一种;vage 不解析、不校验、不清理最终 JSON。
 
 ## 业务规则与不变式
 
@@ -50,6 +51,7 @@
 | MOD-6 | **超大结果外置**:单条工具结果超过字节上限时外置到工件存储,提示里只留短引用;外置失败则回退为内联提示。 |
 | MOD-9 | **重试与存活判定单一来源**:归 `largemodel/router`,vage 不提供 Retry / CircuitBreaker 中间件,以免尝试次数相乘。代价须知悉:router 只把 401/403 视为不可重试,确定性的 400 也会被重试满并使端点进入恢复窗口。`largemodel.IsRetryable` 保留 vage 自己更窄的错误判读,供上层决策使用,但不驱动任何重试循环。 |
 | MOD-10 | **池不共享**:一个 router 池归属一个会话、一次只服务一个调用;并发由多个池承担,每个池独立学习端点健康。跨池的健康视图只在读取时按别名合并,不回写;合并取各池中最有把握的判断(available > probation > dead),无法识别的状态按 dead 处理。 |
+| MOD-11 | **ResponseSchema 非强保证**:原生字段成功发出不等于响应必为合规 JSON —— provider 拒答、内容过滤、截断仍按现有 finish reason / error 语义返回;降级提示只提高遵循概率,不构成 schema 合规保证。vage 不因本地校验失败自动重试,也不在 provider 4xx 后剥离原生字段重试。 |
 
 ## 状态与转换
 
