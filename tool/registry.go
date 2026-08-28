@@ -20,6 +20,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -31,11 +32,29 @@ type entry struct {
 	handler ToolHandler // nil for external (MCP) tools
 }
 
+// ExecuteMiddleware wraps the Registry execute path so callers can observe,
+// short-circuit, or rewrite a tool call before and after dispatch. next is
+// either the next middleware or the base lookup/dispatch handler.
+//
+// The first registered middleware is outermost: for A then B the call order is
+// A.before → B.before → dispatch → B.after → A.after. A middleware may skip
+// next (deny or synthesise a result) or call next with a different name/args;
+// the framework does not normalise returns or recover panics.
+//
+// Concurrent Execute calls share the same middleware instances; stateful
+// middlewares must be safe for concurrent use. Direct ToolHandler calls bypass
+// this chain — enforce policies by constructing the Registry with them.
+type ExecuteMiddleware func(next ToolHandler) ToolHandler
+
 // Registry is a thread-safe in-memory tool registry.
 type Registry struct {
-	mu             sync.RWMutex
-	entries        map[string]*entry
-	externalCaller ExternalToolCaller
+	mu                 sync.RWMutex
+	entries            map[string]*entry
+	externalCaller     ExternalToolCaller
+	executeMiddlewares []ExecuteMiddleware
+	// execute is the fixed middleware chain around dispatch, built once in
+	// NewRegistry. dispatch itself still reads live registry state on each call.
+	execute ToolHandler
 }
 
 // Compile-time check: Registry implements ToolRegistry.
@@ -49,13 +68,40 @@ func WithExternalCaller(c ExternalToolCaller) RegistryOption {
 	return func(r *Registry) { r.externalCaller = c }
 }
 
+// WithExecuteMiddleware appends execute middlewares in registration order.
+// Repeated calls append; nil entries are skipped so callers can assemble the
+// chain conditionally without compaction.
+func WithExecuteMiddleware(middlewares ...ExecuteMiddleware) RegistryOption {
+	return func(r *Registry) {
+		for _, mw := range middlewares {
+			if mw != nil {
+				r.executeMiddlewares = append(r.executeMiddlewares, mw)
+			}
+		}
+	}
+}
+
 // NewRegistry creates an empty Registry.
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{entries: make(map[string]*entry)}
 	for _, o := range opts {
 		o(r)
 	}
+	r.execute = chainExecuteMiddleware(r.dispatch, r.executeMiddlewares...)
 	return r
+}
+
+// chainExecuteMiddleware applies middlewares around base so that
+// middlewares[0] is outermost. nil entries are skipped.
+func chainExecuteMiddleware(base ToolHandler, middlewares ...ExecuteMiddleware) ToolHandler {
+	wrapped := base
+	for _, mw := range slices.Backward(middlewares) {
+		if mw == nil {
+			continue
+		}
+		wrapped = mw(wrapped)
+	}
+	return wrapped
 }
 
 func (r *Registry) Register(def schema.ToolDef, handler ToolHandler) error {
@@ -132,6 +178,13 @@ func (r *Registry) SetExternalCaller(c ExternalToolCaller) {
 }
 
 func (r *Registry) Execute(ctx context.Context, name, args string) (schema.ToolResult, error) {
+	return r.execute(ctx, name, args)
+}
+
+// dispatch looks up the tool and runs the local handler or external caller.
+// The Registry lock is held only while taking the lookup snapshot — never
+// across middleware, handler, or external call execution.
+func (r *Registry) dispatch(ctx context.Context, name, args string) (schema.ToolResult, error) {
 	r.mu.RLock()
 	e, ok := r.entries[name]
 	extCaller := r.externalCaller
