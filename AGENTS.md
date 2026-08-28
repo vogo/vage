@@ -25,6 +25,7 @@ Conflict arbitration (lower number wins); full text in [constitution.md](doc/con
 - **Quality gate** — every commit passes `make build` (license-check → format → lint → test).
 - **License header** — every Go file carries the Apache-2.0 header.
 - **Docs language** — `doc/` in English.
+- No `Co-Authored-By` in commit messages.
 
 ## Build
 
