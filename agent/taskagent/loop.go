@@ -45,6 +45,10 @@ func (a *Agent) preflightRun(ctx context.Context, req *schema.RunRequest) (runPa
 		return runParams{}, errors.New("vage: model caller is required")
 	}
 
+	if err := a.checkInterruptConfig(); err != nil {
+		return runParams{}, err
+	}
+
 	if err := a.runInputGuards(ctx, req); err != nil {
 		return runParams{}, err
 	}
@@ -151,6 +155,24 @@ func (a *Agent) runReactLoop(
 		if rc.tracker.Exhausted() {
 			a.saveIterationCheckpoint(ctx, rc, messages, true, schema.StopReasonBudgetExhausted)
 			return schema.StopReasonBudgetExhausted, nil
+		}
+
+		// Interrupt choke point: a configured InterruptPolicy gets the
+		// batch before any handler runs. A hit suspends here — no
+		// checkpoint write (interrupt.Store, not IterationStore, is the
+		// resumable state) and no tool dispatch — and returns only after
+		// the record is durably persisted; a persistence failure is a hard
+		// Run error, never a synthesised stop reason. See
+		// agent/taskagent/interrupt.go.
+		if a.interruptPolicy != nil {
+			desc, interrupted, err := a.maybeInterrupt(ctx, rc, p, messages, assistantMsg.ToolCalls())
+			if err != nil {
+				return "", err
+			}
+			if interrupted {
+				rc.interruptDesc = desc
+				return schema.StopReasonInterrupted, nil
+			}
 		}
 
 		// Execute tool calls with bounded concurrency; events and messages
@@ -363,13 +385,25 @@ func (a *Agent) buildResponseMsgs(lastMsg schema.Message, partial bool) []schema
 func (a *Agent) draftResponse(rc *runContext) *schema.RunResponse {
 	partial := rc.stopReason != schema.StopReasonComplete
 
-	return &schema.RunResponse{
+	resp := &schema.RunResponse{
 		Messages:   a.buildResponseMsgs(rc.lastMsg, partial),
 		SessionID:  rc.sessionID,
 		Usage:      &rc.totalUsage,
 		Duration:   time.Since(rc.start).Milliseconds(),
 		StopReason: rc.stopReason,
 	}
+
+	// Interrupt is stamped here — the only place a StopReasonInterrupted
+	// draft is ever produced — and only after maybeInterrupt has already
+	// confirmed the record persisted. A middleware can still rewrite
+	// StopReason/Interrupt afterward like any other draft field (AC-12);
+	// what this guarantees is that the framework itself never reports an
+	// interrupt that was not durably created.
+	if rc.stopReason == schema.StopReasonInterrupted {
+		resp.Interrupt = rc.interruptDesc
+	}
+
+	return resp
 }
 
 // partialResult reports whether the terminal path should treat the response as
@@ -424,7 +458,15 @@ func (a *Agent) finalizeRun(ctx context.Context, rc *runContext, resp *schema.Ru
 		resp.Messages = guardedMsgs
 	}
 
-	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, resp.Messages, rc.br.sessionMsgCount)
+	// An interrupted Run leaves the assistant/tool-call pair open — the
+	// matching tool results do not exist yet — so the response messages
+	// (which include that open pair, for the caller's visibility) are
+	// withheld from session memory here. The request messages are still
+	// promoted normally: maybeInterrupt already reserved the key range
+	// after them (see interrupt.go), so Resume's own finalize picks up
+	// writing exactly where this leaves off, with no duplicate keys and
+	// no dangling tool call ever visible in memory.
+	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, a.interruptSafeRespMsgs(rc, resp), rc.br.sessionMsgCount)
 
 	// Emit budget exhaustion event if applicable.
 	if rc.budgetExhausted() {
@@ -469,7 +511,8 @@ func (a *Agent) finalizeStream(
 		resp.Messages = guardedMsgs
 	}
 
-	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, resp.Messages, rc.br.sessionMsgCount)
+	// See finalizeRun for why an interrupted Run withholds resp.Messages.
+	a.storeAndPromoteMessages(ctx, rc.sessionID, rc.reqMsgs, a.interruptSafeRespMsgs(rc, resp), rc.br.sessionMsgCount)
 
 	// Emit budget exhaustion event if applicable.
 	if rc.budgetExhausted() {
@@ -483,6 +526,18 @@ func (a *Agent) finalizeStream(
 		Message:    terminalMessage(resp),
 		StopReason: resp.StopReason,
 	}))
+}
+
+// interruptSafeRespMsgs returns resp.Messages unless the loop actually
+// suspended (rc.stopReason, not the possibly middleware-rewritten
+// resp.StopReason — same reasoning as partialResult/budgetExhausted), in
+// which case it returns nil so storeAndPromoteMessages never persists the
+// still-open assistant/tool-call pair.
+func (a *Agent) interruptSafeRespMsgs(rc *runContext, resp *schema.RunResponse) []schema.Message {
+	if rc.stopReason == schema.StopReasonInterrupted {
+		return nil
+	}
+	return resp.Messages
 }
 
 // storeAndPromoteMessages stores request and response messages in working memory

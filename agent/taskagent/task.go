@@ -27,6 +27,7 @@ import (
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/interrupt"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
@@ -39,6 +40,10 @@ const (
 	defaultMaxIterations        = 10
 	defaultMaxParallelToolCalls = 4
 	defaultPromptCaching        = true
+	// defaultInterruptLeaseTTL bounds how long a ResumeInterrupt call holds
+	// the store lease before another attempt may reclaim it. See
+	// WithInterruptLeaseTTL.
+	defaultInterruptLeaseTTL = 5 * time.Minute
 )
 
 // Agent implements the agent.Agent interface using a model caller with
@@ -87,6 +92,17 @@ type Agent struct {
 	// iterationStore persists per-iteration ReAct snapshots so a Run can
 	// be resumed across crashes. nil disables checkpointing entirely.
 	iterationStore checkpoint.IterationStore
+	// interruptStore and interruptPolicy together enable the interrupt
+	// choke point in runReactLoop and ResumeInterrupt. Both must be set
+	// or both left nil — see checkInterruptConfig. Deliberately separate
+	// from iterationStore/checkpoint: an interrupt is a pending-decision
+	// state machine, not a crash-replay snapshot, see vage/interrupt.
+	interruptStore  interrupt.Store
+	interruptPolicy InterruptPolicy
+	// interruptLeaseTTL bounds how long ResumeInterrupt holds the store
+	// lease before another attempt may reclaim it. See
+	// WithInterruptLeaseTTL.
+	interruptLeaseTTL time.Duration
 	// checkpointFailureCB, when non-nil, runs after a non-fatal save
 	// failure on iterationStore. Used to feed observability counters
 	// (e.g., session.SessionMetrics.CheckpointSaveFailures) without
@@ -288,6 +304,54 @@ func WithIterationStore(s checkpoint.IterationStore) Option {
 	return func(a *Agent) { a.iterationStore = s }
 }
 
+// WithInterruptStore sets the persistence backend for suspended tool
+// batches — see vage/interrupt. It is one half of the configuration
+// ResumeInterrupt needs; WithInterruptPolicy is the other. Configuring
+// only one of the two is a configuration error surfaced at the first
+// Run/RunStream call (see checkInterruptConfig), not silently ignored.
+func WithInterruptStore(s interrupt.Store) Option {
+	return func(a *Agent) { a.interruptStore = s }
+}
+
+// WithInterruptPolicy sets the policy that decides, for each model tool-call
+// batch, which calls need an external decision before any of the batch's
+// handlers run. nil (the default) disables the interrupt choke point
+// entirely — every batch executes exactly as before this option existed.
+// See WithInterruptToolNames for the common "flag these tool names"
+// shortcut.
+func WithInterruptPolicy(p InterruptPolicy) Option {
+	return func(a *Agent) { a.interruptPolicy = p }
+}
+
+// WithInterruptToolNames installs a convenience InterruptPolicy that flags
+// every tool call in a batch whose Name exactly matches one of names — the
+// common case of "pause whenever the model calls ask_user" without having
+// to implement InterruptPolicy. Calling WithInterruptPolicy afterward
+// replaces it; option order follows the package's normal
+// "later-applied-wins" rule.
+func WithInterruptToolNames(names ...string) Option {
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		set[n] = struct{}{}
+	}
+	return func(a *Agent) { a.interruptPolicy = interruptPolicyByToolName(set) }
+}
+
+// WithInterruptLeaseTTL overrides how long ResumeInterrupt holds the store
+// lease (see interrupt.Store.AcquireLease) before another attempt may
+// reclaim it after a crash. Defaults to defaultInterruptLeaseTTL (5
+// minutes). Values <= 0 are ignored.
+func WithInterruptLeaseTTL(d time.Duration) Option {
+	return func(a *Agent) {
+		if d > 0 {
+			a.interruptLeaseTTL = d
+		}
+	}
+}
+
 // CheckpointFailureCallback is invoked after a non-fatal
 // IterationStore.Save failure. The agent has already logged the error
 // at slog.Warn level; the callback exists so observability layers can
@@ -360,6 +424,7 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 		streamBufferSize:     agent.DefaultStreamBufferSize,
 		maxParallelToolCalls: defaultMaxParallelToolCalls,
 		promptCaching:        defaultPromptCaching,
+		interruptLeaseTTL:    defaultInterruptLeaseTTL,
 	}
 	for _, o := range opts {
 		o(a)
@@ -467,6 +532,10 @@ type runContext struct {
 	// happened.
 	reactRan   bool
 	stopReason schema.StopReason
+
+	// interruptDesc is set by maybeInterrupt when stopReason ==
+	// StopReasonInterrupted; draftResponse is the only reader.
+	interruptDesc *schema.InterruptDescriptor
 }
 
 // buildInitialMessages assembles the message list sent to the LLM via a

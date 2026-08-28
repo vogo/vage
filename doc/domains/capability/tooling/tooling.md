@@ -27,7 +27,7 @@
 - **结果取值与截断助手**:工具结果取文本(`ToolResult.Text`)与字节级 UTF-8 截断(`TruncateUTF8`)是框架自带的通用能力,与"多大算大"的治理策略分开;前者只解释数据,后者才是策略。
 - **工具三来源**:本地函数、MCP 远程、agent-as-tool(把一个 Agent 当工具)。
 - **ResourceTracker(资源追踪)**:工具声明其读/写的资源(如文件),供上下文编辑判定 stale_resource、供编排做资源限流。
-- **内建工具族**:文件类(read/write/edit/glob/grep)、执行类(bash,进程隔离)、协作类(agenttool 子代理、askuser 询问用户)、状态类(todo、workspace、sessiontree)、检索类(vectorsearch、webfetch、websearch)。
+- **内建工具族**:文件类(read/write/edit/glob/grep)、执行类(bash,进程隔离)、协作类(agenttool 子代理、askuser 询问用户)、状态类(todo、workspace、sessiontree)、检索类(vectorsearch、webfetch、websearch)。`askuser` 有两条互不替代的协作路径,见下方 TOOL-9 与 [tooling-design](tooling-design.md)。
 - **MCPClient / MCPServer**:MCP 协议两端,带生命周期管理与凭证扫描(ScanEvent)。
 - **Skill(技能)**:Def(定义)+ Resource(资源)+ Activation(激活条件);经 Loader 加载、Registry 索引、Manager 激活、Validator 校验。
 
@@ -43,6 +43,7 @@
 | TOOL-6 | **agent-as-tool 隔离**:子代理通过 `sessionview` 只读快照运行,scratch 隔离(见 [session](../../memory/session/session.md) SES-6)。 |
 | TOOL-7 | **取文本与截断走框架入口**:"从工具结果取文本"与"按字节安全截断"是通用能力,只有一个推荐入口(`schema.ToolResult.Text` / `tool.TruncateUTF8`),调用方不再自建重复助手。字节上限与 token 预算是两件事,不可互换(详见 [tooling-design](tooling-design.md))。 |
 | TOOL-8 | **执行中间件包裹完整分派**:`WithExecuteMiddleware` 装饰 `Registry.Execute` 的整段查找与执行;本地、外部与"未找到/无 handler"等分派错误都在链内可观察可改写。第一个注册者最外层;nil 跳过;链在构造时固定。并发 `Execute` 共享同一组中间件实例,有状态实现须自保并发安全。直接调用某个 `ToolHandler` 会绕过该链。 |
+| TOOL-9 | **askuser 两条协作路径互不替代**:阻塞模式(`tool/askuser.Register` + `UserInteractor`)在处理器内同步等待,进程内、超时或进程退出即结束,不留框架级挂起记录;跨进程模式由 `taskagent.WithInterruptPolicy` 接管同一个 `ask_user` 工具名——命中后处理器整体不执行,框架转而持久化 `interrupt.Record` 并返回 `StopReasonInterrupted`,由 `ResumeInterrupt` 精确恢复。两条路径二选一,不得把阻塞模式包一层冒充跨进程 Resume(见 [agent-core](../../agent/agent-core/agent-core.md) AC-14、[orchestration](../../agent/orchestration/orchestration.md) OR-9)。 |
 
 ## 状态与转换
 

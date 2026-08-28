@@ -47,6 +47,17 @@
 
 历史助手 `tool/toolkit.TruncateUTF8` 与 `tool/toolkit.ResultText` 已 deprecated,保留为薄委托以免既有调用方编译失败;新代码直接用上表的入口。多文本 part 或多模态结果需要完整表示时,仍应直接读 `ToolResult.Content` —— `Text()` 只承诺便捷读取,不承诺完整性。
 
+## ask_user 的两条协作路径
+
+`tool/askuser` 只实现阻塞模式本身;跨进程模式不是这个包的新代码,而是 TaskAgent 在同一个工具名上叠加的一层策略。两条路径的选择在 Agent 构造期做出,不是运行期自动切换:
+
+| 需求 | 用 | 语义要点 |
+|------|----|----------|
+| 同进程、有真人在线等待响应,超时可接受 | `tool/askuser.Register(registry, interactor)` | 处理器调用 `UserInteractor.AskUser` 并阻塞;超时或进程退出直接结束,不产生任何可另一进程恢复的记录。 |
+| 需要跨进程 / 跨会话人工审批,允许延迟到分钟、小时甚至更久 | `taskagent.WithInterruptStore(store)` + `taskagent.WithInterruptToolNames("ask_user")`(或自定义 `InterruptPolicy`) | 模型请求 `ask_user` 时,`runReactLoop` 在处理器前拦截:处理器整体不执行,`interrupt.Store.Create` 成功后返回 `StopReasonInterrupted` 与 `interrupt_id`。另一进程用 `TaskAgent.ResumeInterrupt` 提交人工文本作为该 `tool_call_id` 的决定,恢复到原批次继续。 |
+
+两条路径共用同一个 `ask_user` 工具名与参数 schema,区别只在 Agent 是否配置了 `InterruptPolicy` 命中它:命中即整体接管,处理器不会被调用;未命中(或未配置 interrupt)则完全是阻塞路径的既有行为,不做任何隐式切换。同时注册两者没有意义——`ask_user` 一旦被 `InterruptPolicy` 命中,`tool/askuser` 的处理器就永远不会执行到。
+
 ## 非功能考量
 
 - **安全**:bash 进程隔离;文件工具路径校验集中在 `toolkit`;MCP I/O 脱敏;执行中间件是可选策略接缝而非自动安全边界。

@@ -1,0 +1,369 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package interrupt
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/vogo/vage/schema"
+)
+
+// runStoreContract exercises every Store method and is shared between
+// MapStore_test and FileStore_test so the two implementations stay
+// byte-for-byte equivalent on observable behavior. factory must return a
+// fresh, empty store for each subtest.
+func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Store) {
+	t.Helper()
+
+	t.Run(name+"/create_assigns_identity_and_pending_status", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-1", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if rec.ID == "" {
+			t.Error("Create left ID empty")
+		}
+		if rec.Version != CurrentVersion {
+			t.Errorf("Version = %d, want %d", rec.Version, CurrentVersion)
+		}
+		if rec.Revision != 1 {
+			t.Errorf("Revision = %d, want 1", rec.Revision)
+		}
+		if rec.Status != StatusPending {
+			t.Errorf("Status = %q, want %q", rec.Status, StatusPending)
+		}
+		if rec.CreatedAt.IsZero() || rec.UpdatedAt.IsZero() {
+			t.Error("CreatedAt/UpdatedAt left zero")
+		}
+	})
+
+	t.Run(name+"/create_with_empty_pending_is_immediately_ready", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-1", nil)
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if rec.Status != StatusReady {
+			t.Errorf("Status = %q, want %q", rec.Status, StatusReady)
+		}
+	})
+
+	t.Run(name+"/create_validates_inputs", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		if err := s.Create(ctx, nil); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Create nil err = %v, want ErrInvalidArgument", err)
+		}
+
+		empty := newTestRecord("", nil)
+		if err := s.Create(ctx, empty); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Create empty session err = %v, want ErrInvalidArgument", err)
+		}
+
+		badPending := newTestRecord("sess-1", []string{"not-a-call"})
+		if err := s.Create(ctx, badPending); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Create unknown pending err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run(name+"/get_unknown_id_returns_not_found", func(t *testing.T) {
+		s := factory(t)
+		if _, err := s.Get(context.Background(), "nope"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get unknown err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run(name+"/submit_decisions_transitions_pending_to_ready", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-2", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "yes"}})
+		if err != nil {
+			t.Fatalf("SubmitDecisions partial: %v", err)
+		}
+		if updated.Status != StatusPending {
+			t.Errorf("Status after partial submit = %q, want %q", updated.Status, StatusPending)
+		}
+
+		updated, err = s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-2", Content: "no", IsError: true}})
+		if err != nil {
+			t.Fatalf("SubmitDecisions final: %v", err)
+		}
+		if updated.Status != StatusReady {
+			t.Errorf("Status after full submit = %q, want %q", updated.Status, StatusReady)
+		}
+		if updated.Decisions["call-1"].Content != "yes" || updated.Decisions["call-2"].Content != "no" {
+			t.Errorf("Decisions not persisted: %+v", updated.Decisions)
+		}
+		if updated.Decisions["call-1"].DecidedAt.IsZero() {
+			t.Error("DecidedAt left zero")
+		}
+	})
+
+	t.Run(name+"/submit_decisions_idempotent_resubmit", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-3", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		d := []Decision{{ToolCallID: "call-1", Content: "ok"}}
+		if _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
+			t.Fatalf("first submit: %v", err)
+		}
+		if _, err := s.SubmitDecisions(ctx, rec.ID, d); err != nil {
+			t.Errorf("idempotent resubmit err = %v, want nil", err)
+		}
+	})
+
+	t.Run(name+"/submit_decisions_conflict_rejected", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-4", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
+			t.Fatalf("first submit: %v", err)
+		}
+		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "b"}})
+		if !errors.Is(err, ErrDecisionConflict) {
+			t.Errorf("conflicting resubmit err = %v, want ErrDecisionConflict", err)
+		}
+
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Decisions["call-1"].Content != "a" {
+			t.Errorf("conflict mutated state: %+v", got.Decisions["call-1"])
+		}
+	})
+
+	t.Run(name+"/submit_decisions_unknown_tool_call_rejected", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-5", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-999", Content: "x"}})
+		if !errors.Is(err, ErrUnknownToolCall) {
+			t.Errorf("unknown tool call err = %v, want ErrUnknownToolCall", err)
+		}
+	})
+
+	t.Run(name+"/acquire_lease_requires_ready", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-6", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		_, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute)
+		if !errors.Is(err, ErrNotReady) {
+			t.Errorf("AcquireLease on Pending err = %v, want ErrNotReady", err)
+		}
+	})
+
+	t.Run(name+"/lease_lifecycle", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-7", nil) // Ready immediately
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		leased, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute)
+		if err != nil {
+			t.Fatalf("AcquireLease: %v", err)
+		}
+		if leased.Status != StatusResuming || leased.LeaseOwner != "owner-a" {
+			t.Errorf("after AcquireLease: status=%q owner=%q", leased.Status, leased.LeaseOwner)
+		}
+
+		if _, err := s.AcquireLease(ctx, rec.ID, "owner-b", time.Minute); !errors.Is(err, ErrLeaseHeld) {
+			t.Errorf("second AcquireLease err = %v, want ErrLeaseHeld", err)
+		}
+
+		if err := s.ReleaseLease(ctx, rec.ID, "owner-b"); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Errorf("ReleaseLease wrong owner err = %v, want ErrLeaseNotOwned", err)
+		}
+
+		if err := s.ReleaseLease(ctx, rec.ID, "owner-a"); err != nil {
+			t.Fatalf("ReleaseLease: %v", err)
+		}
+
+		reacquired, err := s.AcquireLease(ctx, rec.ID, "owner-b", time.Minute)
+		if err != nil {
+			t.Fatalf("re-AcquireLease after release: %v", err)
+		}
+		if reacquired.LeaseOwner != "owner-b" {
+			t.Errorf("re-AcquireLease owner = %q, want owner-b", reacquired.LeaseOwner)
+		}
+
+		if err := s.Complete(ctx, rec.ID, "owner-a"); !errors.Is(err, ErrLeaseNotOwned) {
+			t.Errorf("Complete wrong owner err = %v, want ErrLeaseNotOwned", err)
+		}
+		if err := s.Complete(ctx, rec.ID, "owner-b"); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+
+		if _, err := s.AcquireLease(ctx, rec.ID, "owner-c", time.Minute); !errors.Is(err, ErrAlreadyCompleted) {
+			t.Errorf("AcquireLease on Completed err = %v, want ErrAlreadyCompleted", err)
+		}
+		if _, err := s.SubmitDecisions(ctx, rec.ID, nil); !errors.Is(err, ErrAlreadyCompleted) {
+			t.Errorf("SubmitDecisions on Completed err = %v, want ErrAlreadyCompleted", err)
+		}
+	})
+
+	t.Run(name+"/expired_lease_is_reclaimable", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-8", nil)
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		if _, err := s.AcquireLease(ctx, rec.ID, "owner-a", -time.Second); err != nil {
+			t.Fatalf("AcquireLease with already-expired ttl: %v", err)
+		}
+
+		reclaimed, err := s.AcquireLease(ctx, rec.ID, "owner-b", time.Minute)
+		if err != nil {
+			t.Fatalf("reclaim expired lease: %v", err)
+		}
+		if reclaimed.LeaseOwner != "owner-b" {
+			t.Errorf("reclaimed owner = %q, want owner-b", reclaimed.LeaseOwner)
+		}
+	})
+
+	t.Run(name+"/list_returns_meta_without_body", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		for i := range 3 {
+			rec := newTestRecord("sess-list", []string{"call-1"})
+			rec.Iteration = i
+			if err := s.Create(ctx, rec); err != nil {
+				t.Fatalf("Create %d: %v", i, err)
+			}
+		}
+		other := newTestRecord("sess-other", []string{"call-1"})
+		if err := s.Create(ctx, other); err != nil {
+			t.Fatalf("Create other: %v", err)
+		}
+
+		out, err := s.List(ctx, "sess-list")
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(out) != 3 {
+			t.Fatalf("List len = %d, want 3", len(out))
+		}
+		for _, m := range out {
+			if m.SessionID != "sess-list" {
+				t.Errorf("List leaked other session: %+v", m)
+			}
+			if len(m.Pending) == 0 {
+				t.Errorf("Meta.Pending empty: %+v", m)
+			}
+		}
+	})
+
+	t.Run(name+"/list_validates_session_id", func(t *testing.T) {
+		s := factory(t)
+		if _, err := s.List(context.Background(), ""); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("List empty session err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run(name+"/delete_removes_record", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-9", []string{"call-1"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := s.Delete(ctx, rec.ID); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := s.Get(ctx, rec.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get after delete err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run(name+"/delete_unknown_id_is_noop", func(t *testing.T) {
+		s := factory(t)
+		if err := s.Delete(context.Background(), "nope"); err != nil {
+			t.Errorf("Delete unknown: %v", err)
+		}
+	})
+}
+
+func newTestRecord(sessionID string, pending []string) *Record {
+	calls := []schema.ToolCall{
+		{ID: "call-1", Name: "ask_user", Arguments: `{"question":"proceed?"}`},
+	}
+	if len(pending) > 1 {
+		calls = append(calls, schema.ToolCall{ID: "call-2", Name: "ask_user", Arguments: `{"question":"more?"}`})
+	}
+
+	return &Record{
+		SessionID: sessionID,
+		AgentID:   "test-agent",
+		Protocol:  schema.ProtocolOpenAIChat,
+		ToolCalls: calls,
+		Pending:   pending,
+		Messages: []schema.Message{
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
+			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hi"),
+		},
+		Params: EffectiveParams{
+			Model:         "gpt-test",
+			MaxIterations: 10,
+		},
+		Iteration: 0,
+		Usage:     schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+	}
+}

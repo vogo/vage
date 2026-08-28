@@ -9,7 +9,8 @@
 | `schema` | `Protocol`/`RunRequest`/`RunResponse`/`RunOptions`/`Message`/`MessagePart`/`Usage`/`ToolCall`/`ToolDef`/`ToolResult`/`ContentPart`/`Event`/`RunStream`/`StopReason` | provider-neutral 契约层;`Message` 以私有 canonical 状态和访问器统一读写,不解释 provider wire |
 | `largemodel/provider/openais`、`provider/anthropics` | provider 路由绑定与 message codec | 按 provider 聚合 native wire ↔ canonical message 转换、原生回放、协议结构校验与 Backend 路由绑定 |
 | `agent` | `Agent`/`StreamAgent` 接口、`Base`/`Config`、`RunFunc`、`CustomAgent`、`StreamMiddleware`、`Middleware`/`MiddlewareFunc`/`ChainMiddleware`、`RunText`/`RunStreamText`/`RunToStream` | 统一接口 + 非流式↔流式适配胶水 + Agent Run 中间件契约 |
-| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Quick`、`Run`/`RunStream`/`Resume`、`WithMiddleware` | ReAct 循环实现,集成中枢;`New + Option` 是完整构造契约,`Quick` 是其高频参数薄包装 |
+| `agent/taskagent` | `New` + 一整套 `With*` 选项、`Quick`、`Run`/`RunStream`/`Resume`、`WithMiddleware`、`WithInterruptStore`/`WithInterruptPolicy`/`WithInterruptToolNames`/`ResumeInterrupt` | ReAct 循环实现,集成中枢;`New + Option` 是完整构造契约,`Quick` 是其高频参数薄包装;中断挂起判定与恢复见下方设计决策 |
+| `interrupt` | `Record`/`Store`/`MapStore`/`FileStore`、`EffectiveParams`、状态机 `Status` | 跨进程 interrupt/resume 的持久化契约,与 `checkpoint` 完全独立(见 [orchestration](../orchestration/orchestration.md) OR-9) |
 | `agent/routeragent` | `Route`/`RouteFunc`、内置 `FirstFunc`/`IndexFunc`/`KeywordFunc`/`RandomFunc`/`LLMFunc` | 分发策略 |
 | `agent/workflowagent` | `New`/`NewDAG`/`NewDAGWithEdges`/`NewLoop` | 顺序/图/循环编排,委托 `orchestrate` |
 | `prompt` | `PromptTemplate`、`StringPrompt`、`NewPromptTemplate` | 基于 `text/template` 的提示词渲染 |
@@ -26,6 +27,12 @@
 - **流通道语义**:`RunStream` 为拉取式;成功结束返回 `io.EOF`,生产者错误在缓冲事件排空后浮现,关闭后再读返回专用错误。
 - **构造期校验**:WorkflowAgent 的 DAG 构造在建图时即校验环、缺依赖、重复 ID;RouterAgent 构造期要求候选 Agent 非 nil。把错误尽量前移到构造期而非运行期。
 - **便捷构造只做薄包装,不做第二套实现**:TaskAgent 的入门构造(身份 + 调用器 + 模型 + 系统提示词)被收进 `Quick`,但它只负责组装参数并委托 `New` —— 不复制默认值、不自行推导协议、不包装调用器、不吞掉额外选项、不新增校验或错误返回。这样默认值、协议保真与后续选项演进只有 `New` 一个事实来源,不会出现两条构造路径漂移。代价是 `Quick` 只覆盖高频入口:需要描述、具名/版本化提示词或其他 `Config` 字段时仍走 `New`。预置选项排在调用方选项之前,沿用本包「后应用者生效」的规则,因此额外能力可叠加、预置项可被显式覆盖。nil 调用器与空模型的失败时机与等价 `New` 调用完全一致(仍在首次运行时暴露)。
+- **中断挂起点固定在共享循环、独立于 checkpoint 的持久状态机**:`InterruptPolicy.Intercept` 的调用点在 `runReactLoop`——取得完整 assistant 工具调用消息之后、预算检查之后、`executeToolBatch` 之前——同步与流式没有第二条判定路径。命中后框架先调用 `interrupt.Store.Create`,只有存储确认成功才返回 `StopReasonInterrupted`;这与 checkpoint「保存失败只告警」故意不同,因为未落盘的挂起没有可恢复语义,属于本次 Run 的硬错误。新增独立 `interrupt` 包而非扩展 `checkpoint.IterationStore`,是因为二者的不变式互斥:迭代检查点是「完整轮次已完成」的快照,中断记录是「批次执行前」的挂起状态,把后者塞进前者会污染 checkpoint 的完整性假设。
+- **恢复冻结整批,牺牲并行度换取零同批副作用**:命中任一调用即冻结全部工具调用,等待所有待决调用都有决定后才执行未命中的同批调用(仍按既有并发上限)。这样保证挂起前该批零副作用、结果顺序稳定、恢复边界可解释;代价是同批内未命中的调用即便能立即执行也要等待。
+- **恢复保存的是已解析参数而非重新取默认值**:`interrupt.EffectiveParams` 快照模型、温度、最大迭代、预算、工具过滤、停止序列——`ResumeInterrupt` 用它们重建 `runParams`,不调用 `resolveRunParams(nil)` 重新合并新进程的 Agent 默认值。这样新进程的配置变化(例如换了默认模型)不会悄悄改变剩余预算、工具范围或模型行为。
+- **恢复复用 `runReactLoop`/`executeToolBatch`/工具结果护栏,不是第二套循环**:`ResumeInterrupt` 只做批次层面的特殊处理(待决调用用决定替换执行、非待决同批调用正常经 `executeToolBatch` 执行,两者结果都过工具结果护栏后按原 `ToolCalls` 顺序拼回),随后以 `rec.Iteration+1` 复用 `runReactLoop`。因此恢复途中再次触发中断、达到预算/迭代上限或正常完成,都走与一次实时 Run 完全相同的终态路径——包括 ReturnDirect。
+- **挂起阶段的会话记忆分两段提交,避免悬空工具调用**:挂起时只提交请求消息(`reqMsgs`),响应中「尚未闭合的 assistant/tool-call 对」被显式扣留;中断记录的 `SessionMsgCount` 预留了请求消息占用的 key 区间,恢复终态时从预留位置续写完整响应,不产生 key 冲突,也不会让未闭合的工具调用出现在会话记忆里。
+- **租约而非永久锁,允许恢复进程崩溃后再被接管**:`interrupt.Store.AcquireLease` 用「持有者 + 过期时间」表达租约;`FileStore` 用一个仅在临界区持有的 `<id>.lock` 文件(`O_CREATE|O_EXCL`)提供跨进程互斥,租约本身的身份与到期时间仍记在 Record 里,过期租约可被下一个调用方接管。这不是端到端 exactly-once——过期租约被接管后,尚未到达下一持久边界的普通工具可能重放,详见 [orchestration](../orchestration/orchestration.md)。
 - **消息模型单事实源 + 原生回放缓存**:`schema.Message` 的私有 canonical 状态(`role` + `parts`)是唯一事实源;可选 `origin` 保存未经修改的 provider native wire。同协议且未修改时直接回放 `origin`;任何 `SetText`/`SetRole`/`ReplaceParts`/`AppendPart` mutation 都立即清空它,随后由 provider codec 从 canonical 状态重新编码。
 - **provider codec 边界**:`schema` 不导入或解析 `aimodel` wire 类型。OpenAI/Anthropic 的 decode、encode、role 映射、content block 规则和 Anthropic tool-result 合并分别收敛在 `largemodel/provider/openais` 与 `provider/anthropics`。
 
@@ -59,7 +66,7 @@
 ## 非功能考量
 
 - **性能**:消息累积为追加,避免重排;工具批可并行(受最大并行度选项约束)。
-- **可恢复性**:Resume 复用与 Run 相同的循环与 finalize 路径,保证续跑与首跑行为一致。
+- **可恢复性**:Resume 复用与 Run 相同的循环与 finalize 路径,保证续跑与首跑行为一致;`WithInterruptStore`+`WithInterruptPolicy` 均未配置时中断判定完全不介入(零成本路径),配置其一而非二者是构造错误而非静默降级——中断没有"部分启用"的安全状态。
 - **可观测**:全生命周期事件不可被业务逻辑省略(章程运维原则)。
 
 ## 依赖与降级
