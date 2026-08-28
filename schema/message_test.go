@@ -447,6 +447,17 @@ func TestMessageValidateMedia(t *testing.T) {
 		{"file data missing mime", RoleUser, MessagePart{Type: MessagePartFile, Data: []byte{1}, Filename: "r.pdf"}, true},
 		{"file on assistant role", RoleAssistant, MessagePart{Type: MessagePartFile, FileID: "file-1"}, true},
 		{"file carries thinking", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1", Thinking: "x"}, true},
+
+		// A non-media part holding a media field would be dropped by every
+		// codec, which reads sources from image/file parts only. Validate must
+		// reject it rather than let the caller believe the source was sent.
+		{"text carries url", RoleUser, MessagePart{Type: MessagePartText, Text: "hi", URL: "https://x/y.png"}, true},
+		{"text carries inline data", RoleUser, MessagePart{Type: MessagePartText, Text: "hi", Data: []byte{1}, MimeType: "image/png"}, true},
+		{"text carries file id", RoleUser, MessagePart{Type: MessagePartText, Text: "hi", FileID: "file-1"}, true},
+		{"text carries filename", RoleUser, MessagePart{Type: MessagePartText, Text: "hi", Filename: "r.pdf"}, true},
+		{"thinking carries url", RoleAssistant, MessagePart{Type: MessagePartThinking, Thinking: "x", URL: "https://x/y.png"}, true},
+		{"tool_call carries filename", RoleAssistant, MessagePart{Type: MessagePartToolCall, ToolCall: &ToolCall{ID: "call-1", Name: "search"}, Filename: "r.pdf"}, true},
+		{"tool_result carries url", RoleTool, MessagePart{Type: MessagePartToolResult, ToolCallID: "call-1", Text: "ok", URL: "https://x/report.pdf"}, true},
 	}
 
 	for _, tt := range tests {

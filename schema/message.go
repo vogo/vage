@@ -407,18 +407,21 @@ func (m Message) Validate() error {
 	for i, part := range m.parts {
 		switch part.Type {
 		case MessagePartText:
-			if part.Thinking != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError {
+			if part.Thinking != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError ||
+				hasMediaFields(part) {
 				return fmt.Errorf("vage: message part %d text has fields for another part type", i)
 			}
 		case MessagePartThinking:
-			if part.Text != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError {
+			if part.Text != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError ||
+				hasMediaFields(part) {
 				return fmt.Errorf("vage: message part %d thinking has fields for another part type", i)
 			}
 		case MessagePartToolCall:
 			if part.ToolCall == nil {
 				return fmt.Errorf("vage: message part %d tool_call is nil", i)
 			}
-			if part.Text != "" || part.Thinking != "" || part.ToolCallID != "" || part.IsError {
+			if part.Text != "" || part.Thinking != "" || part.ToolCallID != "" || part.IsError ||
+				hasMediaFields(part) {
 				return fmt.Errorf("vage: message part %d tool_call has fields for another part type", i)
 			}
 			if part.ToolCall.ID == "" || part.ToolCall.Name == "" {
@@ -431,7 +434,7 @@ func (m Message) Validate() error {
 			if part.ToolCallID == "" {
 				return fmt.Errorf("vage: message part %d tool_result requires tool_call_id", i)
 			}
-			if part.Thinking != "" || part.ToolCall != nil {
+			if part.Thinking != "" || part.ToolCall != nil || hasMediaFields(part) {
 				return fmt.Errorf("vage: message part %d tool_result has fields for another part type", i)
 			}
 		case MessagePartImage:
@@ -539,6 +542,15 @@ func cloneMessageParts(parts []MessagePart) []MessagePart {
 		out[i] = cloneMessagePart(part)
 	}
 	return out
+}
+
+// hasMediaFields reports whether part carries any image/file-only field. A
+// non-media part holding one would be silently dropped by every codec (they
+// read media sources only from image and file parts), so Validate rejects it
+// instead of letting a caller believe the source was sent.
+func hasMediaFields(part MessagePart) bool {
+	return part.URL != "" || len(part.Data) > 0 || part.MimeType != "" ||
+		part.FileID != "" || part.Filename != ""
 }
 
 func cloneMessagePart(part MessagePart) MessagePart {
