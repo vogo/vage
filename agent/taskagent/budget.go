@@ -29,6 +29,15 @@ func newBudgetTracker(budget int) *budgetTracker {
 	return &budgetTracker{budget: budget}
 }
 
+// newBudgetTrackerAt restores a tracker mid-run, with consumed already
+// charged. Resuming an interrupt continues one logical Run, so the tokens
+// spent before the suspend must keep counting against the same budget.
+func newBudgetTrackerAt(budget, consumed int) *budgetTracker {
+	t := &budgetTracker{budget: budget}
+	t.consumed.Store(int64(consumed))
+	return t
+}
+
 // Add adds tokens to the consumed total. Returns true if budget is now exhausted.
 func (t *budgetTracker) Add(tokens int) bool {
 	t.consumed.Add(int64(tokens))

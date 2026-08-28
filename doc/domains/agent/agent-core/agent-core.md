@@ -58,7 +58,7 @@
 | AC-11 | **短路与改写都不绕过护栏**:不调用 `next` 即短路(保证无 LLM 调用、无工具执行、无 ReAct 检查点写入);调用 `next` 后原地修改或替换 `RunResponse`。两者产出的消息都仍须经过输出护栏、写入会话记忆,并成为 `AgentEnd.Message` 的唯一来源。 |
 | AC-12 | **框架所有的不变式**:`SessionID` 与 `Duration` 最终以请求会话与实测耗时为准,中间件不可伪造;中间件可决定消息、元数据、usage 与 stop reason。`nil, nil` 按 `ErrNilMiddlewareResponse` 失败,中间件错误按运行错误终止终态处理,不产生成功终态事件。 |
 | AC-13 | **直返工具(ReturnDirect)**:被 `taskagent.WithReturnDirectTools` 标记的工具成功后,ReAct 循环跳过下一轮模型调用,把护栏后的 `ToolResult.Text()` 包装为最终 assistant 消息并以 `complete` 终止。同批全部工具仍按既有并发规则执行完毕;在模型调用顺序中选第一个「名称已配置且最终结果成功」的工具,完成时序不参与裁决。失败路径(handler/Registry 错误、`IsError` 结果、工具结果护栏 Block)绝不短路,整批结果照常回填。直返只跳过模型轮次,输出护栏、消息记忆、Agent middleware 后置与 `AgentEnd` 照常运行;usage 只累计已发生的模型调用。 |
-| AC-14 | **中断挂起点**:`WithInterruptPolicy`(+`WithInterruptStore`)命中工具批中任一调用时,`runReactLoop` 在 `executeToolBatch` 之前冻结整批——不执行任何处理器、不发 `tool_call_start/end`——待 `interrupt.Store.Create` 成功后才返回 `StopReasonInterrupted`;存储失败是本次 Run 的硬错误,绝不返回假挂起。`ResumeInterrupt(ctx, req)` 按 `interrupt_id + tool_call_id` 精确注入决定,全部待决调用有决定后才按原 `ToolCalls` 顺序执行未命中的同批调用并继续下一次模型调用;不进 Agent middleware 链,不重跑输入护栏,Run 值从空表开始。仅 `WithInterruptStore`/`WithInterruptPolicy` 之一被配置是构造错误。 |
+| AC-14 | **中断挂起点**:`WithInterruptPolicy`(+`WithInterruptStore`)命中工具批中任一调用时,`runReactLoop` 在 `executeToolBatch` 之前冻结整批——不执行任何处理器、不发 `tool_call_start/end`——待 `interrupt.Store.Create` 成功后才返回 `StopReasonInterrupted`;存储失败是本次 Run 的硬错误,绝不返回假挂起。`ResumeInterrupt(ctx, req)` 按 `interrupt_id + tool_call_id` 精确注入决定,全部待决调用有决定后才按原 `ToolCalls` 顺序执行未命中的同批调用并继续下一次模型调用,且继承同一逻辑 Run 已消耗的 token 预算;省略决定时 Pending 记录只查询状态、Ready 记录继续恢复。不进 Agent middleware 链,不重跑输入护栏,Run 值从空表开始。仅 `WithInterruptStore`/`WithInterruptPolicy` 之一被配置是构造错误。 |
 
 ## Agent 运行中间件链
 

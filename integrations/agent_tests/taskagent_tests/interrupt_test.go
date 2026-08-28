@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -405,6 +406,179 @@ func TestInterrupt_StillPending_ReturnsStatusWithoutStartingAnything(t *testing.
 	}
 	if handlerRuns.Load() != 0 {
 		t.Errorf("handler ran %d times, want 0", handlerRuns.Load())
+	}
+}
+
+func TestInterrupt_ZeroDecisions_ProbesPendingAndRetriesReady(t *testing.T) {
+	var handlerRuns atomic.Int32
+	mock := newMock(
+		makeToolCallResponse("tc-1", "ask_user", `{}`, 30),
+		makeStopResponse("done", 20),
+	)
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-zero-decisions"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-zero-decisions",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	probe, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+	})
+	if err != nil {
+		t.Fatalf("pending probe: %v", err)
+	}
+	if probe.StopReason != schema.StopReasonInterrupted || mock.Calls() != 1 || handlerRuns.Load() != 0 {
+		t.Fatalf("pending probe started work: response=%+v calls=%d handlers=%d", probe, mock.Calls(), handlerRuns.Load())
+	}
+
+	if _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
+		ToolCallID: "tc-1",
+		Content:    "approved",
+	}}); err != nil {
+		t.Fatalf("prepare Ready record: %v", err)
+	}
+
+	resumed, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+	})
+	if err != nil {
+		t.Fatalf("ready retry: %v", err)
+	}
+	if resumed.StopReason != schema.StopReasonComplete || resumed.Messages[0].Text() != "done" {
+		t.Fatalf("ready retry response = %+v, want completed done", resumed)
+	}
+	if mock.Calls() != 2 || handlerRuns.Load() != 0 {
+		t.Fatalf("ready retry calls=%d handlers=%d, want 2/0", mock.Calls(), handlerRuns.Load())
+	}
+}
+
+func TestInterrupt_ResumePreservesRunTokenBudget(t *testing.T) {
+	var (
+		askRuns     atomic.Int32
+		expenseRuns atomic.Int32
+	)
+	mock := newMock(
+		makeToolCallResponse("tc-ask", "ask_user", `{}`, 60),
+		makeToolCallResponse("tc-expense", "expensive", `{}`, 40),
+		makeStopResponse("should not run", 10),
+	)
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "ask_user"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+		askRuns.Add(1)
+		return schema.TextResult("", "never"), nil
+	})
+	_ = reg.Register(schema.ToolDef{Name: "expensive"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+		expenseRuns.Add(1)
+		return schema.TextResult("", "spent"), nil
+	})
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-resume-budget"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithRunTokenBudget(100),
+		taskagent.WithMaxIterations(5),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-resume-budget",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	rec, err := store.Get(context.Background(), first.Interrupt.InterruptID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if rec.TokensConsumed != 60 {
+		t.Fatalf("TokensConsumed = %d, want 60", rec.TokensConsumed)
+	}
+
+	resumed, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+		Decisions:   []schema.InterruptDecision{{ToolCallID: "tc-ask", Content: "approved"}},
+	})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resumed.StopReason != schema.StopReasonBudgetExhausted {
+		t.Fatalf("StopReason = %q, want %q", resumed.StopReason, schema.StopReasonBudgetExhausted)
+	}
+	if resumed.Usage.TotalTokens != 100 || mock.Calls() != 2 {
+		t.Fatalf("usage/calls = %d/%d, want 100/2", resumed.Usage.TotalTokens, mock.Calls())
+	}
+	if askRuns.Load() != 0 || expenseRuns.Load() != 0 {
+		t.Fatalf("handlers ran ask=%d expensive=%d, want 0/0", askRuns.Load(), expenseRuns.Load())
+	}
+}
+
+func TestInterrupt_ResumeWithoutCallerHasNoSideEffects(t *testing.T) {
+	var siblingRuns atomic.Int32
+	store := interrupt.NewMapStore()
+	seed := taskagent.New(
+		agent.Config{ID: "agent-no-caller"},
+		taskagent.WithCaller(newMock(makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-ask", Name: "ask_user", Arguments: `{}`},
+			schema.ToolCall{ID: "tc-sibling", Name: "sibling", Arguments: `{}`},
+		))),
+		taskagent.WithToolRegistry(askUserReg(new(atomic.Int32))),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+	)
+	first, err := seed.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-no-caller",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("seed Run: %v", err)
+	}
+
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "ask_user"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+		return schema.TextResult("", "never"), nil
+	})
+	_ = reg.Register(schema.ToolDef{Name: "sibling"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+		siblingRuns.Add(1)
+		return schema.TextResult("", "side effect"), nil
+	})
+	broken := taskagent.New(
+		agent.Config{ID: "agent-no-caller"},
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+	)
+
+	_, err = broken.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+		Decisions:   []schema.InterruptDecision{{ToolCallID: "tc-ask", Content: "approved"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "model caller is required") {
+		t.Fatalf("ResumeInterrupt error = %v, want missing caller", err)
+	}
+	if siblingRuns.Load() != 0 {
+		t.Fatalf("sibling ran %d times before caller preflight", siblingRuns.Load())
+	}
+	rec, err := store.Get(context.Background(), first.Interrupt.InterruptID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if rec.Status != interrupt.StatusPending || len(rec.Decisions) != 0 || rec.Revision != 1 {
+		t.Fatalf("record mutated before caller preflight: %+v", rec)
 	}
 }
 

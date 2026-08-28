@@ -32,6 +32,12 @@ import (
 // AcquireLease is the only method that must provide real mutual exclusion
 // across independent Store instances (see FileStore); every other method
 // is a plain atomic read/update of one record.
+//
+// Record IDs are opaque tokens the store itself mints in Create. Every
+// id-taking method rejects an id that is empty, over-long, or built from
+// anything but [A-Za-z0-9_-] with ErrInvalidArgument — before looking
+// anything up — so a caller-shaped id can never be resolved against the
+// storage medium (for FileStore, never against a path outside its root).
 type Store interface {
 	// Create persists a brand-new record. The store assigns ID,
 	// CreatedAt, UpdatedAt and Revision (starting at 1); any
@@ -61,9 +67,9 @@ type Store interface {
 	// set: ErrUnknownToolCall otherwise. Resubmitting an identical
 	// decision (same Content and IsError) for an already-decided
 	// ToolCallID is idempotent; resubmitting a different one returns
-	// ErrDecisionConflict without changing any state. Decisions are
-	// applied one at a time in slice order, so a conflict on the Nth
-	// decision leaves the first N-1 committed.
+	// ErrDecisionConflict without changing that decision. Decisions are
+	// applied one at a time in slice order, so a conflict or unknown ID on
+	// the Nth decision leaves the first N-1 committed.
 	//
 	// When every Pending ID has a Decision after this call, Status
 	// transitions Pending -> Ready. Returns ErrNotFound for an unknown
@@ -112,6 +118,7 @@ type Store interface {
 	List(ctx context.Context, sessionID string) ([]*Meta, error)
 
 	// Delete removes the record identified by id. Idempotent on an
-	// unknown id.
+	// unknown — but well-formed — id; a malformed id returns
+	// ErrInvalidArgument like every other id-taking method.
 	Delete(ctx context.Context, id string) error
 }

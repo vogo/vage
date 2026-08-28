@@ -90,6 +90,9 @@ func NewFileStore(root string) (*FileStore, error) {
 // Root returns the configured root directory; useful in tests.
 func (s *FileStore) Root() string { return s.root }
 
+// recordPath / lockPath assume id already passed validateID — that check is
+// the sole reason this join cannot escape root, so every public entry point
+// runs it before reaching here.
 func (s *FileStore) recordPath(id string) string {
 	return filepath.Join(s.root, id+recordFileExt)
 }
@@ -111,6 +114,9 @@ func (s *FileStore) localLock(id string) *sync.Mutex {
 // non-nil error to abort without writing.
 func (s *FileStore) withRecordLock(ctx context.Context, id string, fn func(cur *Record) (*Record, error)) (*Record, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateID(id); err != nil {
 		return nil, err
 	}
 
@@ -258,27 +264,38 @@ func (s *FileStore) Get(ctx context.Context, id string) (*Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if id == "" {
-		return nil, fmt.Errorf("%w: id is empty", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
 	}
 	return s.readRecord(id)
 }
 
 // SubmitDecisions applies decisions under the record lock.
 func (s *FileStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error) {
-	if id == "" {
-		return nil, fmt.Errorf("%w: id is empty", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
 	}
 
-	return s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
+	var decisionErr error
+	next, err := s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
 		if cur == nil {
 			return nil, ErrNotFound
 		}
-		if err := applyDecisions(cur, decisions, time.Now()); err != nil {
-			return nil, err
+
+		revision := cur.Revision
+		decisionErr = applyDecisions(cur, decisions, time.Now())
+		if decisionErr != nil && cur.Revision == revision {
+			return nil, decisionErr
 		}
 		return cur, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if decisionErr != nil {
+		return nil, decisionErr
+	}
+	return next, nil
 }
 
 // AcquireLease transitions Ready (or an expired Resuming) to Resuming. The
@@ -287,8 +304,11 @@ func (s *FileStore) SubmitDecisions(ctx context.Context, id string, decisions []
 // for id at a time, so "read status, decide, write" is atomic even though
 // the filesystem itself has no native compare-and-swap.
 func (s *FileStore) AcquireLease(ctx context.Context, id, owner string, ttl time.Duration) (*Record, error) {
-	if id == "" || owner == "" {
-		return nil, fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	if owner == "" {
+		return nil, fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	return s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
@@ -304,8 +324,11 @@ func (s *FileStore) AcquireLease(ctx context.Context, id, owner string, ttl time
 
 // ReleaseLease transitions Resuming back to Ready for owner.
 func (s *FileStore) ReleaseLease(ctx context.Context, id, owner string) error {
-	if id == "" || owner == "" {
-		return fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	_, err := s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
@@ -322,8 +345,11 @@ func (s *FileStore) ReleaseLease(ctx context.Context, id, owner string) error {
 
 // Complete transitions Resuming to the terminal Completed state for owner.
 func (s *FileStore) Complete(ctx context.Context, id, owner string) error {
-	if id == "" || owner == "" {
-		return fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	_, err := s.withRecordLock(ctx, id, func(cur *Record) (*Record, error) {
@@ -380,10 +406,11 @@ func (s *FileStore) List(ctx context.Context, sessionID string) ([]*Meta, error)
 }
 
 // Delete removes the record file (and any stale lock file) for id.
-// Idempotent on unknown id.
+// Idempotent on an unknown — but well-formed — id; a malformed one is
+// rejected rather than resolved, so no id can ever name a file outside root.
 func (s *FileStore) Delete(_ context.Context, id string) error {
-	if id == "" {
-		return nil
+	if err := validateID(id); err != nil {
+		return err
 	}
 
 	mu := s.localLock(id)

@@ -135,6 +135,14 @@ type Record struct {
 	Usage     schema.Usage `json:"usage"`
 	Estimated bool         `json:"estimated,omitempty"`
 
+	// TokensConsumed is what the suspended Run's token-budget tracker had
+	// already charged against Params.RunTokenBudget. It is deliberately
+	// separate from Usage: a streamed turn with no vendor usage report
+	// charges the budget an estimate that never enters Usage, so restoring
+	// the budget from Usage would silently hand the resumed half of the
+	// same logical Run more tokens than it has left.
+	TokensConsumed int `json:"tokens_consumed,omitempty"`
+
 	// State machine.
 	Status   Status `json:"status"`
 	Revision int    `json:"revision"`

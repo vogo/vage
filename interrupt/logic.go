@@ -25,9 +25,39 @@ import (
 // This file holds the state-machine transition logic shared verbatim by
 // MapStore and FileStore, so the two backends cannot drift on validation,
 // idempotency or conflict rules — only their storage medium (a Go map vs a
-// JSON file plus a lock file) differs. Each function mutates rec in place
-// and returns an error without partial side effects when it fails, so
-// callers can hold whatever lock they use and write back only on success.
+// JSON file plus a lock file) differs. Each function mutates rec in place;
+// applyDecisions deliberately retains the valid prefix before an error, as
+// required by Store.SubmitDecisions.
+
+// maxIDLen bounds an interrupt ID so a hostile caller cannot drive a store
+// into filesystem-dependent name-length errors. generateID emits 32 hex
+// characters, so this leaves ample headroom.
+const maxIDLen = 128
+
+// validateID rejects any id that is not an opaque, store-issued token.
+// IDs are always minted by generateID and never supplied by a caller, so
+// constraining them to [A-Za-z0-9_-] costs nothing — and it is what makes
+// FileStore's <root>/<id>.json join provably stay inside root: no separator,
+// no "..", no absolute path and no NUL can survive this check. Both backends
+// apply it at every public entry point so a malformed id fails identically
+// whichever Store a caller holds.
+func validateID(id string) error {
+	if id == "" {
+		return fmt.Errorf("%w: id is empty", ErrInvalidArgument)
+	}
+	if len(id) > maxIDLen {
+		return fmt.Errorf("%w: id is longer than %d characters", ErrInvalidArgument, maxIDLen)
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return fmt.Errorf("%w: id %q is not an opaque interrupt id", ErrInvalidArgument, id)
+		}
+	}
+	return nil
+}
 
 // validateNewRecord checks the fields Create requires the caller to supply.
 func validateNewRecord(rec *Record) error {
@@ -75,14 +105,9 @@ func initialStatus(pending []string) Status {
 	return StatusPending
 }
 
-// applyDecisions merges decisions into rec.Decisions in slice order,
-// stopping at the first unknown-tool-call or conflicting resubmission, and
-// recomputes Status/UpdatedAt/Revision on success. On error rec is left
-// exactly as it was after any decisions committed before the failing one —
-// callers persist rec regardless of the returned error so a resubmit-safe
-// caller does not repeat already-applied decisions, but MUST NOT persist
-// when this returns an error together with zero applied decisions being
-// the common case; see callers for the exact write timing.
+// applyDecisions merges decisions into rec.Decisions in slice order. If a
+// decision is rejected, decisions committed earlier in the slice remain and
+// the audit fields reflect that prefix before the error is returned.
 func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 	if rec.Status == StatusCompleted {
 		return ErrAlreadyCompleted
@@ -93,12 +118,20 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 		pendingSet[id] = struct{}{}
 	}
 
-	if rec.Decisions == nil {
-		rec.Decisions = make(map[string]Decision, len(decisions))
+	changed := false
+	commitAudit := func() {
+		if allDecided(rec.Pending, rec.Decisions) {
+			rec.Status = StatusReady
+		}
+		rec.UpdatedAt = now
+		rec.Revision++
 	}
 
 	for _, d := range decisions {
 		if _, isPending := pendingSet[d.ToolCallID]; !isPending {
+			if changed {
+				commitAudit()
+			}
 			return fmt.Errorf("%w: %q", ErrUnknownToolCall, d.ToolCallID)
 		}
 
@@ -107,22 +140,25 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 			if existing.Content == d.Content && existing.IsError == d.IsError {
 				continue // idempotent resubmission
 			}
+			if changed {
+				commitAudit()
+			}
 			return fmt.Errorf("%w: %q", ErrDecisionConflict, d.ToolCallID)
 		}
 
+		if rec.Decisions == nil {
+			rec.Decisions = make(map[string]Decision, len(decisions))
+		}
 		rec.Decisions[d.ToolCallID] = Decision{
 			ToolCallID: d.ToolCallID,
 			Content:    d.Content,
 			IsError:    d.IsError,
 			DecidedAt:  now,
 		}
+		changed = true
 	}
 
-	if allDecided(rec.Pending, rec.Decisions) {
-		rec.Status = StatusReady
-	}
-	rec.UpdatedAt = now
-	rec.Revision++
+	commitAudit()
 
 	return nil
 }

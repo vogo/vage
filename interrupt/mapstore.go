@@ -77,8 +77,8 @@ func (s *MapStore) Get(ctx context.Context, id string) (*Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if id == "" {
-		return nil, fmt.Errorf("%w: id is empty", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -94,14 +94,14 @@ func (s *MapStore) Get(ctx context.Context, id string) (*Record, error) {
 	return cloneRecord(r), nil
 }
 
-// SubmitDecisions applies decisions in order, stopping at the first
-// conflict, and returns the resulting record.
+// SubmitDecisions applies decisions in order, retaining the valid prefix
+// when a later decision is rejected.
 func (s *MapStore) SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if id == "" {
-		return nil, fmt.Errorf("%w: id is empty", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -128,8 +128,11 @@ func (s *MapStore) AcquireLease(ctx context.Context, id, owner string, ttl time.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if id == "" || owner == "" {
-		return nil, fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	if owner == "" {
+		return nil, fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	s.mu.Lock()
@@ -153,8 +156,11 @@ func (s *MapStore) ReleaseLease(ctx context.Context, id, owner string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if id == "" || owner == "" {
-		return fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	s.mu.Lock()
@@ -178,8 +184,11 @@ func (s *MapStore) Complete(ctx context.Context, id, owner string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if id == "" || owner == "" {
-		return fmt.Errorf("%w: id and owner are required", ErrInvalidArgument)
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if owner == "" {
+		return fmt.Errorf("%w: owner is empty", ErrInvalidArgument)
 	}
 
 	s.mu.Lock()
@@ -219,8 +228,14 @@ func (s *MapStore) List(ctx context.Context, sessionID string) ([]*Meta, error) 
 	return out, nil
 }
 
-// Delete removes the record identified by id. Idempotent on unknown id.
+// Delete removes the record identified by id. Idempotent on an unknown — but
+// well-formed — id; a malformed one is rejected, matching FileStore, whose
+// rejection is a path-safety requirement rather than a stylistic one.
 func (s *MapStore) Delete(_ context.Context, id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, id)

@@ -103,6 +103,7 @@ func (a *Agent) maybeInterrupt(
 		Iteration:       rc.iteration,
 		Usage:           rc.totalUsage,
 		Estimated:       rc.estimated,
+		TokensConsumed:  rc.tracker.Consumed(),
 	}
 
 	if err := a.interruptStore.Create(ctx, rec); err != nil {
@@ -207,9 +208,12 @@ func generateLeaseOwner() string {
 // that tool batch. It is the cross-process counterpart to a suspend
 // produced by the InterruptPolicy choke point in runReactLoop.
 //
-// A request with no decisions is a valid way to check status or retry a
-// resume after a previous attempt failed: it still tries to acquire the
-// lease if the record is already Ready.
+// Omitting Decisions submits nothing and resumes on whatever is already
+// committed. While any flagged call is still undecided that degenerates into
+// a pure status probe — the still-pending set comes back and no tool or model
+// call starts — and once every one is decided it retries the resume, which is
+// how an attempt that failed after the human already paid for the decisions
+// is picked up again, possibly by a process that never held them.
 //
 // Errors:
 //   - ErrInterruptConfig when WithInterruptStore/WithInterruptPolicy are
@@ -233,6 +237,13 @@ func generateLeaseOwner() string {
 // guards; the final response still passes through output guards, message
 // persistence and the terminal event path.
 func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptRequest) (*schema.RunResponse, error) {
+	// Same preflight Run/Resume perform, and for the same reason — but it
+	// matters more here: a resumer reached mid-way through this method has
+	// already taken the lease and possibly executed sibling tools, side
+	// effects an incompletely configured process must never pay for.
+	if a.caller == nil {
+		return nil, errors.New("vage: model caller is required")
+	}
 	if err := a.checkInterruptConfig(); err != nil {
 		return nil, err
 	}
@@ -351,10 +362,13 @@ func (a *Agent) resumeFromInterrupt(ctx context.Context, rec *interrupt.Record, 
 	agentID := a.ID()
 	p := effectiveParamsToRunParams(rec.Params)
 
+	// The resumed half continues the suspended Run's budget rather than
+	// restarting it: same budget, same already-charged total.
+
 	rc := &runContext{
 		sessionID:  rec.SessionID,
 		start:      time.Now(),
-		tracker:    newBudgetTracker(p.runTokenBudget),
+		tracker:    newBudgetTrackerAt(p.runTokenBudget, rec.TokensConsumed),
 		totalUsage: rec.Usage,
 		estimated:  rec.Estimated,
 		br: buildResult{

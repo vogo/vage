@@ -339,6 +339,131 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Errorf("Delete unknown: %v", err)
 		}
 	})
+
+	// A record ID is a store-minted opaque token; anything else must be
+	// rejected identically by every backend, before it reaches the storage
+	// medium. For FileStore that is a path-safety requirement (see
+	// TestFileStore_MalformedIDCannotEscapeRoot); asserting it here keeps
+	// MapStore from drifting into accepting ids FileStore refuses.
+	t.Run(name+"/malformed_ids_rejected_at_every_entry_point", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		for _, id := range []string{"", "../escape", "sub/dir", "a\\b", ".", "..", "id.with.dots"} {
+			if _, err := s.Get(ctx, id); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("Get(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+			if _, err := s.SubmitDecisions(ctx, id, nil); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("SubmitDecisions(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+			if _, err := s.AcquireLease(ctx, id, "owner", time.Minute); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("AcquireLease(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+			if err := s.ReleaseLease(ctx, id, "owner"); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("ReleaseLease(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+			if err := s.Complete(ctx, id, "owner"); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("Complete(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+			if err := s.Delete(ctx, id); !errors.Is(err, ErrInvalidArgument) {
+				t.Errorf("Delete(%q) err = %v, want ErrInvalidArgument", id, err)
+			}
+		}
+	})
+
+	// Decisions commit in order. Both backends must retain the same valid
+	// prefix before a later conflict or unknown tool-call ID is rejected.
+	t.Run(name+"/submit_decisions_retains_valid_prefix", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-atomic", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "a"}}); err != nil {
+			t.Fatalf("seed decision: %v", err)
+		}
+
+		// call-2 is valid and undecided; call-1 conflicts with "a".
+		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+			{ToolCallID: "call-2", Content: "b"},
+			{ToolCallID: "call-1", Content: "different"},
+		})
+		if !errors.Is(err, ErrDecisionConflict) {
+			t.Fatalf("mixed batch err = %v, want ErrDecisionConflict", err)
+		}
+
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Decisions["call-2"].Content != "b" {
+			t.Errorf("valid prefix was not committed: %+v", got.Decisions)
+		}
+		if got.Decisions["call-1"].Content != "a" {
+			t.Errorf("call-1 = %q, want unchanged \"a\"", got.Decisions["call-1"].Content)
+		}
+		if got.Status != StatusReady {
+			t.Errorf("Status = %q, want %q after prefix completed decisions", got.Status, StatusReady)
+		}
+
+		unknownRec := newTestRecord("sess-prefix-unknown", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, unknownRec); err != nil {
+			t.Fatalf("Create unknown-case record: %v", err)
+		}
+		if _, err := s.SubmitDecisions(ctx, unknownRec.ID, []Decision{
+			{ToolCallID: "call-1", Content: "a"},
+			{ToolCallID: "call-999", Content: "x"},
+		}); !errors.Is(err, ErrUnknownToolCall) {
+			t.Fatalf("unknown-id batch err = %v, want ErrUnknownToolCall", err)
+		}
+		got, gerr = s.Get(ctx, unknownRec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Decisions["call-1"].Content != "a" {
+			t.Errorf("valid prefix before unknown ID was not committed: %+v", got.Decisions)
+		}
+		if _, committed := got.Decisions["call-2"]; committed {
+			t.Error("decision after rejected entry was committed")
+		}
+	})
+
+	// A batch that names the same call twice is judged like any other
+	// resubmission: identical is idempotent, while a divergent duplicate
+	// rejects the duplicate after retaining the first entry.
+	t.Run(name+"/submit_decisions_duplicate_within_batch", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-dup", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+			{ToolCallID: "call-1", Content: "a"},
+			{ToolCallID: "call-1", Content: "b"},
+		})
+		if !errors.Is(err, ErrDecisionConflict) {
+			t.Fatalf("divergent duplicate err = %v, want ErrDecisionConflict", err)
+		}
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Decisions["call-1"].Content != "a" {
+			t.Errorf("Decisions = %+v, want first duplicate committed", got.Decisions)
+		}
+
+		if _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+			{ToolCallID: "call-1", Content: "a"},
+			{ToolCallID: "call-1", Content: "a"},
+		}); err != nil {
+			t.Errorf("identical duplicate err = %v, want nil", err)
+		}
+	})
 }
 
 func newTestRecord(sessionID string, pending []string) *Record {

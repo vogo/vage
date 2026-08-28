@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -200,6 +201,76 @@ func TestFileStore_StaleLockIsReclaimed(t *testing.T) {
 
 	if _, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute); err != nil {
 		t.Fatalf("AcquireLease past stale lock: %v", err)
+	}
+}
+
+// TestFileStore_MalformedIDCannotEscapeRoot is the path-traversal
+// regression: every id-taking entry point must refuse a caller-shaped id
+// before it is joined onto root, so no read, write or — most damagingly —
+// Delete can ever resolve to a file the store does not own.
+func TestFileStore_MalformedIDCannotEscapeRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "store")
+	ctx := context.Background()
+
+	s, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	// A bystander file one level above root, named so that a naive
+	// filepath.Join(root, id+".json") would land exactly on it.
+	victim := filepath.Join(base, "victim.json")
+	if err := os.WriteFile(victim, []byte(`{"keep":"me"}`), filestoreFilePerm); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+	victimLock := filepath.Join(base, "victim.lock")
+	if err := os.WriteFile(victimLock, nil, filestoreFilePerm); err != nil {
+		t.Fatalf("write victim lock: %v", err)
+	}
+
+	escapes := []string{
+		"../victim",
+		"..\\..\\victim",
+		"sub/victim",
+		"/etc/passwd",
+		"",
+	}
+
+	for _, id := range escapes {
+		if _, err := s.Get(ctx, id); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Get(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+		if _, err := s.SubmitDecisions(ctx, id, []Decision{{ToolCallID: "call-1", Content: "x"}}); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("SubmitDecisions(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+		if _, err := s.AcquireLease(ctx, id, "owner", time.Minute); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("AcquireLease(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+		if err := s.ReleaseLease(ctx, id, "owner"); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("ReleaseLease(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+		if err := s.Complete(ctx, id, "owner"); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Complete(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+		if err := s.Delete(ctx, id); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Delete(%q) err = %v, want ErrInvalidArgument", id, err)
+		}
+	}
+
+	for _, path := range []string{victim, victimLock} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("file outside root was touched by a traversal id: %s: %v", path, err)
+		}
+	}
+
+	// Nothing may have been created outside root either.
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		t.Fatalf("ReadDir base: %v", err)
+	}
+	if len(entries) != 3 { // store/, victim.json, victim.lock
+		t.Errorf("base dir entries = %d, want 3; traversal id wrote outside root", len(entries))
 	}
 }
 

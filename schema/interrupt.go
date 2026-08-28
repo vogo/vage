@@ -45,9 +45,15 @@ type InterruptDecision struct {
 
 // ResumeInterruptRequest is the input to TaskAgent.ResumeInterrupt. It
 // addresses a persisted interrupt by exact ID — never "the latest one for
-// this session" — and carries zero or more decisions to submit atomically.
-// A request with no decisions is a status probe: it returns the current
-// pending set without starting any tool or model call.
+// this session" — and carries zero or more decisions. Decisions commit in
+// slice order; if one is rejected, the valid prefix remains committed.
+//
+// Decisions may be omitted, which submits nothing and resumes on what is
+// already committed. As long as some flagged call is still undecided that is
+// a pure status probe — it returns the remaining pending set without starting
+// any tool or model call — and once every one has a decision it retries the
+// resume, so an attempt that failed after the human already decided can be
+// picked up without re-asking them.
 type ResumeInterruptRequest struct {
 	InterruptID string              `json:"interrupt_id"`
 	Decisions   []InterruptDecision `json:"decisions,omitempty"`

@@ -403,7 +403,10 @@ whole batch is frozen *before* any handler runs, persisted, and the call
 returns `schema.StopReasonInterrupted` instead of executing anything.
 
 ```go
-store := interrupt.NewFileStore("/var/run/myapp/interrupts") // or interrupt.NewMapStore() for tests
+store, err := interrupt.NewFileStore("/var/run/myapp/interrupts") // or interrupt.NewMapStore() for tests
+if err != nil {
+	return err
+}
 
 a := taskagent.New(cfg,
 	taskagent.WithCaller(caller),
@@ -437,7 +440,11 @@ A request with a partial decision set returns the same `interrupt_id` and the
 still-pending calls without starting any tool or model call; only once every
 flagged call in the batch has a decision does `ResumeInterrupt` execute the
 batch's ordinary sibling calls, feed everything back through the model, and
-continue the ReAct loop. `ResumeInterrupt` does not run the agent middleware
+continue the ReAct loop — with the suspended run's token budget carried over,
+not restarted. `Decisions` commit in order, so a rejected entry leaves its
+valid prefix committed. Omitting `Decisions` entirely resumes on what is
+already committed, which is how a resume that failed part-way is retried
+without asking the human again. `ResumeInterrupt` does not run the agent middleware
 chain or input guards (the original `Run` already did), starts with an empty
 run-value store (see above — nothing from the suspended run carries over),
 and requires a matching tool registry: a sibling call naming a tool the new
