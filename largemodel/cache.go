@@ -98,27 +98,29 @@ func (m *CacheMiddleware) Wrap(next Caller) Caller {
 // wire form: the same conversation addressed to two protocols is two distinct
 // calls with two distinct responses.
 type cacheKeyData struct {
-	Protocol      schema.Protocol  `json:"protocol"`
-	Model         string           `json:"model"`
-	Messages      []schema.Message `json:"messages"`
-	Tools         []schema.ToolDef `json:"tools,omitempty"`
-	Temperature   *float64         `json:"temperature,omitempty"`
-	MaxTokens     *int             `json:"max_tokens,omitempty"`
-	Stop          []string         `json:"stop,omitempty"`
-	PromptCaching bool             `json:"prompt_caching,omitempty"`
+	Protocol       schema.Protocol  `json:"protocol"`
+	Model          string           `json:"model"`
+	Messages       []schema.Message `json:"messages"`
+	Tools          []schema.ToolDef `json:"tools,omitempty"`
+	Temperature    *float64         `json:"temperature,omitempty"`
+	MaxTokens      *int             `json:"max_tokens,omitempty"`
+	Stop           []string         `json:"stop,omitempty"`
+	PromptCaching  bool             `json:"prompt_caching,omitempty"`
+	ResponseSchema any              `json:"response_schema,omitempty"`
 }
 
 // cacheKey produces a SHA-256 hex digest from the deterministic request fields.
 func cacheKey(proto schema.Protocol, req *Request) (string, error) {
 	data := cacheKeyData{
-		Protocol:      proto,
-		Model:         req.Model,
-		Messages:      req.Messages,
-		Tools:         req.Tools,
-		Temperature:   req.Temperature,
-		MaxTokens:     req.MaxTokens,
-		Stop:          req.Stop,
-		PromptCaching: req.PromptCaching,
+		Protocol:       proto,
+		Model:          req.Model,
+		Messages:       req.Messages,
+		Tools:          req.Tools,
+		Temperature:    req.Temperature,
+		MaxTokens:      req.MaxTokens,
+		Stop:           req.Stop,
+		PromptCaching:  req.PromptCaching,
+		ResponseSchema: req.ResponseSchema,
 	}
 
 	b, err := json.Marshal(data)

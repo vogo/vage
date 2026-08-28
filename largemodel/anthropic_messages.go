@@ -196,6 +196,17 @@ func (c *anthropicMessagesCaller) buildRequest(req *Request) (*anthropic.Message
 		return nil, err
 	}
 
+	if req.ResponseSchema != nil {
+		if wire.OutputConfig == nil {
+			wire.OutputConfig = &anthropic.OutputConfig{}
+		}
+
+		wire.OutputConfig.Format = &anthropic.OutputFormat{
+			Type:   "json_schema",
+			Schema: req.ResponseSchema,
+		}
+	}
+
 	return wire, nil
 }
 

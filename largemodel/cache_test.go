@@ -325,6 +325,43 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 	}
 }
 
+// TestCacheKey_DifferentResponseSchema pins that ResponseSchema participates
+// in the cache key: two requests that differ only in the requested output
+// shape must not collide, and either must differ from the schema-less
+// request that keeps today's key.
+func TestCacheKey_DifferentResponseSchema(t *testing.T) {
+	base := []schema.Message{
+		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
+	}
+
+	reqNone := &Request{Model: "gpt-4", Messages: base}
+	reqA := &Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "object"}}
+	reqB := &Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "string"}}
+
+	kNone, err := cacheKey(schema.ProtocolOpenAIChat, reqNone)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	kA, err := cacheKey(schema.ProtocolOpenAIChat, reqA)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	kB, err := cacheKey(schema.ProtocolOpenAIChat, reqB)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if kA == kB {
+		t.Fatal("requests with different ResponseSchema must produce different cache keys")
+	}
+
+	if kA == kNone || kB == kNone {
+		t.Fatal("a ResponseSchema request must not collide with the schema-less request")
+	}
+}
+
 // TestCacheKey_DifferentProtocol pins the dual-track cache rule: the same
 // conversation addressed to two protocols is two distinct calls, because the
 // stored messages are vendor-native wire forms.

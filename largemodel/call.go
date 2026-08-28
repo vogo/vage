@@ -55,11 +55,29 @@ type Request struct {
 	// prompt and the final tool definition. It has an on-wire effect only for
 	// Anthropic; OpenAI caches identical prefixes automatically.
 	PromptCaching bool
+
+	// ResponseSchema, when set, requires the model's final assistant text to
+	// be raw JSON matching this JSON Schema. It carries the caller's schema
+	// as-is — the same shape as schema.ToolDef.Parameters — and is treated as
+	// a read-only value: vage never mutates or trims it.
+	//
+	// It constrains the model's text output only, not tool-call arguments, so
+	// it may be set alongside Tools without interfering with each tool's own
+	// Parameters schema.
+	//
+	// A protocol caller with a native structured-output mapping (OpenAI Chat,
+	// Anthropic Messages) sends it as that vendor's own constraint field.
+	// Codecs with no native mapping degrade it into a deterministic system
+	// instruction instead (see DegradeResponseSchemaPrompt); either way vage
+	// does not parse, validate, or strip code fences from the resulting text.
+	ResponseSchema any
 }
 
 // Clone returns a copy of the request with its slices duplicated, so a
 // middleware may rewrite the copy without disturbing the caller's request.
 // The messages themselves are shared: callers treat them as immutable.
+// ResponseSchema is copied by value, like every ToolDef.Parameters: Clone
+// does not deep-copy the schema object underneath it.
 func (r *Request) Clone() *Request {
 	c := *r
 
