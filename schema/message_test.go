@@ -279,6 +279,190 @@ func TestProtocolOf(t *testing.T) {
 	}
 }
 
+// TestNewUserMessageWithParts proves text/image/file can be mixed in a single
+// user message, in the caller's order, and that Text() reports only the text
+// parts — media never leaks into it.
+func TestNewUserMessageWithParts(t *testing.T) {
+	for _, proto := range bothProtocols {
+		t.Run(string(proto), func(t *testing.T) {
+			parts := []MessagePart{
+				{Type: MessagePartText, Text: "look at this"},
+				{Type: MessagePartImage, URL: "https://example.com/cat.png"},
+				{Type: MessagePartFile, Data: []byte("pdf-bytes"), MimeType: "application/pdf", Filename: "report.pdf"},
+			}
+			msg := NewUserMessageWithParts(proto, parts)
+
+			if err := msg.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
+			}
+			if msg.Protocol() != proto {
+				t.Errorf("Protocol() = %q, want %q", msg.Protocol(), proto)
+			}
+			if msg.Role() != RoleUser {
+				t.Errorf("Role() = %q, want %q", msg.Role(), RoleUser)
+			}
+			if msg.Text() != "look at this" {
+				t.Errorf("Text() = %q, want only the text part", msg.Text())
+			}
+
+			got := msg.Parts()
+			if len(got) != 3 {
+				t.Fatalf("len(Parts()) = %d, want 3", len(got))
+			}
+			if got[0].Type != MessagePartText || got[1].Type != MessagePartImage || got[2].Type != MessagePartFile {
+				t.Errorf("Parts() order = %+v, want text, image, file", got)
+			}
+			if got[1].URL != "https://example.com/cat.png" {
+				t.Errorf("image URL = %q, want preserved", got[1].URL)
+			}
+			if string(got[2].Data) != "pdf-bytes" || got[2].Filename != "report.pdf" {
+				t.Errorf("file part = %+v, want data and filename preserved", got[2])
+			}
+		})
+	}
+}
+
+// TestMessagePartDataIsDeepCopied guards the value-semantics contract: no
+// entry point (construction, Parts(), AppendPart) may let a caller mutate a
+// Message through a shared []byte.
+func TestMessagePartDataIsDeepCopied(t *testing.T) {
+	t.Run("construction copies the input slice", func(t *testing.T) {
+		data := []byte{1, 2, 3}
+		msg := NewUserMessageWithParts(ProtocolOpenAIChat, []MessagePart{
+			{Type: MessagePartImage, Data: data, MimeType: "image/png"},
+		})
+		data[0] = 0xFF
+		if msg.Parts()[0].Data[0] == 0xFF {
+			t.Fatal("mutating the input slice changed the message")
+		}
+	})
+
+	t.Run("Parts returns a copy", func(t *testing.T) {
+		msg := NewUserMessageWithParts(ProtocolOpenAIChat, []MessagePart{
+			{Type: MessagePartImage, Data: []byte{1, 2, 3}, MimeType: "image/png"},
+		})
+		got := msg.Parts()
+		got[0].Data[0] = 0xFF
+		if msg.Parts()[0].Data[0] == 0xFF {
+			t.Fatal("mutating the returned slice changed the message")
+		}
+	})
+
+	t.Run("AppendPart copies the appended part", func(t *testing.T) {
+		msg := NewUserMessage(ProtocolOpenAIChat, "hi")
+		data := []byte{1, 2, 3}
+		msg.AppendPart(MessagePart{Type: MessagePartImage, Data: data, MimeType: "image/png"})
+		data[0] = 0xFF
+		if msg.Parts()[1].Data[0] == 0xFF {
+			t.Fatal("mutating the appended slice changed the message")
+		}
+	})
+}
+
+// TestSetTextPreservesMedia guards the same rewrite path as
+// TestSetTextPreservesToolCalls, for image/file parts instead of tool calls.
+func TestSetTextPreservesMedia(t *testing.T) {
+	msg := NewUserMessageWithParts(ProtocolOpenAIChat, []MessagePart{
+		{Type: MessagePartImage, URL: "https://example.com/cat.png"},
+	})
+	msg.SetText("caption")
+
+	if msg.Text() != "caption" {
+		t.Errorf("Text() = %q, want %q", msg.Text(), "caption")
+	}
+	parts := msg.Parts()
+	if len(parts) != 2 {
+		t.Fatalf("len(Parts()) = %d, want 2 (image kept, text appended)", len(parts))
+	}
+	hasImage := false
+	for _, p := range parts {
+		if p.Type == MessagePartImage && p.URL == "https://example.com/cat.png" {
+			hasImage = true
+		}
+	}
+	if !hasImage {
+		t.Errorf("Parts() = %+v, want the original image preserved", parts)
+	}
+}
+
+// TestMessageRoundTripWithMedia proves JSON persistence carries image/file
+// parts losslessly, including raw Data bytes.
+func TestMessageRoundTripWithMedia(t *testing.T) {
+	for _, proto := range bothProtocols {
+		t.Run(string(proto), func(t *testing.T) {
+			original := NewUserMessageWithParts(proto, []MessagePart{
+				{Type: MessagePartText, Text: "see attached"},
+				{Type: MessagePartImage, Data: []byte{0x89, 0x50, 0x4e, 0x47}, MimeType: "image/png"},
+				{Type: MessagePartFile, FileID: "file-abc"},
+			})
+
+			encoded, err := json.Marshal(original)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			var decoded Message
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			got := decoded.Parts()
+			want := original.Parts()
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("round-tripped Parts() = %+v, want %+v", got, want)
+			}
+			if err := decoded.Validate(); err != nil {
+				t.Errorf("decoded.Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestMessageValidateMedia table-drives every canonical media invariant:
+// missing/multiple sources, missing MIME on inline data, a non-image MIME on
+// an image part, the wrong role, and cross-type fields.
+func TestMessageValidateMedia(t *testing.T) {
+	tests := []struct {
+		name    string
+		role    Role
+		part    MessagePart
+		wantErr bool
+	}{
+		{"image url only", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, false},
+		{"image data with mime", RoleUser, MessagePart{Type: MessagePartImage, Data: []byte{1}, MimeType: "image/png"}, false},
+		{"image missing source", RoleUser, MessagePart{Type: MessagePartImage}, true},
+		{"image url and data both set", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png", Data: []byte{1}, MimeType: "image/png"}, true},
+		{"image data missing mime", RoleUser, MessagePart{Type: MessagePartImage, Data: []byte{1}}, true},
+		{"image non-image mime", RoleUser, MessagePart{Type: MessagePartImage, Data: []byte{1}, MimeType: "application/pdf"}, true},
+		{"image on assistant role", RoleAssistant, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, true},
+		{"image on system role", RoleSystem, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, true},
+		{"image on tool role", RoleTool, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, true},
+		{"image carries tool_call_id", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png", ToolCallID: "call-1"}, true},
+
+		{"file url only", RoleUser, MessagePart{Type: MessagePartFile, URL: "https://x/report.pdf"}, false},
+		{"file data with mime", RoleUser, MessagePart{Type: MessagePartFile, Data: []byte{1}, MimeType: "application/pdf", Filename: "r.pdf"}, false},
+		{"file id only", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1"}, false},
+		{"file missing source", RoleUser, MessagePart{Type: MessagePartFile}, true},
+		{"file two sources", RoleUser, MessagePart{Type: MessagePartFile, URL: "https://x/report.pdf", FileID: "file-1"}, true},
+		{"file data missing mime", RoleUser, MessagePart{Type: MessagePartFile, Data: []byte{1}, Filename: "r.pdf"}, true},
+		{"file on assistant role", RoleAssistant, MessagePart{Type: MessagePartFile, FileID: "file-1"}, true},
+		{"file carries thinking", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1", Thinking: "x"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := NewMessage(ProtocolOpenAIChat, tt.role, []MessagePart{tt.part})
+			err := msg.Validate()
+			if tt.wantErr && err == nil {
+				t.Fatal("Validate() = nil, want an error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestTextResult(t *testing.T) {
 	r := TextResult("call-1", "sunny weather")
 	if r.ToolCallID != "call-1" {

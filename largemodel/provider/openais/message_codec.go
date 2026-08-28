@@ -18,6 +18,7 @@
 package openais
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -95,9 +96,15 @@ func EncodeOpenAIMessage(msg schema.Message) (openai.ChatCompletionMessage, erro
 		return openai.ChatCompletionMessage{}, err
 	}
 
-	out := openai.ChatCompletionMessage{
-		Role:    string(msg.Role()),
-		Content: openai.NewTextContent(msg.Text()),
+	out := openai.ChatCompletionMessage{Role: string(msg.Role())}
+	if hasMediaParts(msg) {
+		parts, err := encodeOpenAIContentParts(msg)
+		if err != nil {
+			return openai.ChatCompletionMessage{}, err
+		}
+		out.Content = openai.NewPartsContent(parts...)
+	} else {
+		out.Content = openai.NewTextContent(msg.Text())
 	}
 	if msg.Role() == schema.RoleAssistant {
 		out.ReasoningContent = msg.Thinking()
@@ -128,8 +135,12 @@ func validateOpenAIParts(msg schema.Message) error {
 	for i, part := range msg.Parts() {
 		allowed := false
 		switch msg.Role() {
-		case schema.RoleSystem, schema.RoleUser:
+		case schema.RoleSystem:
 			allowed = part.Type == schema.MessagePartText
+		case schema.RoleUser:
+			allowed = part.Type == schema.MessagePartText ||
+				part.Type == schema.MessagePartImage ||
+				part.Type == schema.MessagePartFile
 		case schema.RoleAssistant:
 			allowed = part.Type == schema.MessagePartText ||
 				part.Type == schema.MessagePartThinking ||
@@ -148,4 +159,74 @@ func validateOpenAIParts(msg schema.Message) error {
 		return fmt.Errorf("openai: tool message requires exactly one tool_result part")
 	}
 	return nil
+}
+
+// hasMediaParts reports whether msg carries any image or file part. Media-free
+// messages keep encoding to the scalar Content form so unrelated requests do
+// not change shape.
+func hasMediaParts(msg schema.Message) bool {
+	for _, part := range msg.Parts() {
+		if part.Type == schema.MessagePartImage || part.Type == schema.MessagePartFile {
+			return true
+		}
+	}
+	return false
+}
+
+// encodeOpenAIContentParts renders canonical text/image/file parts into Chat
+// Completions' structured content array, preserving canonical order. It fails
+// closed on combinations Chat Completions cannot express (a file URL, or
+// inline file data without a filename) rather than sending a request the
+// backend would reject or silently truncate.
+func encodeOpenAIContentParts(msg schema.Message) ([]openai.ChatCompletionContentPart, error) {
+	parts := msg.Parts()
+	out := make([]openai.ChatCompletionContentPart, 0, len(parts))
+	for i, part := range parts {
+		switch part.Type {
+		case schema.MessagePartText:
+			out = append(out, openai.ChatCompletionContentPart{
+				Type: openai.ContentPartTypeText,
+				Text: part.Text,
+			})
+		case schema.MessagePartImage:
+			url := part.URL
+			if len(part.Data) > 0 {
+				url = dataURI(part.MimeType, part.Data)
+			}
+			out = append(out, openai.ChatCompletionContentPart{
+				Type:     openai.ContentPartTypeImageURL,
+				ImageURL: &openai.ImageURL{URL: url},
+			})
+		case schema.MessagePartFile:
+			switch {
+			case part.FileID != "":
+				out = append(out, openai.ChatCompletionContentPart{
+					Type: openai.ContentPartTypeFile,
+					File: &openai.InputFile{FileID: part.FileID},
+				})
+			case len(part.Data) > 0:
+				if part.Filename == "" {
+					return nil, fmt.Errorf("openai: message part %d inline file requires filename", i)
+				}
+				out = append(out, openai.ChatCompletionContentPart{
+					Type: openai.ContentPartTypeFile,
+					File: &openai.InputFile{
+						FileData: dataURI(part.MimeType, part.Data),
+						Filename: part.Filename,
+					},
+				})
+			default:
+				return nil, fmt.Errorf("openai: message part %d file url input is not supported", i)
+			}
+		default:
+			return nil, fmt.Errorf("openai: message part %d type %q cannot be encoded as content", i, part.Type)
+		}
+	}
+	return out, nil
+}
+
+// dataURI assembles the data: URI OpenAI expects for inline image_url.url and
+// file.file_data. Callers provide raw bytes; the codec owns base64 assembly.
+func dataURI(mimeType string, data []byte) string {
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 }
