@@ -97,15 +97,17 @@ type MessagePart struct {
 	// caller, assembles base64 or a data URI from it. Required MimeType
 	// accompanies it.
 	Data []byte `json:"data,omitempty"`
-	// MimeType names Data's media type. Required whenever Data is set; for an
-	// image part it must be an "image/*" type.
+	// MimeType names Data's media type. Required whenever Data is set and
+	// rejected on a URL or FileID source, which carry no wire field for it;
+	// for an image part it must be an "image/*" type.
 	MimeType string `json:"mime_type,omitempty"`
 	// FileID references a provider-hosted file (file part only, e.g. an
 	// OpenAI Files API upload). vage does not manage file lifecycle.
 	FileID string `json:"file_id,omitempty"`
-	// Filename names a file part. OpenAI requires it alongside inline Data;
+	// Filename names an inline file part. OpenAI requires it alongside Data;
 	// Anthropic has no wire field for it and drops it (documented
-	// degradation).
+	// degradation). It is rejected on a URL or FileID source, where no
+	// provider has a field to carry it.
 	Filename string `json:"filename,omitempty"`
 }
 
@@ -445,17 +447,17 @@ func (m Message) Validate() error {
 			if m.role != RoleUser {
 				return fmt.Errorf("vage: message part %d image is only valid on user messages", i)
 			}
-			sources := 0
-			if part.URL != "" {
-				sources++
-			}
-			if len(part.Data) > 0 {
-				sources++
-			}
-			if sources != 1 {
+			switch {
+			case part.URL != "" && len(part.Data) > 0, part.URL == "" && len(part.Data) == 0:
 				return fmt.Errorf("vage: message part %d image requires exactly one of url or data", i)
-			}
-			if len(part.Data) > 0 {
+			case part.URL != "":
+				// Only the inline source has a wire field for the media type;
+				// on a url source every codec would drop MimeType, so it fails
+				// closed here instead of misleading the caller.
+				if part.MimeType != "" {
+					return fmt.Errorf("vage: message part %d image url source must not set mime_type", i)
+				}
+			default:
 				if part.MimeType == "" {
 					return fmt.Errorf("vage: message part %d image data requires mime_type", i)
 				}
@@ -484,7 +486,18 @@ func (m Message) Validate() error {
 			if sources != 1 {
 				return fmt.Errorf("vage: message part %d file requires exactly one of url, data, or file_id", i)
 			}
-			if len(part.Data) > 0 && part.MimeType == "" {
+			// Only the inline source has wire fields for the media type and the
+			// filename. On a url or file_id source both would be dropped by
+			// every codec, so they fail closed rather than vanish.
+			if len(part.Data) == 0 {
+				if part.MimeType != "" || part.Filename != "" {
+					source := "url"
+					if part.FileID != "" {
+						source = "file_id"
+					}
+					return fmt.Errorf("vage: message part %d file %s source must not set mime_type or filename", i, source)
+				}
+			} else if part.MimeType == "" {
 				return fmt.Errorf("vage: message part %d file data requires mime_type", i)
 			}
 		default:

@@ -32,6 +32,7 @@
 | file FileID | `file.file_id` | 编码前明确报错,不支持 |
 | file URL | 编码前明确报错,不支持 | `document` block,`source.type=url` |
 
+- **辅助字段只跟随有 wire 字段的来源**:MimeType 与 Filename 只出现在内联 Data 行;URL / FileID 行没有可承载它们的 wire 字段,所以 canonical 层就不允许携带(见 [agent-core AC-15](../../agent/agent-core/agent-core.md)),codec 无需、也不会做丢弃决定。
 - **只在需要时切换 wire 形态**:用户消息含任一媒体 part 时才编码为结构化 content 数组;纯文本消息继续走标量 `content` 字符串,避免无关请求发生变化,也不影响缓存键。
 - **OpenAI 内联文件强制要求 Filename**:`file.file_data` 无 filename 时 OpenAI 会拒绝识别文件类型,codec 因此在编码期(而非等 backend 4xx)报错。
 - **失败前置到编码期**:结构错误(canonical 校验)与不可表示的组合(上表两处"编码前明确报错")都在任何网络 I/O 之前返回,`Call`/`CallStream` 共享同一 `buildRequest`,两条路径得到相同结果。

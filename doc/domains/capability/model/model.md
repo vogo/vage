@@ -36,7 +36,7 @@
 - **溢出处理(overflow)**:上下文超限时的处置。
 - **上下文编辑器(ContextEditor)**:请求到达模型前,把较早的工具结果折叠为短占位符,并可将超大工具结果外置到工件存储。
 - **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段;无原生映射的 codec 走 `DegradeResponseSchemaPrompt` 降级为确定性 system 指令。三态互斥,一次调用只选一种;vage 不解析、不校验、不清理最终 JSON。
-- **多模态输入(image/file)**:`schema.MessagePartImage`/`MessagePartFile` 是用户消息可携带的 provider-neutral 媒体来源(URL、内联 Data+MimeType,文件另可 FileID)。厂商 wire 字段只出现在 `EncodeOpenAIMessage`/`EncodeAnthropicMessage` 内部,来源到 wire 的映射固定,见 [model-design](model-design.md)。
+- **多模态输入(image/file)**:`schema.MessagePartImage`/`MessagePartFile` 是用户消息可携带的 provider-neutral 媒体来源(URL、内联 Data+MimeType,文件另可 FileID);MimeType / Filename 只属于内联 Data 来源。厂商 wire 字段只出现在 `EncodeOpenAIMessage`/`EncodeAnthropicMessage` 内部,来源到 wire 的映射固定,见 [model-design](model-design.md)。
 
 ## 业务规则与不变式
 

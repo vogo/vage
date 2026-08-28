@@ -438,6 +438,11 @@ func TestMessageValidateMedia(t *testing.T) {
 		{"image on system role", RoleSystem, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, true},
 		{"image on tool role", RoleTool, MessagePart{Type: MessagePartImage, URL: "https://x/y.png"}, true},
 		{"image carries tool_call_id", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png", ToolCallID: "call-1"}, true},
+		// Auxiliary fields only exist on the wire for the source they belong
+		// to: a mime_type or filename hung off a url/file_id source reaches no
+		// provider field, so Validate rejects it instead of dropping it.
+		{"image url carries mime", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png", MimeType: "image/png"}, true},
+		{"image url carries non-image mime", RoleUser, MessagePart{Type: MessagePartImage, URL: "https://x/y.png", MimeType: "application/not-image"}, true},
 
 		{"file url only", RoleUser, MessagePart{Type: MessagePartFile, URL: "https://x/report.pdf"}, false},
 		{"file data with mime", RoleUser, MessagePart{Type: MessagePartFile, Data: []byte{1}, MimeType: "application/pdf", Filename: "r.pdf"}, false},
@@ -447,6 +452,10 @@ func TestMessageValidateMedia(t *testing.T) {
 		{"file data missing mime", RoleUser, MessagePart{Type: MessagePartFile, Data: []byte{1}, Filename: "r.pdf"}, true},
 		{"file on assistant role", RoleAssistant, MessagePart{Type: MessagePartFile, FileID: "file-1"}, true},
 		{"file carries thinking", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1", Thinking: "x"}, true},
+		{"file url carries mime", RoleUser, MessagePart{Type: MessagePartFile, URL: "https://x/report.pdf", MimeType: "application/pdf"}, true},
+		{"file url carries filename", RoleUser, MessagePart{Type: MessagePartFile, URL: "https://x/report.pdf", Filename: "r.pdf"}, true},
+		{"file id carries mime", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1", MimeType: "application/pdf"}, true},
+		{"file id carries filename", RoleUser, MessagePart{Type: MessagePartFile, FileID: "file-1", Filename: "r.pdf"}, true},
 
 		// A non-media part holding a media field would be dropped by every
 		// codec, which reads sources from image/file parts only. Validate must

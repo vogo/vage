@@ -194,9 +194,13 @@ msg := schema.NewUserMessageWithParts(schema.ProtocolOpenAIChat, []schema.Messag
 ```
 
 Each image/file part needs exactly one source — a remote `URL`, inline `Data`
-(with `MimeType`), or for an OpenAI file, a `FileID` from the Files API. Image
+(with `MimeType`, plus `Filename` for a file), or for an OpenAI file, a
+`FileID` from the Files API. `MimeType` and `Filename` belong to the inline
+source only: no provider has a wire field for them on a `URL` or `FileID`
+source, so setting them there is an error rather than a silent drop. Image
 and file parts are only valid on user messages; `Message.Validate()` rejects a
-missing/duplicate source or the wrong role before any network call. Provider
+missing/duplicate source, misplaced source metadata, or the wrong role before
+any network call. Provider
 coverage differs by design and fails closed rather than downgrading silently:
 OpenAI has no file-by-URL wire shape and Anthropic has no `FileID` shape, so
 encoding either combination returns an error before the backend is called.
