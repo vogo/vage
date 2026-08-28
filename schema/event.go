@@ -94,6 +94,23 @@ const (
 	// to detect store failures without needing a failure-variant event.
 	EventCheckpointWritten = "checkpoint_written"
 
+	// Interrupt lifecycle events (emitted by TaskAgent around an
+	// interrupt.Store-backed suspend/resume, see vage/interrupt).
+	// EventInterruptCreated fires after a suspending tool batch has been
+	// durably persisted (never before — an unpersisted suspend is a hard
+	// Run error, not an event). EventInterruptDecisionStored fires after
+	// each external decision is durably committed, whether or not the
+	// batch is fully decided yet, including each item of a valid prefix
+	// that landed before a later decision in the same SubmitDecisions
+	// call was rejected — and only then: resubmitting a decision already
+	// stored writes nothing, so it emits nothing. EventInterruptResumed fires once a resume has
+	// acquired the store lease and is about to re-enter the ReAct loop.
+	// None of these payloads carry decision or message content — only
+	// identity, status and timing — so they are safe to log verbatim.
+	EventInterruptCreated        = "interrupt_created"
+	EventInterruptDecisionStored = "interrupt_decision_stored"
+	EventInterruptResumed        = "interrupt_resumed"
+
 	// Context editing event (emitted by largemodel.ContextEditorMiddleware
 	// when at least one tool_result in an outgoing Request is folded
 	// into a placeholder). Payload is ContextEditedData. Silent passes
@@ -504,6 +521,42 @@ type CheckpointWrittenData struct {
 }
 
 func (CheckpointWrittenData) eventData() {}
+
+// InterruptCreatedData is the payload for EventInterruptCreated, emitted
+// after interrupt.Store.Create has durably persisted the suspending tool
+// batch. PendingToolCallIDs preserves the original ToolCalls order.
+type InterruptCreatedData struct {
+	InterruptID        string   `json:"interrupt_id"`
+	Iteration          int      `json:"iteration"`
+	PendingToolCallIDs []string `json:"pending_tool_call_ids"`
+}
+
+func (InterruptCreatedData) eventData() {}
+
+// InterruptDecisionStoredData is the payload for
+// EventInterruptDecisionStored, emitted once per decision after
+// interrupt.Store.SubmitDecisions durably commits it (including each
+// committed prefix item when a later decision in the same call is
+// rejected, and excluding an idempotent resubmission, which commits
+// nothing). Ready reports whether every pending tool call in the batch
+// now has a decision.
+type InterruptDecisionStoredData struct {
+	InterruptID string `json:"interrupt_id"`
+	ToolCallID  string `json:"tool_call_id"`
+	Ready       bool   `json:"ready"`
+}
+
+func (InterruptDecisionStoredData) eventData() {}
+
+// InterruptResumedData is the payload for EventInterruptResumed, emitted
+// once a resume has acquired the store lease and is about to re-enter the
+// ReAct loop at the interrupted tool batch.
+type InterruptResumedData struct {
+	InterruptID string `json:"interrupt_id"`
+	SessionID   string `json:"session_id"`
+}
+
+func (InterruptResumedData) eventData() {}
 
 // ContextEditedData is the payload for EventContextEdited. It is
 // emitted by largemodel.ContextEditorMiddleware after a successful

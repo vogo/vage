@@ -10,6 +10,7 @@ A Go framework for building LLM-based intelligent agent systems.
 
 - **Composable Agents** — TaskAgent (ReAct tool-calling), RouterAgent (routing), WorkflowAgent (DAG orchestration), and CustomAgent (user-defined)
 - **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling
+- **Cross-Process Interrupt & Resume** — Suspend a tool batch before it runs, persist it, and let a different process inject a human decision and resume from exactly that batch
 - **Three-Level Memory** — Working (request) → Session (conversation) → Store (persistent), with context compression and token budgets
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
 - **Agent Middleware** — One decorator chain shared by sync and streaming runs: short-circuit, audit, or rewrite the final response once per run (hooks stay read-only, stream middleware stays event-level)
@@ -390,6 +391,69 @@ it: neither is validated, and the payload is stored as given, not copied. The
 call is best-effort and returns nothing — with no emitter bound to the context
 it is a silent no-op, and a closing stream simply drops the event — so treat
 custom events as observability, never as the only trigger for a state change.
+
+## Cross-Process Interrupt & Resume
+
+`ask_user` (see `tool/askuser`) blocks synchronously inside a tool handler and
+is lost if the process exits before it returns — fine for a human sitting at
+a terminal, not for approval that may take hours and land on another
+machine. `WithInterruptStore` + `WithInterruptPolicy` give TaskAgent a
+different, resumable suspend point: when the policy flags a tool call, the
+whole batch is frozen *before* any handler runs, persisted, and the call
+returns `schema.StopReasonInterrupted` instead of executing anything.
+
+```go
+store, err := interrupt.NewFileStore("/var/run/myapp/interrupts") // or interrupt.NewMapStore() for tests
+if err != nil {
+	return err
+}
+
+a := taskagent.New(cfg,
+	taskagent.WithCaller(caller),
+	taskagent.WithToolRegistry(registry), // must still declare ask_user's ToolDef
+	taskagent.WithInterruptStore(store),
+	taskagent.WithInterruptToolNames("ask_user"), // or a custom taskagent.InterruptPolicy
+)
+
+resp, _ := a.Run(ctx, req)
+if resp.StopReason == schema.StopReasonInterrupted {
+	// Persist resp.Interrupt.InterruptID; resp.Interrupt.Pending lists the
+	// ToolCall(s) awaiting a decision. No handler ran for them.
+	saveForLaterApproval(resp.Interrupt.InterruptID, resp.Interrupt.Pending)
+}
+```
+
+Later — possibly from a different process, as long as it opens the same
+`FileStore` root and constructs an `Agent` with the same `Config.ID` and
+`Protocol` — inject the human's decision and resume from exactly that batch:
+
+```go
+resp, err := a2.ResumeInterrupt(ctx, schema.ResumeInterruptRequest{
+	InterruptID: interruptID,
+	Decisions: []schema.InterruptDecision{
+		{ToolCallID: "call_abc123", Content: "approved, proceed with $500 refund"},
+	},
+})
+```
+
+A request with a partial decision set returns the same `interrupt_id` and the
+still-pending calls without starting any tool or model call; only once every
+flagged call in the batch has a decision does `ResumeInterrupt` execute the
+batch's ordinary sibling calls, feed everything back through the model, and
+continue the ReAct loop — with the suspended run's token budget carried over,
+not restarted. `Decisions` commit in order, so a rejected entry leaves its
+valid prefix committed. Omitting `Decisions` entirely resumes on what is
+already committed, which is how a resume that failed part-way is retried
+without asking the human again. `ResumeInterrupt` does not run the agent middleware
+chain or input guards (the original `Run` already did), starts with an empty
+run-value store (see above — nothing from the suspended run carries over),
+and requires a matching tool registry: a sibling call naming a tool the new
+process cannot execute fails before anything runs. `WithInterruptStore` and
+`WithInterruptPolicy` must be configured together — configuring only one is a
+construction-time error, not a silent no-op — and this is deliberately not a
+wrapper around `ask_user`'s blocking mode or `checkpoint`'s crash-replay
+`Resume(sessionID)`: all three answer different questions and none
+substitutes for another (see [doc/glossary.md](doc/glossary.md) — "Interrupt").
 
 ## License
 

@@ -47,6 +47,15 @@
 
 历史助手 `tool/toolkit.TruncateUTF8` 与 `tool/toolkit.ResultText` 已 deprecated,保留为薄委托以免既有调用方编译失败;新代码直接用上表的入口。多文本 part 或多模态结果需要完整表示时,仍应直接读 `ToolResult.Content` —— `Text()` 只承诺便捷读取,不承诺完整性。
 
+## Two collaboration paths for ask_user
+
+`tool/askuser` implements only the blocking path. The cross-process path is not extra code in that package — it is a TaskAgent policy layered on the same tool name. The choice is made at Agent construction, not auto-switched at runtime:
+
+- Same process, a human waiting, timeout acceptable → `tool/askuser.Register(registry, interactor)`. The handler calls `UserInteractor.AskUser` and blocks; timeout or process exit ends it, with no record another process can resume.
+- Cross-process / cross-session approval that may wait minutes or hours → `taskagent.WithInterruptStore(store)` + `taskagent.WithInterruptToolNames("ask_user")` (or a custom `InterruptPolicy`). When the model requests `ask_user`, `runReactLoop` intercepts before the handler: the handler does not run; after `interrupt.Store.Create` succeeds the call returns `StopReasonInterrupted` and an `interrupt_id`. Another process submits the human text as that `tool_call_id`'s decision via `TaskAgent.ResumeInterrupt` and continues the original batch.
+
+Both paths share the `ask_user` name and parameter schema. The only difference is whether the Agent's `InterruptPolicy` flags it: a hit takes over and the handler never runs; a miss (or no interrupt configured) is the existing blocking path, with no implicit switch. Registering both is pointless — once `ask_user` is flagged, the `tool/askuser` handler is never reached.
+
 ## 非功能考量
 
 - **安全**:bash 进程隔离;文件工具路径校验集中在 `toolkit`;MCP I/O 脱敏;执行中间件是可选策略接缝而非自动安全边界。

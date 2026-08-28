@@ -7,7 +7,7 @@
 | **Agent(智能体)** | 满足统一 `Run(请求)→响应` 契约、带身份三元组(ID/名称/描述)的执行单元。有任务型、路由型、工作流型、自定义型四种形态。详见 [agent-core](domains/agent/agent-core/agent-core.md)。 |
 | **ReAct 循环** | 任务型 Agent 的推理-行动循环:提示 → LLM → 若产生工具调用则执行并回喂 → 直至收敛。三种终止:得到最终答案、达到最大迭代、token 预算耗尽。 |
 | **RunRequest / RunResponse** | 一次 Agent 调用的输入/输出信封。请求含消息列表、会话 ID 与单次覆盖项;响应含消息、用量、耗时与终止原因(StopReason)。 |
-| **StopReason(终止原因)** | 标记一次 Agent 运行为何结束:wire 值为 `complete`(完成)/ `max_iterations_exceeded`(达上限)/ `token_budget_exhausted`(预算耗尽)。 |
+| **StopReason** | Why an Agent call ended. Wire values: `complete` / `max_iterations_exceeded` / `token_budget_exhausted` / `interrupted` (this call ended; the logical Run has not — see Interrupt). |
 | **Message(消息)** | provider-neutral 的对话消息:canonical 状态为 `role` + `parts`,叠加 Agent 语义元数据(所属 Agent、时间戳、附加元数据)与协议标识;可选 `origin` 缓存未修改的厂商原生 wire 供同协议回放。读取统一走访问器。 |
 | **Protocol(协议)** | 模型绑定的厂商 wire 协议,配置期确定并标记在每条消息上。当前实现:openai-chat、anthropic-messages;`openai-responses` 已命名预留但尚未接入公开 Caller。 |
 | **工具(Tool)** | 可被 Agent 调用的能力单元,带名称、描述与 JSON Schema 参数。来源分本地函数、MCP 远程、agent-as-tool 三类。 |
@@ -18,6 +18,7 @@
 | **上下文编辑(Context Editing)** | 在请求到达模型前,把较早的工具结果折叠为短占位符的中间件动作,使多轮 ReAct 不必每轮重付完整工具结果的 token。 |
 | **会话(Session)** | 一等的对话实体:身份 + 追加型事件流 + 结构化状态 KV + 可插拔存储后端。事件只追加,结构化状态可覆盖。 |
 | **检查点(Checkpoint)** | 某次迭代的完整可恢复快照,用于崩溃/重启后断点续跑。注意:`checkpoint` 包(ReAct 迭代级)与 `orchestrate` 的 DAG 级检查点是两套不同机制。 |
+| **Interrupt** | Third durable execution state from the `interrupt` package: when a policy flags one or more tool calls before the batch runs, the framework freezes the whole batch, persists an `interrupt.Record`, and ends this call with `StopReasonInterrupted` (the logical Run is not finished). `TaskAgent.ResumeInterrupt(ctx, req)` injects external decisions by `interrupt_id + tool_call_id` and continues from that batch. Distinct from `ask_user` (handler already running, in-process blocking wait, no framework suspend record) and from checkpoint (crash-replay snapshot of a completed turn or finished Run, resumed via `Resume(sessionID)` from the latest complete turn). The three do not substitute; see [agent-core](domains/agent/agent-core/agent-core.md) and [orchestration](domains/agent/orchestration/orchestration.md). |
 | **DAG 编排** | 以有向无环图组织多个 Runner(Agent 满足此接口),支持并行、条件、循环、补偿、背压、优先级调度。 |
 | **补偿(Compensation / Saga)** | 编排失败时对已提交步骤执行的回滚动作,保证长流程的最终一致。 |
 | **背压(Backpressure)** | 根据运行时负载自适应调节 DAG 并发度的机制。 |

@@ -36,6 +36,8 @@
 - **自定义事件(custom event)**:由调用方(通常是工具处理器)在执行途中发出的应用级事件。它挂在固定的 `custom` 事件类型下,靠一个应用自选的名称区分含义;框架不解释它,只负责投递。
 - **Agent 运行中间件(Agent Middleware)**:装饰整次 Run 的装饰器,以 `Wrap(next RunFunc) RunFunc` 包裹一次 ReAct 执行与终态响应,可短路、可后置改写。它是唯一覆盖「一次运行」控制流的接缝。
 - **PromptTemplate**:可渲染、具名、带版本的系统提示词。
+- **Interrupt**: a third durable execution state persisted by `interrupt.Store`. When a policy flags a tool batch as needing an external decision, the framework freezes the whole batch before any handler runs and ends this call with `StopReasonInterrupted`. Another process resumes by `interrupt_id`. See glossary [Interrupt](../../../glossary.md) and the three-way boundary in [orchestration](../orchestration/orchestration.md).
+- **InterruptPolicy**: `taskagent.InterruptPolicy` chooses which call IDs in a tool batch need an injected external decision. `Pending` must be a non-empty unique subset of that batch; `WithInterruptToolNames` is the name-matching convenience implementation.
 
 > 实体的字段、类型与转换关系属于结构细节,以代码为准,不在此重述。
 
@@ -56,6 +58,7 @@
 | AC-11 | **短路与改写都不绕过护栏**:不调用 `next` 即短路(保证无 LLM 调用、无工具执行、无 ReAct 检查点写入);调用 `next` 后原地修改或替换 `RunResponse`。两者产出的消息都仍须经过输出护栏、写入会话记忆,并成为 `AgentEnd.Message` 的唯一来源。 |
 | AC-12 | **框架所有的不变式**:`SessionID` 与 `Duration` 最终以请求会话与实测耗时为准,中间件不可伪造;中间件可决定消息、元数据、usage 与 stop reason。`nil, nil` 按 `ErrNilMiddlewareResponse` 失败,中间件错误按运行错误终止终态处理,不产生成功终态事件。 |
 | AC-13 | **直返工具(ReturnDirect)**:被 `taskagent.WithReturnDirectTools` 标记的工具成功后,ReAct 循环跳过下一轮模型调用,把护栏后的 `ToolResult.Text()` 包装为最终 assistant 消息并以 `complete` 终止。同批全部工具仍按既有并发规则执行完毕;在模型调用顺序中选第一个「名称已配置且最终结果成功」的工具,完成时序不参与裁决。失败路径(handler/Registry 错误、`IsError` 结果、工具结果护栏 Block)绝不短路,整批结果照常回填。直返只跳过模型轮次,输出护栏、消息记忆、Agent middleware 后置与 `AgentEnd` 照常运行;usage 只累计已发生的模型调用。 |
+| AC-14 | **Interrupt suspend point**: when `WithInterruptPolicy` (+ `WithInterruptStore`) flags any call in a tool batch, `runReactLoop` freezes the whole batch before `executeToolBatch` — no handler runs, no `tool_call_start/end`. `StopReasonInterrupted` is returned only after `interrupt.Store.Create` succeeds; a store failure is a hard Run error, never a fake suspend. `Pending` is a non-empty unique subset of the batch (duplicates and unknown IDs are rejected before persist). `ResumeInterrupt(ctx, req)` injects decisions by `interrupt_id + tool_call_id`; sibling calls in the original `ToolCalls` order run only once every pending call has a decision, inheriting the same logical Run's consumed token budget. Omitting decisions probes a Pending record and retries resume on a Ready record. Submit never demotes `Resuming` back to `Ready`. Each durably committed decision emits `interrupt_decision_stored`, including a valid prefix that landed before a later item in the same call was rejected — and only those: an idempotent resubmission of an already stored decision writes nothing and emits nothing. Which decisions those are is taken from what `SubmitDecisions` reports it committed, not from a before/after comparison of the record, so concurrent resumers submitting the same decision still emit exactly one event. Does not enter the Agent middleware chain, does not re-run input guards, starts with empty Run values. Configuring only one of `WithInterruptStore` / `WithInterruptPolicy` is a construction error. |
 
 ## Agent 运行中间件链
 
@@ -93,19 +96,25 @@ stateDiagram-v2
     AgentStart --> Iteration
     Iteration --> LLMCall
     LLMCall --> ToolBatch: 有工具调用
-    ToolBatch --> Checkpoint
+    ToolBatch --> InterruptCheck
+    InterruptCheck --> Suspended: policy hit
+    InterruptCheck --> ToolExec: no hit
+    ToolExec --> Checkpoint
     Checkpoint --> Iteration: 未终止
-    ToolBatch --> Terminal: 成功直返工具
+    ToolExec --> Terminal: successful return-direct tool
     LLMCall --> Terminal: 无工具调用/达上限/预算耗尽
     Terminal --> AgentEnd
+    Suspended --> AgentEnd: interrupted (this call ends here)
     AgentEnd --> [*]
 ```
 
 断点续跑(Resume):从迭代存储载入最新检查点,复用完全相同的循环骨架与终止路径;跳过输入护栏(原运行已校验),但输出与工具结果护栏仍生效。检查点已是终态则拒绝续跑。
 
+Cross-process interrupt resume (`ResumeInterrupt`): see AC-14. `Suspended` does not write an iteration checkpoint — `interrupt.Store` is an independent durable state machine, not a variant of `IterationStore`. The boundary is in [orchestration](../orchestration/orchestration.md).
+
 ## 领域事件
 
-任务型 Agent 在整条 ReAct 路径上发出结构化事件:AgentStart/End、IterationStart、TextDelta(流式)、ToolCall/ToolResult、LLM 调用、Token 预算、护栏、技能、编排、上下文构建。消费者为 `platform` 组的 hook 与流式调用方。
+任务型 Agent 在整条 ReAct 路径上发出结构化事件:AgentStart/End、IterationStart、TextDelta(流式)、ToolCall/ToolResult、LLM 调用、Token 预算、护栏、技能、编排、上下文构建、interrupt (`interrupt_created` / `interrupt_decision_stored` / `interrupt_resumed`; identity, status, tool-call IDs and timing only — no decision or message body). 消费者为 `platform` 组的 hook 与流式调用方。
 
 除这些**内置事件**外,还有一类**自定义事件**:内置事件描述框架生命周期、语义由框架定义;自定义事件只表达调用方自己定义的运行期信息(典型场景是一次长耗时工具调用内部的分阶段进度),框架既不定义也不校验其含义。二者的关键差别对消费者是可见的 —— 内置事件看顶层类型即可分派,自定义事件必须**先看 `custom` 类型、再看载荷里的名称**才能解释,因为所有自定义事件共用同一个顶层类型。名称由应用自行命名与演进,框架不维护名称注册表,也不会把名称提升成新的事件类型。
 
@@ -117,6 +126,6 @@ stateDiagram-v2
 - **tooling**:通过工具注册表注册与执行工具;技能向其注入提示与过滤工具。
 - **memory**:多轮会话记忆的读写与 session 提升;上下文装配管线来自 `context`。跨运行、跨进程要留存的状态归 memory / workspace,Run 值只负责单次运行内的临时传递。
 - **guard**:输入/输出/工具结果三处护栏。
-- **orchestration**:工作流型 Agent 的 DAG/循环执行,任务型的断点续跑存储。
+- **orchestration**:工作流型 Agent 的 DAG/循环执行,任务型的断点续跑存储(`checkpoint`)与 cross-process interrupt/resume store (`interrupt`).
 
 技术实现(选项、ReAct 具体流程、路由内置函数)见 [agent-core-design](agent-core-design.md)。

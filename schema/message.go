@@ -32,6 +32,13 @@ const (
 	StopReasonComplete        StopReason = "complete"
 	StopReasonBudgetExhausted StopReason = "token_budget_exhausted"
 	StopReasonMaxIterations   StopReason = "max_iterations_exceeded"
+
+	// StopReasonInterrupted marks a Run that suspended before executing a
+	// tool batch a policy flagged for external decision. It means "this call
+	// ended, the logical Run has not terminated" — distinct from the other
+	// three, which are true terminators. See vage/interrupt and
+	// TaskAgent.ResumeInterrupt.
+	StopReasonInterrupted StopReason = "interrupted"
 )
 
 // Role names a chat participant. vage keeps its own role vocabulary because
@@ -540,4 +547,10 @@ type RunResponse struct {
 	Duration   int64          `json:"duration_ms,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	StopReason StopReason     `json:"stop_reason,omitempty"`
+
+	// Interrupt is populated when StopReason == StopReasonInterrupted. It
+	// carries just enough for the caller to persist an interrupt_id and
+	// present the pending tool calls to a human decision-maker — the full
+	// resumable state stays server-side in the interrupt.Store record.
+	Interrupt *InterruptDescriptor `json:"interrupt,omitempty"`
 }
