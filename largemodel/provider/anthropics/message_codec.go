@@ -18,6 +18,7 @@
 package anthropics
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -184,6 +185,50 @@ func EncodeAnthropicMessage(msg schema.Message) (anthropic.MessagesMessage, erro
 				ResultContent: part.Text,
 				IsError:       part.IsError,
 			})
+		case schema.MessagePartImage:
+			if msg.Role() != schema.RoleUser {
+				return out, invalidAnthropicPart(i, part, msg.Role())
+			}
+			source := anthropic.ContentSource{}
+			switch {
+			case part.URL != "":
+				source.Type = anthropic.ContentSourceTypeURL
+				source.URL = part.URL
+			case len(part.Data) > 0:
+				source.Type = anthropic.ContentSourceTypeBase64
+				source.MediaType = part.MimeType
+				source.Data = base64.StdEncoding.EncodeToString(part.Data)
+			}
+			blocks = append(blocks, anthropic.ContentBlock{
+				Type:   anthropic.ContentBlockTypeImage,
+				Source: &source,
+			})
+		case schema.MessagePartFile:
+			if msg.Role() != schema.RoleUser {
+				return out, invalidAnthropicPart(i, part, msg.Role())
+			}
+			switch {
+			case part.FileID != "":
+				return out, fmt.Errorf("anthropic: message part %d file_id input is not supported", i)
+			case part.URL != "":
+				blocks = append(blocks, anthropic.ContentBlock{
+					Type:   anthropic.ContentBlockTypeDocument,
+					Source: &anthropic.ContentSource{Type: anthropic.ContentSourceTypeURL, URL: part.URL},
+				})
+			case len(part.Data) > 0:
+				// Document blocks have no wire field for a filename; Anthropic
+				// drops it. This is the one documented degradation (see
+				// doc/domains/capability/model) — the file's bytes and MIME type
+				// still reach the model intact.
+				blocks = append(blocks, anthropic.ContentBlock{
+					Type: anthropic.ContentBlockTypeDocument,
+					Source: &anthropic.ContentSource{
+						Type:      anthropic.ContentSourceTypeBase64,
+						MediaType: part.MimeType,
+						Data:      base64.StdEncoding.EncodeToString(part.Data),
+					},
+				})
+			}
 		}
 	}
 	if len(blocks) == 0 {

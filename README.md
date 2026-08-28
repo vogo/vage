@@ -17,6 +17,7 @@ A Go framework for building LLM-based intelligent agent systems.
 - **LLM Middleware** — Decorator chain: logging, rate limiting, timeout, cache, metrics (retries and endpoint health live in the caller's router pool)
 - **Tool Execute Middleware** — Registry-level decorator around each tool dispatch: audit, deny, or rewrite results/errors for local, MCP, and agent-as-tool calls
 - **Tool System** — Local functions, MCP remote tools, agent-as-tool, built-in bash tool with process isolation
+- **Multimodal Input** — Mix text, image, and file parts in a user message; OpenAI and Anthropic codecs render each to native wire shapes
 - **Agent Skills** — Compatible with the [Agent Skills](https://agentskills.io) open standard
 - **MCP Protocol** — Client (consume external tools) and server (expose agent capabilities)
 - **Evaluation** — ExactMatch, Contains, LLMJudge, ToolCall, Latency, Cost evaluators
@@ -177,6 +178,36 @@ request named. Strategies are failover, random, weighted, cost, and latency;
 `caller.EndpointStats()` reports per-endpoint health merged across the
 caller's pools. There is no cross-protocol failover: an OpenAI pool and an
 Anthropic pool are separate, with no shared request to hand between them.
+
+## Multimodal Input (image/file)
+
+A user message can mix text with images and files. `NewUserMessageWithParts`
+keeps the parts provider-neutral; each provider's codec renders them to its
+own wire shape (`image_url` / inline `image` blocks, OpenAI `file_data` /
+Anthropic `document` blocks) when the request is built:
+
+```go
+msg := schema.NewUserMessageWithParts(schema.ProtocolOpenAIChat, []schema.MessagePart{
+	{Type: schema.MessagePartText, Text: "What is in this image?"},
+	{Type: schema.MessagePartImage, URL: "https://example.com/cat.png"},
+})
+```
+
+Each image/file part needs exactly one source — a remote `URL`, inline `Data`
+(with `MimeType`, plus `Filename` for a file), or for an OpenAI file, a
+`FileID` from the Files API. `MimeType` and `Filename` belong to the inline
+source only: no provider has a wire field for them on a `URL` or `FileID`
+source, so setting them there is an error rather than a silent drop. Image
+and file parts are only valid on user messages; `Message.Validate()` rejects a
+missing/duplicate source, misplaced source metadata, or the wrong role before
+any network call. Provider
+coverage differs by design and fails closed rather than downgrading silently:
+OpenAI has no file-by-URL wire shape and Anthropic has no `FileID` shape, so
+encoding either combination returns an error before the backend is called.
+Anthropic's `document` block also has no filename field — the bytes and MIME
+type still reach the model, but the filename does not. See
+[doc/domains/capability/model/model-design.md](doc/domains/capability/model/model-design.md)
+for the full source-to-wire mapping.
 
 ## Run Middleware (One Chain for Sync and Streaming)
 

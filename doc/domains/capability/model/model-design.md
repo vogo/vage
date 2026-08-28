@@ -20,6 +20,25 @@
 | `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
 | `largemodel/response_schema.go` | `DegradeResponseSchemaPrompt`:无原生结构化输出映射的 codec 的通用降级路径 |
 
+## 多模态消息编码(image/file)
+
+`schema.MessagePartImage`/`MessagePartFile` 只在用户消息里有效(见 [agent-core AC-15](../../agent/agent-core/agent-core.md))。`EncodeOpenAIMessage`/`EncodeAnthropicMessage` 按 canonical part 顺序把它们渲染为各自的原生 wire 形态;下表是固定映射,不按模型名或运行时探测切换:
+
+| canonical 来源 | OpenAI Chat Completions | Anthropic Messages |
+|---|---|---|
+| image URL | `image_url.url` | `image` block,`source.type=url` |
+| image Data + MimeType | `image_url.url` data URI(`data:<mime>;base64,<data>`) | `image` block,`source.type=base64`,携带 `media_type` |
+| file Data + MimeType + Filename | `file.file_data` data URI,携带 `filename` | `document` block,`source.type=base64`;`Filename` 无对应 wire 字段,被丢弃(唯一允许的已知降级 —— 字节与 MIME 类型仍完整送达) |
+| file FileID | `file.file_id` | 编码前明确报错,不支持 |
+| file URL | 编码前明确报错,不支持 | `document` block,`source.type=url` |
+
+- **辅助字段只跟随有 wire 字段的来源**:MimeType 与 Filename 只出现在内联 Data 行;URL / FileID 行没有可承载它们的 wire 字段,所以 canonical 层就不允许携带(见 [agent-core AC-15](../../agent/agent-core/agent-core.md)),codec 无需、也不会做丢弃决定。
+- **只在需要时切换 wire 形态**:用户消息含任一媒体 part 时才编码为结构化 content 数组;纯文本消息继续走标量 `content` 字符串,避免无关请求发生变化,也不影响缓存键。
+- **OpenAI 内联文件强制要求 Filename**:`file.file_data` 无 filename 时 OpenAI 会拒绝识别文件类型,codec 因此在编码期(而非等 backend 4xx)报错。
+- **失败前置到编码期**:结构错误(canonical 校验)与不可表示的组合(上表两处"编码前明确报错")都在任何网络 I/O 之前返回,`Call`/`CallStream` 共享同一 `buildRequest`,两条路径得到相同结果。
+- **vision capability 复用现有检测**:`openais.chatRequiresVision`/`anthropics.messagesRequireVision` 读的是已编码的 wire content(`image_url`/`image` block),对 schema 层无感知,因此本变更不需要新增判定逻辑。文件不新增 capability 标签——模型是否接受某类文档、多大、哪些 MIME,由 provider 在调用时报错,vage 不做本地猜测或限流。
+- **vage 不做的事**:不下载 URL、不读取本地路径、不上传文件、不管理 FileID 生命周期,也不提供统一文件存储服务——URL、字节、外部 ID 均由调用方提供并对其正确性负责。
+
 ## 中间件清单
 
 | 文件 | 中间件 | 作用 |

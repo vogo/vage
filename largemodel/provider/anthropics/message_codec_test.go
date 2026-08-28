@@ -18,9 +18,12 @@
 package anthropics
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/vage/schema"
 )
 
@@ -52,5 +55,90 @@ func TestToolResultPreservesIsError(t *testing.T) {
 	parts := decoded.Parts()
 	if decoded.Role() != schema.RoleTool || len(parts) != 1 || !parts[0].IsError {
 		t.Fatalf("decoded canonical message = role %q parts %+v", decoded.Role(), parts)
+	}
+}
+
+// TestEncodeMixedContentBlocks asserts text/image/document block order,
+// source type (url vs. base64), media_type and raw data for a user message
+// mixing every supported media source.
+func TestEncodeMixedContentBlocks(t *testing.T) {
+	imgBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	fileBytes := []byte("%PDF-1.4 ...")
+
+	msg := schema.NewUserMessageWithParts(schema.ProtocolAnthropicMessages, []schema.MessagePart{
+		{Type: schema.MessagePartText, Text: "see below"},
+		{Type: schema.MessagePartImage, URL: "https://example.com/cat.png"},
+		{Type: schema.MessagePartImage, Data: imgBytes, MimeType: "image/png"},
+		{Type: schema.MessagePartFile, URL: "https://example.com/doc.pdf"},
+		{Type: schema.MessagePartFile, Data: fileBytes, MimeType: "application/pdf", Filename: "report.pdf"},
+	})
+
+	wire, err := EncodeAnthropicMessage(msg)
+	if err != nil {
+		t.Fatalf("EncodeAnthropicMessage: %v", err)
+	}
+
+	var blocks []anthropic.ContentBlock
+	if err := json.Unmarshal(wire.Content, &blocks); err != nil {
+		t.Fatalf("decode content: %v", err)
+	}
+	if len(blocks) != 5 {
+		t.Fatalf("len(blocks) = %d, want 5: %+v", len(blocks), blocks)
+	}
+
+	if blocks[0].Type != anthropic.ContentBlockTypeText || blocks[0].Text != "see below" {
+		t.Errorf("blocks[0] = %+v, want text %q", blocks[0], "see below")
+	}
+
+	if blocks[1].Type != anthropic.ContentBlockTypeImage || blocks[1].Source == nil ||
+		blocks[1].Source.Type != anthropic.ContentSourceTypeURL || blocks[1].Source.URL != "https://example.com/cat.png" {
+		t.Errorf("blocks[1] = %+v, want image url source", blocks[1])
+	}
+
+	wantImgB64 := base64.StdEncoding.EncodeToString(imgBytes)
+	if blocks[2].Type != anthropic.ContentBlockTypeImage || blocks[2].Source == nil ||
+		blocks[2].Source.Type != anthropic.ContentSourceTypeBase64 ||
+		blocks[2].Source.MediaType != "image/png" || blocks[2].Source.Data != wantImgB64 {
+		t.Errorf("blocks[2] = %+v, want base64 image source", blocks[2])
+	}
+
+	if blocks[3].Type != anthropic.ContentBlockTypeDocument || blocks[3].Source == nil ||
+		blocks[3].Source.Type != anthropic.ContentSourceTypeURL || blocks[3].Source.URL != "https://example.com/doc.pdf" {
+		t.Errorf("blocks[3] = %+v, want document url source", blocks[3])
+	}
+
+	wantFileB64 := base64.StdEncoding.EncodeToString(fileBytes)
+	if blocks[4].Type != anthropic.ContentBlockTypeDocument || blocks[4].Source == nil ||
+		blocks[4].Source.Type != anthropic.ContentSourceTypeBase64 ||
+		blocks[4].Source.MediaType != "application/pdf" || blocks[4].Source.Data != wantFileB64 {
+		t.Errorf("blocks[4] = %+v, want base64 document source", blocks[4])
+	}
+
+	// Filename has no wire field on a document block — the documented
+	// degradation. Confirm it truly does not appear anywhere in the wire JSON.
+	if strings.Contains(string(wire.Content), "report.pdf") {
+		t.Errorf("filename leaked into wire content: %s", wire.Content)
+	}
+}
+
+// TestEncodeRejectsFileID pins the documented gap: Anthropic Messages has no
+// FileID wire shape, so encoding must fail before any backend call.
+func TestEncodeRejectsFileID(t *testing.T) {
+	msg := schema.NewUserMessageWithParts(schema.ProtocolAnthropicMessages, []schema.MessagePart{
+		{Type: schema.MessagePartFile, FileID: "file-abc123"},
+	})
+	if _, err := EncodeAnthropicMessage(msg); err == nil {
+		t.Fatal("EncodeAnthropicMessage accepted a FileID")
+	}
+}
+
+// TestEncodeRejectsMediaOnNonUserRole proves the failure happens before any
+// backend call.
+func TestEncodeRejectsMediaOnNonUserRole(t *testing.T) {
+	msg := schema.NewMessage(schema.ProtocolAnthropicMessages, schema.RoleAssistant, []schema.MessagePart{
+		{Type: schema.MessagePartImage, URL: "https://example.com/cat.png"},
+	})
+	if _, err := EncodeAnthropicMessage(msg); err == nil {
+		t.Fatal("EncodeAnthropicMessage accepted an image part on the assistant role")
 	}
 }
