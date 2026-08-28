@@ -33,4 +33,4 @@
 - `checkpoint`(迭代级)与 `orchestrate` checkpoint(DAG 级)双轨分离。
 - 上下文编辑采用"收敛策略单一判定点 + V1 兼容层隔离"。
 - DAG 执行器"锁契约收尾单点"(错误与取消收敛到同一收尾路径)。
-- 选择独立 `interrupt` 状态机而非扩展 `checkpoint.IterationStore` 承载跨进程人机协作挂起(`agent/taskagent` interrupt/resume)。
+- 选择独立 `interrupt` 状态机而非扩展 `checkpoint.IterationStore` 承载跨进程人机协作挂起(`agent/taskagent` interrupt/resume). See [0001-interrupt-independent-state-machine.md](0001-interrupt-independent-state-machine.md).

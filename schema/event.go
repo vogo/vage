@@ -99,12 +99,13 @@ const (
 	// EventInterruptCreated fires after a suspending tool batch has been
 	// durably persisted (never before — an unpersisted suspend is a hard
 	// Run error, not an event). EventInterruptDecisionStored fires after
-	// each external decision is atomically committed, whether or not the
-	// batch is fully decided yet. EventInterruptResumed fires once a
-	// resume has acquired the store lease and is about to re-enter the
-	// ReAct loop. None of these payloads carry decision or message
-	// content — only identity, status and timing — so they are safe to
-	// log verbatim.
+	// each external decision is durably committed, whether or not the
+	// batch is fully decided yet, including each item of a valid prefix
+	// that landed before a later decision in the same SubmitDecisions
+	// call was rejected. EventInterruptResumed fires once a resume has
+	// acquired the store lease and is about to re-enter the ReAct loop.
+	// None of these payloads carry decision or message content — only
+	// identity, status and timing — so they are safe to log verbatim.
 	EventInterruptCreated        = "interrupt_created"
 	EventInterruptDecisionStored = "interrupt_decision_stored"
 	EventInterruptResumed        = "interrupt_resumed"
@@ -533,9 +534,10 @@ func (InterruptCreatedData) eventData() {}
 
 // InterruptDecisionStoredData is the payload for
 // EventInterruptDecisionStored, emitted once per decision after
-// interrupt.Store.SubmitDecisions commits it. Ready reports whether every
-// pending tool call in the batch now has a decision (the record
-// transitioned to interrupt.StatusReady).
+// interrupt.Store.SubmitDecisions durably commits it (including each
+// committed prefix item when a later decision in the same call is
+// rejected). Ready reports whether every pending tool call in the batch
+// now has a decision.
 type InterruptDecisionStoredData struct {
 	InterruptID string `json:"interrupt_id"`
 	ToolCallID  string `json:"tool_call_id"`

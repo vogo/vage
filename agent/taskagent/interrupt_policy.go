@@ -32,9 +32,11 @@ import (
 // that produces tool calls, before any tool executes.
 type InterruptPolicy interface {
 	// Intercept examines the full assistant tool-call batch and returns
-	// the subset of ToolCall.ID that must be decided externally. A nil or
-	// empty result means "do not interrupt": the batch executes normally,
-	// exactly as if no InterruptPolicy were configured.
+	// the subset of ToolCall.ID that must be decided externally. The
+	// result must be unique IDs drawn from calls (the framework rejects
+	// duplicates and unknown IDs before persist). A nil or empty result
+	// means "do not interrupt": the batch executes normally, exactly as
+	// if no InterruptPolicy were configured.
 	Intercept(ctx context.Context, sessionID string, calls []schema.ToolCall) []string
 }
 

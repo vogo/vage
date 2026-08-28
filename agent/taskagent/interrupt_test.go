@@ -131,3 +131,20 @@ func TestInterruptPolicyByToolName(t *testing.T) {
 		t.Errorf("pending = %v, want [2]", pending)
 	}
 }
+
+func TestValidatePendingSubset(t *testing.T) {
+	calls := []schema.ToolCall{{ID: "tc-1", Name: "ask_user"}, {ID: "tc-2", Name: "echo"}}
+
+	if err := validatePendingSubset(calls, []string{"tc-1"}); err != nil {
+		t.Errorf("valid subset: %v", err)
+	}
+	if err := validatePendingSubset(calls, []string{"tc-1", "tc-1"}); !errors.Is(err, interrupt.ErrInvalidArgument) {
+		t.Errorf("duplicate pending err = %v, want ErrInvalidArgument", err)
+	}
+	if err := validatePendingSubset(calls, []string{"nope"}); !errors.Is(err, interrupt.ErrInvalidArgument) {
+		t.Errorf("unknown pending err = %v, want ErrInvalidArgument", err)
+	}
+	if err := validatePendingSubset(calls, []string{""}); !errors.Is(err, interrupt.ErrInvalidArgument) {
+		t.Errorf("empty pending id err = %v, want ErrInvalidArgument", err)
+	}
+}

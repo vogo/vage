@@ -84,6 +84,9 @@ func (a *Agent) maybeInterrupt(
 	if err := validateBatchAddressable(calls); err != nil {
 		return nil, false, fmt.Errorf("vage: interrupt: %w", err)
 	}
+	if err := validatePendingSubset(calls, pending); err != nil {
+		return nil, false, fmt.Errorf("vage: interrupt: %w", err)
+	}
 
 	rec := &interrupt.Record{
 		SessionID: rc.sessionID,
@@ -133,6 +136,31 @@ func validateBatchAddressable(calls []schema.ToolCall) error {
 			return fmt.Errorf("duplicate tool call id %q", tc.ID)
 		}
 		seen[tc.ID] = struct{}{}
+	}
+	return nil
+}
+
+// validatePendingSubset enforces that Pending is a unique subset of the
+// batch's ToolCall IDs. Empty is not a valid flagged set — Intercept
+// already treated that as "do not interrupt". Duplicates would make
+// resume allocate a negative sibling slice and panic.
+func validatePendingSubset(calls []schema.ToolCall, pending []string) error {
+	known := make(map[string]struct{}, len(calls))
+	for _, tc := range calls {
+		known[tc.ID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(pending))
+	for _, id := range pending {
+		if id == "" {
+			return fmt.Errorf("%w: pending id is empty", interrupt.ErrInvalidArgument)
+		}
+		if _, ok := known[id]; !ok {
+			return fmt.Errorf("%w: pending id %q is not among tool calls", interrupt.ErrInvalidArgument, id)
+		}
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("%w: duplicate pending id %q", interrupt.ErrInvalidArgument, id)
+		}
+		seen[id] = struct{}{}
 	}
 	return nil
 }
@@ -270,17 +298,13 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 	}
 
 	if len(req.Decisions) > 0 {
-		rec, err = a.interruptStore.SubmitDecisions(ctx, rec.ID, toStoreDecisions(req.Decisions))
-		if err != nil {
-			return nil, err
+		updated, submitErr := a.interruptStore.SubmitDecisions(ctx, rec.ID, toStoreDecisions(req.Decisions))
+		if updated != nil {
+			rec = updated
+			a.emitInterruptDecisionEvents(ctx, rec, req.Decisions)
 		}
-		ready := rec.Status == interrupt.StatusReady
-		for _, d := range req.Decisions {
-			a.dispatch(ctx, schema.NewEvent(schema.EventInterruptDecisionStored, a.ID(), rec.SessionID, schema.InterruptDecisionStoredData{
-				InterruptID: rec.ID,
-				ToolCallID:  d.ToolCallID,
-				Ready:       ready,
-			}))
+		if submitErr != nil {
+			return nil, submitErr
 		}
 	}
 
@@ -310,6 +334,26 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 	}
 
 	return a.resumeFromInterrupt(ctx, rec, owner)
+}
+
+// emitInterruptDecisionEvents fires interrupt_decision_stored for each
+// submitted decision that actually landed, in slice order, and stops at
+// the first entry that was not committed (the rejected Nth of a prefix
+// submit). This keeps the event count aligned with durable writes even
+// when SubmitDecisions returns an error after committing a valid prefix.
+func (a *Agent) emitInterruptDecisionEvents(ctx context.Context, rec *interrupt.Record, submitted []schema.InterruptDecision) {
+	ready := rec.Status != interrupt.StatusPending
+	for _, d := range submitted {
+		existing, ok := rec.Decisions[d.ToolCallID]
+		if !ok || existing.Content != d.Content || existing.IsError != d.IsError {
+			return
+		}
+		a.dispatch(ctx, schema.NewEvent(schema.EventInterruptDecisionStored, a.ID(), rec.SessionID, schema.InterruptDecisionStoredData{
+			InterruptID: rec.ID,
+			ToolCallID:  d.ToolCallID,
+			Ready:       ready,
+		}))
+	}
 }
 
 // validateInterruptToolCompatibility fails before anything executes when a
@@ -455,7 +499,7 @@ func (a *Agent) reconcileInterruptBatch(
 		pendingSet[id] = struct{}{}
 	}
 
-	siblings := make([]schema.ToolCall, 0, len(rec.ToolCalls)-len(rec.Pending))
+	siblings := make([]schema.ToolCall, 0, len(rec.ToolCalls))
 	for _, tc := range rec.ToolCalls {
 		if _, isPending := pendingSet[tc.ID]; !isPending {
 			siblings = append(siblings, tc)

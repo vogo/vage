@@ -41,14 +41,15 @@ import (
 type Store interface {
 	// Create persists a brand-new record. The store assigns ID,
 	// CreatedAt, UpdatedAt and Revision (starting at 1); any
-	// caller-supplied values for these fields are overwritten. Status is
-	// computed from rec.Pending: StatusPending when non-empty (the
-	// normal case), StatusReady if the caller already passed an empty
-	// Pending (nothing left to decide).
+	// caller-supplied values for these fields are overwritten. Status
+	// starts as StatusPending: Pending must be a non-empty unique subset
+	// of ToolCalls[i].ID (nothing left to decide is not a Create case —
+	// that is SubmitDecisions' Pending → Ready transition).
 	//
-	// Returns ErrInvalidArgument when rec is nil, or when SessionID,
-	// AgentID, Protocol, ToolCalls is empty, or when a Pending entry is
-	// not a known ToolCalls[i].ID.
+	// Returns ErrInvalidArgument when rec is nil, when SessionID,
+	// AgentID, Protocol or ToolCalls is empty, when Pending is empty,
+	// contains duplicates, or names an ID that is not a known
+	// ToolCalls[i].ID.
 	//
 	// After Create returns nil, rec's assigned fields are populated so
 	// the caller can address it and emit an interrupt_created event.
@@ -69,11 +70,16 @@ type Store interface {
 	// ToolCallID is idempotent; resubmitting a different one returns
 	// ErrDecisionConflict without changing that decision. Decisions are
 	// applied one at a time in slice order, so a conflict or unknown ID on
-	// the Nth decision leaves the first N-1 committed.
+	// the Nth decision leaves the first N-1 committed. When a prefix was
+	// committed before the error, the returned *Record reflects that
+	// prefix and is non-nil alongside the error.
 	//
-	// When every Pending ID has a Decision after this call, Status
-	// transitions Pending -> Ready. Returns ErrNotFound for an unknown
-	// id, ErrAlreadyCompleted for a completed record.
+	// When every Pending ID has a Decision after this call and Status is
+	// still StatusPending, Status transitions Pending → Ready. A record
+	// already in StatusResuming stays Resuming: SubmitDecisions never
+	// revokes a live lease. During Resuming, identical resubmits are
+	// no-ops; conflicting or unknown IDs still error. Returns ErrNotFound
+	// for an unknown id, ErrAlreadyCompleted for a completed record.
 	SubmitDecisions(ctx context.Context, id string, decisions []Decision) (*Record, error)
 
 	// AcquireLease transitions a Ready record to Resuming under owner's
@@ -119,6 +125,9 @@ type Store interface {
 
 	// Delete removes the record identified by id. Idempotent on an
 	// unknown — but well-formed — id; a malformed id returns
-	// ErrInvalidArgument like every other id-taking method.
+	// ErrInvalidArgument like every other id-taking method. FileStore
+	// takes the same per-record cross-process lock as every other
+	// mutation, so Delete cannot unlink a lock another instance holds
+	// and cannot race a concurrent read-modify-write of the same id.
 	Delete(ctx context.Context, id string) error
 }

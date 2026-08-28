@@ -58,16 +58,18 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 	})
 
-	t.Run(name+"/create_with_empty_pending_is_immediately_ready", func(t *testing.T) {
+	t.Run(name+"/create_rejects_empty_or_duplicate_pending", func(t *testing.T) {
 		s := factory(t)
 		ctx := context.Background()
 
-		rec := newTestRecord("sess-1", nil)
-		if err := s.Create(ctx, rec); err != nil {
-			t.Fatalf("Create: %v", err)
+		emptyPending := newTestRecord("sess-1", nil)
+		if err := s.Create(ctx, emptyPending); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Create empty pending err = %v, want ErrInvalidArgument", err)
 		}
-		if rec.Status != StatusReady {
-			t.Errorf("Status = %q, want %q", rec.Status, StatusReady)
+
+		dupPending := newTestRecord("sess-1", []string{"call-1", "call-1"})
+		if err := s.Create(ctx, dupPending); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("Create duplicate pending err = %v, want ErrInvalidArgument", err)
 		}
 	})
 
@@ -207,10 +209,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		s := factory(t)
 		ctx := context.Background()
 
-		rec := newTestRecord("sess-7", nil) // Ready immediately
-		if err := s.Create(ctx, rec); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		rec := createReadyRecord(t, s, "sess-7")
 
 		leased, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute)
 		if err != nil {
@@ -259,10 +258,7 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		s := factory(t)
 		ctx := context.Background()
 
-		rec := newTestRecord("sess-8", nil)
-		if err := s.Create(ctx, rec); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		rec := createReadyRecord(t, s, "sess-8")
 
 		if _, err := s.AcquireLease(ctx, rec.ID, "owner-a", -time.Second); err != nil {
 			t.Fatalf("AcquireLease with already-expired ttl: %v", err)
@@ -386,12 +382,15 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 
 		// call-2 is valid and undecided; call-1 conflicts with "a".
-		_, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
+		prefix, err := s.SubmitDecisions(ctx, rec.ID, []Decision{
 			{ToolCallID: "call-2", Content: "b"},
 			{ToolCallID: "call-1", Content: "different"},
 		})
 		if !errors.Is(err, ErrDecisionConflict) {
 			t.Fatalf("mixed batch err = %v, want ErrDecisionConflict", err)
+		}
+		if prefix == nil {
+			t.Fatal("SubmitDecisions returned nil record alongside a prefix error")
 		}
 
 		got, gerr := s.Get(ctx, rec.ID)
@@ -412,11 +411,15 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		if err := s.Create(ctx, unknownRec); err != nil {
 			t.Fatalf("Create unknown-case record: %v", err)
 		}
-		if _, err := s.SubmitDecisions(ctx, unknownRec.ID, []Decision{
+		unknownPrefix, err := s.SubmitDecisions(ctx, unknownRec.ID, []Decision{
 			{ToolCallID: "call-1", Content: "a"},
 			{ToolCallID: "call-999", Content: "x"},
-		}); !errors.Is(err, ErrUnknownToolCall) {
+		})
+		if !errors.Is(err, ErrUnknownToolCall) {
 			t.Fatalf("unknown-id batch err = %v, want ErrUnknownToolCall", err)
+		}
+		if unknownPrefix == nil {
+			t.Fatal("SubmitDecisions returned nil record alongside a prefix error")
 		}
 		got, gerr = s.Get(ctx, unknownRec.ID)
 		if gerr != nil {
@@ -464,6 +467,67 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 			t.Errorf("identical duplicate err = %v, want nil", err)
 		}
 	})
+
+	// An idempotent SubmitDecisions after AcquireLease must not demote
+	// Resuming back to Ready, or a second owner can take a live lease.
+	t.Run(name+"/submit_decisions_does_not_demote_resuming", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := createReadyRecord(t, s, "sess-resuming")
+		if _, err := s.AcquireLease(ctx, rec.ID, "owner-a", time.Minute); err != nil {
+			t.Fatalf("AcquireLease: %v", err)
+		}
+
+		updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+		if err != nil {
+			t.Fatalf("idempotent SubmitDecisions during Resuming: %v", err)
+		}
+		if updated.Status != StatusResuming {
+			t.Errorf("Status after idempotent submit = %q, want %q", updated.Status, StatusResuming)
+		}
+		if updated.LeaseOwner != "owner-a" {
+			t.Errorf("LeaseOwner = %q, want owner-a", updated.LeaseOwner)
+		}
+
+		if _, err := s.AcquireLease(ctx, rec.ID, "owner-b", time.Minute); !errors.Is(err, ErrLeaseHeld) {
+			t.Errorf("second AcquireLease err = %v, want ErrLeaseHeld", err)
+		}
+
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if got.Status != StatusResuming || got.LeaseOwner != "owner-a" {
+			t.Errorf("persisted status=%q owner=%q, want Resuming/owner-a", got.Status, got.LeaseOwner)
+		}
+	})
+
+	t.Run(name+"/delete_respects_canceled_context", func(t *testing.T) {
+		s := factory(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := s.Delete(ctx, "any-well-formed-id"); !errors.Is(err, context.Canceled) {
+			t.Errorf("Delete canceled ctx err = %v, want context.Canceled", err)
+		}
+	})
+}
+
+func createReadyRecord(t *testing.T, s Store, sessionID string) *Record {
+	t.Helper()
+	ctx := context.Background()
+	rec := newTestRecord(sessionID, []string{"call-1"})
+	if err := s.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	updated, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+	if err != nil {
+		t.Fatalf("SubmitDecisions to Ready: %v", err)
+	}
+	if updated.Status != StatusReady {
+		t.Fatalf("Status after seed decisions = %q, want %q", updated.Status, StatusReady)
+	}
+	return updated
 }
 
 func newTestRecord(sessionID string, pending []string) *Record {

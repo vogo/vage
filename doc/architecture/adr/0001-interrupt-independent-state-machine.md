@@ -5,25 +5,27 @@
 
 ## Context
 
-TaskAgent 需要一种能跨进程恢复的人机协作暂停点——模型产生需要外部决策的工具调用后，在执行工具处理器之前挂起，把未完成工具批和 continuation 持久化，并允许另一进程按人工决策精确恢复。
+TaskAgent needs a human-in-the-loop pause that can resume in another process: after the model emits tool calls that require an external decision, the run suspends *before* any tool handler executes, persists the unfinished batch plus continuation, and lets a second process resume from exactly those calls once the decisions are supplied.
 
-现有 `checkpoint.IterationStore` 是面向"崩溃后从最近完整轮次重放"的迭代快照，其不变式是"这是一轮已完成的完整快照"；`tool/askuser` 是进程内同步阻塞、无框架级持久记录，超时或进程退出即结束。两者都不能安全地承载"执行前挂起、待决集合、租约、外部决定注入"这套语义：把执行前的挂起状态塞进 checkpoint 会打破其"完整轮次"假设，把跨进程恢复包装成阻塞 `ask_user` 的另一层则是伪装 API，不具备真实可恢复语义。
+Existing `checkpoint.IterationStore` is an iteration snapshot for "replay the latest completed turn after a crash"; its invariant is "this is a complete, finished turn". `tool/askuser` is an in-process synchronous block with no framework-level durable record — timeout or process exit ends it. Neither can safely carry "suspend-before-execute, pending set, lease, inject external decisions": stuffing a pre-execution hang into checkpoint would break its complete-turn assumption, and wrapping cross-process resume as another layer of blocking `ask_user` would be a fake API without real resumability.
 
 ## Decision
 
-新增独立的 `interrupt` 包，定义 `Record`/`Store` 持久化契约与 Pending → Ready → Resuming → Completed 状态机，由 TaskAgent 通过 `WithInterruptStore`/`WithInterruptPolicy` 组合使用；不把 interrupt 记录写入 `IterationStore`，也不让 `Resume(sessionID)` 兼管两种语义。
+Add an independent `interrupt` package that defines the `Record`/`Store` persistence contract and the Pending → Ready → Resuming → Completed state machine. TaskAgent opts in via `WithInterruptStore`/`WithInterruptPolicy`. Interrupt records are not written to `IterationStore`, and `Resume(sessionID)` does not serve both semantics.
 
-挂起判定点固定在共享 `runReactLoop` 内——取得完整 assistant 工具调用消息之后、预算检查之后、`executeToolBatch` 之前，同步与流式共用同一判定；命中后整批冻结，等待所有待决调用都有决定后才执行未命中的同批调用。`ResumeInterrupt(ctx, req)` 是新增的公共入口，按 `interrupt_id + tool_call_id` 精确寻址，不进 Agent middleware 链，不重跑输入护栏，Run 值从空表开始。
+The suspend check lives in the shared `runReactLoop` — after the full assistant tool-call message is in hand, after the budget check, and before `executeToolBatch` — so sync and stream share one gate. On a hit the whole batch is frozen; ordinary sibling calls in that batch run only after every pending call has a decision. `ResumeInterrupt(ctx, req)` is the public resume entry: it addresses `interrupt_id + tool_call_id`, does not enter the Agent middleware chain, does not re-run input guards, and starts with empty Run values.
+
+`Pending` is a non-empty unique subset of the batch's tool-call IDs. `SubmitDecisions` never demotes `Resuming` back to `Ready` (an idempotent resubmit must not drop a live lease). FileStore `Delete` takes the same per-record cross-process lock as every other mutation.
 
 ## Rationale
 
-checkpoint 的"完整轮次快照"不变式与 interrupt 的"执行前挂起、待决未完成"不变式互斥，合并会污染两者各自的正确性假设；独立接口让两者可分别配置持久化后端、保留期与恢复语义。代价是多一套持久契约（`interrupt.Store`）和状态机，但换来：挂起前零同批副作用、可解释的恢复边界、以及不会让 `Resume(sessionID)` 的调用方猜测意图。
+Checkpoint's "complete-turn snapshot" invariant and interrupt's "pre-execution hang with an unfinished pending set" invariant are mutually exclusive; merging them would pollute both. Independent interfaces let each configure its own backend, retention, and resume semantics. The cost is a second persistence contract (`interrupt.Store`) and state machine; the gain is zero sibling side effects before suspend, an explainable resume boundary, and a `Resume(sessionID)` caller that never has to guess intent.
 
-选择冻结整批工具调用而非逐个放行，牺牲部分并行度，换取挂起前零同批副作用、稳定的结果顺序和可解释的恢复边界。选择保存已解析的有效 Run 参数（`interrupt.EffectiveParams`）而非恢复时重新取 Agent 默认值，记录体更大，但新进程不会因默认配置变化而悄然改变剩余预算、工具范围或模型行为。选择租约（持有者 + 到期时间）而非永久锁，允许恢复进程崩溃后再次被接管，代价是不承诺端到端 exactly-once。
+Freezing the whole tool batch rather than releasing unflagged calls one-by-one trades some parallelism for zero same-batch side effects, stable result order, and a clear resume boundary. Persisting already-resolved run parameters (`interrupt.EffectiveParams`) rather than re-reading Agent defaults on resume makes the record larger, but a new process cannot silently change remaining budget, tool scope, or model. A lease (owner + expiry) rather than a permanent lock lets a crashed resumer be taken over; the trade-off is no end-to-end exactly-once.
 
 ## Consequences
 
-- 正面：`ask_user`（阻塞）、checkpoint（崩溃重放）、interrupt（人机协作挂起）三条路径边界清晰，互不替代，文档与代码可分别演进（见 [agent-core](../../domains/agent/agent-core/agent-core.md) AC-14、[orchestration](../../domains/agent/orchestration/orchestration.md) OR-9、[tooling](../../domains/capability/tooling/tooling.md) TOOL-9）。
-- 正面：`interrupt.Store` 独立配置存储后端（`MapStore`/`FileStore`）与保留期，不受 checkpoint 生命周期约束；`FileStore` 用 `<id>.lock` 文件提供跨进程 `AcquireLease` 互斥，两个独立进程可安全竞争同一条记录的恢复权。
-- 负面：多一个需要维护的持久契约与状态机；调用方需要理解三种相邻机制的边界。
-- 负面：不承诺端到端 exactly-once——租约过期后被接管的普通工具可能重放，需要调用方为有副作用的工具提供幂等键或补偿。
+- Positive: `ask_user` (blocking), checkpoint (crash replay), and interrupt (human-in-the-loop suspend) stay three distinct paths that do not substitute for each other; docs and code can evolve separately (see [agent-core](../../domains/agent/agent-core/agent-core.md) AC-14, [orchestration](../../domains/agent/orchestration/orchestration.md) OR-9, [tooling](../../domains/capability/tooling/tooling.md) TOOL-9).
+- Positive: `interrupt.Store` configures its backend (`MapStore`/`FileStore`) and retention independently of checkpoint lifetime. `FileStore` uses an `<id>.lock` file for cross-process mutual exclusion on every mutation of that record, including `AcquireLease` and `Delete`, so two independent processes can safely contend for the same resume.
+- Negative: one more persistence contract and state machine to maintain; callers must understand the three adjacent mechanisms.
+- Negative: no end-to-end exactly-once — ordinary tools may replay after a lease expires and is taken over; callers of side-effecting tools still need idempotency keys or compensation.

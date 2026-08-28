@@ -88,10 +88,22 @@ func validateNewRecord(rec *Record) error {
 		known[tc.ID] = struct{}{}
 	}
 
+	if len(rec.Pending) == 0 {
+		return fmt.Errorf("%w: pending is empty", ErrInvalidArgument)
+	}
+
+	seenPending := make(map[string]struct{}, len(rec.Pending))
 	for _, id := range rec.Pending {
+		if id == "" {
+			return fmt.Errorf("%w: pending id is empty", ErrInvalidArgument)
+		}
 		if _, ok := known[id]; !ok {
 			return fmt.Errorf("%w: pending id %q is not among tool calls", ErrInvalidArgument, id)
 		}
+		if _, dup := seenPending[id]; dup {
+			return fmt.Errorf("%w: duplicate pending id %q", ErrInvalidArgument, id)
+		}
+		seenPending[id] = struct{}{}
 	}
 
 	return nil
@@ -120,7 +132,10 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 
 	changed := false
 	commitAudit := func() {
-		if allDecided(rec.Pending, rec.Decisions) {
+		// Pending → Ready only. An idempotent resubmit (or a prefix commit)
+		// must never demote Resuming back to Ready: that would drop a live
+		// lease and let a second owner AcquireLease concurrently.
+		if rec.Status == StatusPending && allDecided(rec.Pending, rec.Decisions) {
 			rec.Status = StatusReady
 		}
 		rec.UpdatedAt = now
@@ -158,7 +173,9 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) error {
 		changed = true
 	}
 
-	commitAudit()
+	if changed {
+		commitAudit()
+	}
 
 	return nil
 }

@@ -95,9 +95,8 @@ type Decision struct {
 // receive copies.
 //
 // Invariants:
-//   - len(Pending) >= 1 always (a Record is only created when a policy
-//     flagged at least one call in the batch).
-//   - Every ID in Pending is a ToolCall.ID present in ToolCalls.
+//   - Pending is a non-empty unique subset of ToolCalls[i].ID (a Record
+//     is only created when a policy flagged at least one call).
 //   - Status == StatusReady  ⇒ every Pending ID has a Decisions entry.
 //   - Status == StatusResuming ⇒ LeaseOwner != "" and !LeaseExpiresAt.IsZero().
 type Record struct {

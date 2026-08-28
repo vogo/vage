@@ -120,10 +120,7 @@ func TestFileStore_CrossInstance_LeaseIsExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore seed: %v", err)
 	}
-	rec := newTestRecord("sess-race", nil) // Ready immediately
-	if err := seed.Create(ctx, rec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	rec := createReadyRecord(t, seed, "sess-race")
 
 	const contenders = 8
 	var (
@@ -183,10 +180,7 @@ func TestFileStore_StaleLockIsReclaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	rec := newTestRecord("sess-stale", nil)
-	if err := s.Create(ctx, rec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	rec := createReadyRecord(t, s, "sess-stale")
 
 	// Simulate a crashed holder: create the lock file directly and
 	// backdate its mtime past staleLockAge.
@@ -274,6 +268,162 @@ func TestFileStore_MalformedIDCannotEscapeRoot(t *testing.T) {
 	}
 }
 
+// TestFileStore_CrossInstance_LockBlocksDeleteAndWrite holds the
+// cross-process record lock from instance A and asserts that instance B
+// cannot Delete or SubmitDecisions until A releases — the lock file must
+// not be unlinked out from under a live holder.
+func TestFileStore_CrossInstance_LockBlocksDeleteAndWrite(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	storeA, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore A: %v", err)
+	}
+	rec := newTestRecord("sess-lock", []string{"call-1"})
+	if err := storeA.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	storeB, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore B: %v", err)
+	}
+
+	t.Run("delete_waits_for_holder", func(t *testing.T) {
+		release, lockErr := storeA.acquireFileLock(ctx, rec.ID)
+		if lockErr != nil {
+			t.Fatalf("acquireFileLock: %v", lockErr)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- storeB.Delete(ctx, rec.ID)
+		}()
+
+		select {
+		case err := <-done:
+			release()
+			t.Fatalf("Delete returned while A held the lock: %v", err)
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		if _, err := os.Stat(storeA.recordPath(rec.ID)); err != nil {
+			release()
+			t.Fatalf("record vanished while lock held: %v", err)
+		}
+
+		release()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Delete after release: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Delete did not complete after lock released")
+		}
+
+		if _, err := storeB.Get(ctx, rec.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Get after Delete err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("write_waits_for_holder", func(t *testing.T) {
+		// Recreate after the delete subtest.
+		rec := newTestRecord("sess-lock-w", []string{"call-1"})
+		if err := storeA.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		release, lockErr := storeA.acquireFileLock(ctx, rec.ID)
+		if lockErr != nil {
+			t.Fatalf("acquireFileLock: %v", lockErr)
+		}
+
+		type result struct {
+			rec *Record
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			updated, err := storeB.SubmitDecisions(ctx, rec.ID, []Decision{{ToolCallID: "call-1", Content: "ok"}})
+			done <- result{updated, err}
+		}()
+
+		select {
+		case got := <-done:
+			release()
+			t.Fatalf("SubmitDecisions returned while A held the lock: rec=%v err=%v", got.rec, got.err)
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		got, gerr := storeA.readRecord(rec.ID)
+		if gerr != nil {
+			release()
+			t.Fatalf("readRecord while lock held: %v", gerr)
+		}
+		if got.Status != StatusPending || len(got.Decisions) != 0 {
+			release()
+			t.Fatalf("record mutated while lock held: status=%q decisions=%+v", got.Status, got.Decisions)
+		}
+
+		release()
+
+		select {
+		case got := <-done:
+			if got.err != nil {
+				t.Fatalf("SubmitDecisions after release: %v", got.err)
+			}
+			if got.rec.Status != StatusReady {
+				t.Errorf("Status = %q, want Ready", got.rec.Status)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("SubmitDecisions did not complete after lock released")
+		}
+	})
+
+	t.Run("delete_observes_canceled_ctx_while_waiting", func(t *testing.T) {
+		rec := newTestRecord("sess-lock-ctx", []string{"call-1"})
+		if err := storeA.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		release, lockErr := storeA.acquireFileLock(ctx, rec.ID)
+		if lockErr != nil {
+			t.Fatalf("acquireFileLock: %v", lockErr)
+		}
+		defer release()
+
+		waitCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- storeB.Delete(waitCtx, rec.ID)
+		}()
+
+		select {
+		case err := <-done:
+			t.Fatalf("Delete returned before cancel: %v", err)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		cancel()
+
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Delete err = %v, want context.Canceled", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Delete did not observe ctx cancel")
+		}
+
+		if _, err := storeA.readRecord(rec.ID); err != nil {
+			t.Errorf("record deleted despite canceled Delete: %v", err)
+		}
+	})
+}
+
 // TestFileStore_UnknownVersionRejected verifies a record written by a
 // future/unknown schema version is rejected rather than guess-read.
 func TestFileStore_UnknownVersionRejected(t *testing.T) {
@@ -284,7 +434,7 @@ func TestFileStore_UnknownVersionRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	rec := newTestRecord("sess-v", nil)
+	rec := newTestRecord("sess-v", []string{"call-1"})
 	if err := s.Create(ctx, rec); err != nil {
 		t.Fatalf("Create: %v", err)
 	}

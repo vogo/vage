@@ -106,18 +106,17 @@ func (s *FileStore) localLock(id string) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-// withRecordLock runs fn while holding both the in-process mutex for id and
-// the cross-process file lock, guaranteeing fn is the only critical section
-// touching <id>.json across every FileStore instance (any process) pointed
-// at this root. fn reads the current record (nil, nil if none exists yet —
-// used by Create) and returns the record to persist, or a nil record with a
-// non-nil error to abort without writing.
-func (s *FileStore) withRecordLock(ctx context.Context, id string, fn func(cur *Record) (*Record, error)) (*Record, error) {
+// withExclusive runs fn while holding both the in-process mutex for id and
+// the cross-process file lock, so fn is the only critical section touching
+// this id across every FileStore instance (any process) pointed at this
+// root. Delete uses this directly; withRecordLock layers a read-modify-write
+// on top.
+func (s *FileStore) withExclusive(ctx context.Context, id string, fn func() error) error {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := validateID(id); err != nil {
-		return nil, err
+		return err
 	}
 
 	mu := s.localLock(id)
@@ -126,25 +125,34 @@ func (s *FileStore) withRecordLock(ctx context.Context, id string, fn func(cur *
 
 	release, err := s.acquireFileLock(ctx, id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer release()
 
-	cur, err := s.readRecord(id)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
+	return fn()
+}
 
-	next, err := fn(cur)
-	if err != nil {
-		return nil, err
-	}
+// withRecordLock runs fn while holding the exclusive lock for id.
+// fn sees the current record (nil if none exists yet — used by Create)
+// and returns the record to persist, or a nil record with a non-nil error
+// to abort without writing.
+func (s *FileStore) withRecordLock(ctx context.Context, id string, fn func(cur *Record) (*Record, error)) (*Record, error) {
+	var next *Record
+	err := s.withExclusive(ctx, id, func() error {
+		cur, err := s.readRecord(id)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
 
-	if err := s.writeRecord(next); err != nil {
-		return nil, err
-	}
+		var fnErr error
+		next, fnErr = fn(cur)
+		if fnErr != nil {
+			return fnErr
+		}
 
-	return next, nil
+		return s.writeRecord(next)
+	})
+	return next, err
 }
 
 // acquireFileLock spins on an O_CREATE|O_EXCL create of <id>.lock until it
@@ -293,7 +301,7 @@ func (s *FileStore) SubmitDecisions(ctx context.Context, id string, decisions []
 		return nil, err
 	}
 	if decisionErr != nil {
-		return nil, decisionErr
+		return next, decisionErr
 	}
 	return next, nil
 }
@@ -405,22 +413,16 @@ func (s *FileStore) List(ctx context.Context, sessionID string) ([]*Meta, error)
 	return out, nil
 }
 
-// Delete removes the record file (and any stale lock file) for id.
-// Idempotent on an unknown — but well-formed — id; a malformed one is
-// rejected rather than resolved, so no id can ever name a file outside root.
-func (s *FileStore) Delete(_ context.Context, id string) error {
-	if err := validateID(id); err != nil {
-		return err
-	}
-
-	mu := s.localLock(id)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if err := os.Remove(s.recordPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("interrupt: delete %q: %w", id, err)
-	}
-	_ = os.Remove(s.lockPath(id))
-	s.locks.Delete(id)
-	return nil
+// Delete removes the record file for id under the same exclusive lock as
+// every other mutation. The lock file itself is released by withExclusive
+// (never unlinked while another instance holds it). Idempotent on an
+// unknown — but well-formed — id; a malformed one is rejected rather than
+// resolved, so no id can ever name a file outside root.
+func (s *FileStore) Delete(ctx context.Context, id string) error {
+	return s.withExclusive(ctx, id, func() error {
+		if err := os.Remove(s.recordPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("interrupt: delete %q: %w", id, err)
+		}
+		return nil
+	})
 }

@@ -872,6 +872,116 @@ func TestInterrupt_CrossProcess_FileStore(t *testing.T) {
 	}
 }
 
+// TestInterrupt_DuplicatePendingFromPolicy_RejectedBeforePersist covers a
+// buggy or hostile InterruptPolicy that returns the same call ID twice.
+// Create must never persist that record, and resume must never panic on a
+// negative sibling-slice capacity.
+func TestInterrupt_DuplicatePendingFromPolicy_RejectedBeforePersist(t *testing.T) {
+	var handlerRuns atomic.Int32
+	mock := newMock(makeToolCallResponse("tc-1", "ask_user", `{"question":"proceed?"}`, 30))
+	store := interrupt.NewMapStore()
+
+	a := taskagent.New(
+		agent.Config{ID: "agent-dup"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(taskagent.InterruptPolicyFunc(
+			func(_ context.Context, _ string, _ []schema.ToolCall) []string {
+				return []string{"tc-1", "tc-1"}
+			},
+		)),
+	)
+
+	_, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-dup",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "please ask")},
+	})
+	if !errors.Is(err, interrupt.ErrInvalidArgument) {
+		t.Fatalf("Run err = %v, want ErrInvalidArgument", err)
+	}
+	if handlerRuns.Load() != 0 {
+		t.Errorf("ask_user handler ran %d times, want 0", handlerRuns.Load())
+	}
+
+	listed, lerr := store.List(context.Background(), "sess-dup")
+	if lerr != nil {
+		t.Fatalf("List: %v", lerr)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("persisted %d records after rejected policy, want 0", len(listed))
+	}
+}
+
+// TestInterrupt_PrefixSubmit_EmitsEventsForCommittedDecisions keeps the
+// observability contract: each durably committed decision emits
+// interrupt_decision_stored, even when a later item in the same
+// ResumeInterrupt call is rejected.
+func TestInterrupt_PrefixSubmit_EmitsEventsForCommittedDecisions(t *testing.T) {
+	var handlerRuns atomic.Int32
+	mock := newMock(
+		makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-1", Name: "ask_user", Arguments: `{"question":"a?"}`},
+			schema.ToolCall{ID: "tc-2", Name: "ask_user", Arguments: `{"question":"b?"}`},
+		),
+	)
+	store := interrupt.NewMapStore()
+	hookMgr, events := eventCollector()
+
+	a := taskagent.New(
+		agent.Config{ID: "agent-prefix-evt"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+		taskagent.WithHookManager(hookMgr),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-prefix-evt",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "go")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	_, err = a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+		Decisions: []schema.InterruptDecision{
+			{ToolCallID: "tc-1", Content: "yes"},
+			{ToolCallID: "not-a-call", Content: "x"},
+		},
+	})
+	if !errors.Is(err, interrupt.ErrUnknownToolCall) {
+		t.Fatalf("ResumeInterrupt err = %v, want ErrUnknownToolCall", err)
+	}
+
+	var stored int
+	for _, e := range events() {
+		if e == schema.EventInterruptDecisionStored {
+			stored++
+		}
+	}
+	if stored != 1 {
+		t.Errorf("interrupt_decision_stored count = %d, want 1 (committed prefix only)", stored)
+	}
+
+	rec, gerr := store.Get(context.Background(), first.Interrupt.InterruptID)
+	if gerr != nil {
+		t.Fatalf("store.Get: %v", gerr)
+	}
+	if rec.Decisions["tc-1"].Content != "yes" {
+		t.Errorf("prefix decision missing: %+v", rec.Decisions)
+	}
+	if _, ok := rec.Decisions["not-a-call"]; ok {
+		t.Error("rejected decision was persisted")
+	}
+	if rec.Status != interrupt.StatusPending {
+		t.Errorf("status = %q, want pending", rec.Status)
+	}
+}
+
 func containsStr(list []string, want string) bool {
 	return slices.Contains(list, want)
 }

@@ -15,10 +15,10 @@
 本领域把"多个 Agent/工作单元按依赖关系跑起来"这件事抽象为一个 DAG 执行引擎,并提供三条独立的断点/挂起续跑路径。
 
 - `orchestrate`:DAG 执行引擎 —— 并行调度、条件分支、循环、补偿(Saga)、背压、优先级调度、DAG 级检查点。
-- `checkpoint`:ReAct **迭代级**快照 —— 让长时运行的任务型 Agent 能跨崩溃/重启/SIGTERM 续跑,面向"进程意外终止后从最近完整轮次重放"。
-- `interrupt`:ReAct **工具批执行前**的人机协作挂起状态机 —— 让任务型 Agent 能在工具批被外部策略命中时有序挂起,由另一进程按 `interrupt_id + tool_call_id` 精确注入决定并恢复,面向"有意暂停等待人工决策",而非崩溃。
+- `checkpoint`: ReAct **iteration-level** snapshot — crash/restart/SIGTERM replay of the latest completed turn.
+- `interrupt`: ReAct **pre-tool-batch** human-in-the-loop suspend state machine — freeze a flagged batch, let another process inject decisions by `interrupt_id + tool_call_id`, and resume. This is an intentional pause for a human decision, not a crash.
 
-**边界(不做):** 不做通用工作流引擎;不定义业务节点语义(节点只是"一个 Runner")。`checkpoint`(迭代级快照)、`orchestrate` 内的 DAG 级检查点、`interrupt`(挂起状态机)是**三套不同机制**,面向不同消费者、有各自读路径,不可混用、不可相互替代。
+**边界(不做):** 不做通用工作流引擎;不定义业务节点语义(节点只是"一个 Runner")。`checkpoint` (iteration snapshot), DAG-level checkpoints inside `orchestrate`, and `interrupt` (suspend state machine) are **three different mechanisms** with different consumers and read paths; they are not interchangeable.
 
 ## 核心实体(概念层)
 
@@ -32,8 +32,8 @@
 - **补偿(Compensation / Saga)**:对已成功节点执行回滚,配合幂等检查器保证重复补偿安全。
 - **背压(Backpressure)**:按负载自适应调节并发度。
 - **Checkpoint(检查点)**:某次迭代的完整可恢复快照(消息列表、累计用量、Final/StopReason 标记)。
-- **Interrupt(中断)**:`interrupt.Record` —— 工具批执行前的挂起快照,携带完整批次、待决调用子集、已提交决定、continuation(挂起时刻的消息序列)与挂起时已解析的有效 Run 参数,以 Pending → Ready → Resuming → Completed 状态机推进。
-- **interrupt.Store**:中断记录的持久化契约,`MapStore`(单进程测试)与 `FileStore`(跨进程,基于文件锁提供 `AcquireLease` 的互斥语义)两种实现。
+- **Interrupt**: `interrupt.Record` — a pre-tool-batch suspend snapshot: full batch, pending unique subset, committed decisions, continuation, and the already-resolved effective Run parameters. State machine: Pending → Ready → Resuming → Completed. Submit never demotes Resuming to Ready.
+- **interrupt.Store**: persistence contract. `MapStore` (single-process tests) and `FileStore` (cross-process; `<id>.lock` serializes every mutation of that record, including `AcquireLease` and `Delete`).
 
 ## 业务规则与不变式
 
@@ -47,7 +47,7 @@
 | OR-6 | **补偿幂等**:补偿动作经幂等检查器守护,重复触发不产生重复副作用。 |
 | OR-7 | **检查点双轨分离**:迭代级检查点与 DAG 级检查点地址不同、读路径不同,不得相互引用或替代。 |
 | OR-8 | **回放不执行**:DAG 回放模式(ReplayMode)从检查点重建状态而不真正执行 Runner。 |
-| OR-9 | **三方持久机制互不替代**:`ask_user`(处理器已执行、进程内同步等待、无框架级挂起记录)、`checkpoint`(轮次已完成或 Run 已终止后的崩溃重放快照,`Resume(sessionID)` 只认最近完整轮次,不接受外部决定)、`interrupt`(工具批执行前的挂起状态机,`ResumeInterrupt` 按精确 ID 注入决定)三者触发点、持久内容、恢复语义均不同。不得把 interrupt 记录写入 `IterationStore`,不得让 `Resume(sessionID)` 猜测调用方想恢复 checkpoint 还是中断,也不得把 `ask_user` 包一层充当跨进程 Resume。 |
+| OR-9 | **Three persistence mechanisms do not substitute**: `ask_user` (handler already running, in-process blocking wait, no framework suspend record), `checkpoint` (crash-replay snapshot after a completed turn or a finished Run; `Resume(sessionID)` takes the latest complete turn and accepts no external decisions), `interrupt` (pre-tool-batch suspend state machine; `ResumeInterrupt` injects decisions by exact ID). Trigger point, persisted content, and resume semantics all differ. Do not write interrupt records into `IterationStore`, do not let `Resume(sessionID)` guess whether the caller wanted a checkpoint or an interrupt, and do not wrap `ask_user` as a fake cross-process Resume. |
 
 ## 状态与转换
 
@@ -59,7 +59,7 @@ DAG 执行通过事件处理器发出:节点开始、节点完成(带状态与�
 
 ## 与其他领域的交互
 
-- **agent-core**:节点里的 Runner 通常就是一个 Agent;工作流型 Agent 是本引擎的主要调用方。任务型 Agent 使用 `checkpoint` 的迭代存储实现崩溃续跑,使用 `interrupt.Store` 实现工具批级的挂起/恢复;挂起判定点、`ResumeInterrupt` 契约与事件属于 agent-core 的 AC-14,见 [agent-core](../agent-core/agent-core.md)。
+- **agent-core**:节点里的 Runner 通常就是一个 Agent;工作流型 Agent 是本引擎的主要调用方。 TaskAgent uses `checkpoint` for crash resume and `interrupt.Store` for tool-batch suspend/resume. The suspend gate, `ResumeInterrupt` contract, and events belong to agent-core AC-14; see [agent-core](../agent-core/agent-core.md).
 - 本领域仅依赖 `schema`,不反向依赖具体 Agent 实现。
 
 技术实现(调度器、优先级队列、资源限流、补偿流程)见 [orchestration-design](orchestration-design.md)。

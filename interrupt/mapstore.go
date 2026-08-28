@@ -116,7 +116,7 @@ func (s *MapStore) SubmitDecisions(ctx context.Context, id string, decisions []D
 	}
 
 	if err := applyDecisions(r, decisions, time.Now()); err != nil {
-		return nil, err
+		return cloneRecord(r), err
 	}
 
 	s.data[id] = r
@@ -231,7 +231,10 @@ func (s *MapStore) List(ctx context.Context, sessionID string) ([]*Meta, error) 
 // Delete removes the record identified by id. Idempotent on an unknown — but
 // well-formed — id; a malformed one is rejected, matching FileStore, whose
 // rejection is a path-safety requirement rather than a stylistic one.
-func (s *MapStore) Delete(_ context.Context, id string) error {
+func (s *MapStore) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateID(id); err != nil {
 		return err
 	}

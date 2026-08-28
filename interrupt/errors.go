@@ -28,8 +28,8 @@ var (
 	ErrNotFound = errors.New("interrupt: not found")
 
 	// ErrInvalidArgument is returned when input fails validation (nil
-	// record, empty session/agent/id, empty Pending, an ID in Pending
-	// that is not among ToolCalls, etc.).
+	// record, empty session/agent/id, empty or duplicate Pending, an ID
+	// in Pending that is not among ToolCalls, etc.).
 	ErrInvalidArgument = errors.New("interrupt: invalid argument")
 
 	// ErrUnknownToolCall is returned by SubmitDecisions when a decision's
