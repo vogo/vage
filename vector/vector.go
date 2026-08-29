@@ -27,13 +27,21 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/vogo/vage/vector/internal/embedcore"
 )
 
 // Sentinel errors. Backends and callers compare with errors.Is; messages
 // are stable and safe for log assertions in tests.
 var (
-	// ErrEmptyQuery indicates Search was called with a nil/empty vector.
-	ErrEmptyQuery = errors.New("vector: empty query")
+	// ErrEmptyQuery indicates Search was called with a nil/empty vector,
+	// or that an Embedder was handed empty text.
+	//
+	// The instance is defined in vector/internal/embedcore so the provider
+	// packages under vector/provider can return it without importing this
+	// package (which would cycle back through NewEmbedderFromConfig). This
+	// is an alias, not a copy: errors.Is is unaffected.
+	ErrEmptyQuery = embedcore.ErrEmptyQuery
 
 	// ErrDimensionMismatch is returned when an Add or Search operation
 	// supplies a vector whose length differs from the store's locked

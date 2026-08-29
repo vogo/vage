@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package openai
+package openais
 
 import (
 	"context"
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/vector"
+	"github.com/vogo/vage/vector/internal/embedcore"
 )
 
 // fakeServer accepts a handler and returns an Embedder pointed at it,
@@ -106,7 +106,7 @@ func TestEmbed_EmptyText(t *testing.T) {
 	})
 	defer cleanup()
 
-	if _, err := e.Embed(context.Background(), ""); !errors.Is(err, vector.ErrEmptyQuery) {
+	if _, err := e.Embed(context.Background(), ""); !errors.Is(err, embedcore.ErrEmptyQuery) {
 		t.Fatalf("expected ErrEmptyQuery, got %v", err)
 	}
 }
@@ -175,7 +175,7 @@ func TestBatchEmbed_RejectsEmptyElement(t *testing.T) {
 	defer cleanup()
 
 	_, err := e.BatchEmbed(context.Background(), []string{"ok", "", "ok"})
-	if !errors.Is(err, vector.ErrEmptyQuery) {
+	if !errors.Is(err, embedcore.ErrEmptyQuery) {
 		t.Fatalf("expected ErrEmptyQuery, got %v", err)
 	}
 }
@@ -224,23 +224,22 @@ func TestEmbed_DimensionsOption(t *testing.T) {
 	}
 }
 
-func TestSiblingInterfaceConformance(t *testing.T) {
-	// An OpenAI Embedder must satisfy all four capabilities so the
-	// type-assertion path matches HashEmbedder behaviourally.
-	var e vector.Embedder = mustEmbedder(t)
+// TestCapabilityDefaults pins the values behind the optional capability
+// methods. The interface assertions themselves (Embedder / BatchEmbedder /
+// NamedEmbedder / LimitedEmbedder) live in the root vector package's
+// external tests — asserting them here would need an import of the root
+// package, which imports this one.
+func TestCapabilityDefaults(t *testing.T) {
+	e := mustEmbedder(t)
 
-	if _, ok := e.(vector.BatchEmbedder); !ok {
-		t.Error("openai.Embedder does not satisfy BatchEmbedder")
+	if e.ModelName() != DefaultModel {
+		t.Errorf("ModelName = %q, want %q", e.ModelName(), DefaultModel)
 	}
-	if ne, ok := e.(vector.NamedEmbedder); !ok {
-		t.Error("openai.Embedder does not satisfy NamedEmbedder")
-	} else if ne.ModelName() != DefaultModel {
-		t.Errorf("ModelName = %q, want %q", ne.ModelName(), DefaultModel)
+	if e.MaxInputTokens() != MaxInputTokensTextEmbedding3 {
+		t.Errorf("MaxInputTokens = %d, want %d", e.MaxInputTokens(), MaxInputTokensTextEmbedding3)
 	}
-	if le, ok := e.(vector.LimitedEmbedder); !ok {
-		t.Error("openai.Embedder does not satisfy LimitedEmbedder")
-	} else if le.MaxInputTokens() != MaxInputTokensTextEmbedding3 {
-		t.Errorf("MaxInputTokens = %d, want %d", le.MaxInputTokens(), MaxInputTokensTextEmbedding3)
+	if _, err := e.BatchEmbed(context.Background(), nil); err != nil {
+		t.Errorf("BatchEmbed(nil) = %v, want nil", err)
 	}
 }
 

@@ -17,7 +17,7 @@
 - `service`:HTTP 服务,以 REST 端点暴露 Agent 执行,支持同步、流式、异步三种语义。
 - `hook`:事件总线 —— 把 Agent 生命周期事件分发给同步/异步订阅者。
 - `eval`:评测器 —— 对 Agent 输出按多种标准打分(精确匹配、包含、LLM 裁判、工具调用、延迟、成本),可组合加权。
-- `vector`:可插拔的向量召回面 —— 定义最小接口,自带内存实现,外部后端(qdrant)与嵌入器(OpenAI)独立实现。
+- `vector`:可插拔的向量召回面 —— 定义最小接口,自带内存实现,外部存储后端(qdrant)与嵌入器(OpenAI、Voyage)按厂商分层独立实现。
 
 **边界(不做):** `service` 不做账户/计费/多租户;`vector` 不内置向量数据库,只定义接口;`eval` 不做训练,只做离线/在线评测打分。
 
@@ -29,6 +29,7 @@
 - **Evaluator(评测器)**:对一个评测用例产出评分;家族含 ExactMatch、Contains、LLMJudge、ToolCall、Latency、Cost,及 Composite/Weighted 组合。
 - **EvalCase / EvalResult / EvalReport**:评测的输入用例、单项结果、汇总报告(支持批量)。
 - **VectorStore / Embedder**:向量存取与嵌入;MapVectorStore 为内存实现;archivehook/vectorhook 把会话内容归档进向量库。
+- **Embedding Provider**:嵌入服务的厂商实现,当前为 OpenAI 与 Voyage 两家,各自独立、互不依赖;调用方要么按配置构造,要么直接用厂商包拿专属能力。
 
 ## 业务规则与不变式
 
@@ -38,6 +39,8 @@
 | SVC-2 | **事件不丢主流程**:hook 分发失败不得打断 Agent 主流程;异步 hook 与主流程解耦。 |
 | SVC-3 | **评测标准显式**:每个评测器有明确、可复现的判定标准;组合评测按权重汇总。 |
 | SVC-4 | **向量接口最小化**:`vector` 只暴露最小接口,使多种后端可无扭曲实现;后端缺省时召回类功能可降级。 |
+| SVC-6 | **嵌入厂商可换而不外溢**:召回链路只认 `Embedder`,换厂商不改调用方;厂商专属参数只在对应 provider 包暴露,不做跨厂商有损归一。 |
+| SVC-7 | **嵌入配置显式**:provider 必须显式指定,构造期校验且不发网络请求;框架不读环境变量、不猜默认厂商、不为 Voyage 内置默认模型。 |
 | SVC-5 | **异步任务可查询**:异步执行返回可查询的任务标识,状态经 TaskStore 保存。 |
 
 ## 状态与转换
@@ -51,9 +54,10 @@ hook 消费 `schema.Event`(Agent 全生命周期事件),向订阅者分发;可�
 ## 与其他领域的交互
 
 - **agent-core**:service 调用 Agent 执行;hook 消费其生命周期事件。
-- **model**:LLMJudge 评测器与嵌入器调用模型能力。
+- **model**:LLMJudge 评测器调用 `largemodel` 的聊天能力。嵌入不走这条路 —— Embedder 是独立的一层,不经 `largemodel`/`aimodel`,也不复用聊天的 schema、预算与路由语义。
+- **Anthropic / Claude 生态**:Anthropic 不提供原生 embedding API,其官方文档把 Claude 应用指向 Voyage。因此本领域没有 anthropics 嵌入 provider,Claude 侧的答案就是 Voyage。
 - **memory**:向量召回为上下文装配的 Source 提供检索(见 [memory](../../memory/memory/memory.md))。
 
 技术实现(端点、任务存储、评测器与向量后端)见 [service-design](service-design.md)。
 
-> **集成测试**:跨领域行为的集成矩阵位于仓库 `integrations/`(agent/context/eval/guard/largemodel/mcp/memory/metrics/orchestrate/service/skill/tool/vector 各一套),是本领域及全框架的端到端验证入口。
+> **集成测试**:跨领域行为的集成矩阵位于仓库 `integrations/`(agent/context/eval/guard/largemodel/mcp/memory/metrics/orchestrate/service/skill/tool/vector 各一套),是本领域及全框架的端到端验证入口。其中 `vector_tests` 按嵌入厂商分子矩阵,某家 key 未配置时只跳过该家的实时用例。
