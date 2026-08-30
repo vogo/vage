@@ -19,6 +19,7 @@ package orchestrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -309,7 +310,11 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 
 	// Handle Compensate error strategy.
 	if de.cfg.ErrorStrategy == Compensate && de.cfg.CompensateCfg != nil {
-		if de.cfg.CompensateCfg.Strategy == ForwardRecovery {
+		// Forward recovery re-runs the same Runner, which is not
+		// ResumeInterrupt: a suspended node would run again from the top and
+		// persist a second pending record for the same decision. Fall through
+		// to backward compensation, which only touches completed nodes.
+		if de.cfg.CompensateCfg.Strategy == ForwardRecovery && !errors.Is(comp.err, ErrInterruptedRunner) {
 			// Try forward recovery.
 			nodeReq, buildErr := buildNodeInput(node, de.req, de.result.NodeResults)
 			if buildErr == nil {
@@ -568,6 +573,11 @@ func launchNodeAdvanced(ctx context.Context, node *Node, req *schema.RunRequest,
 				}
 			} else {
 				lastErr = err
+				// A suspended runner is not retryable: re-running it is not
+				// ResumeInterrupt and can persist a second pending record.
+				if errors.Is(err, ErrInterruptedRunner) {
+					break
+				}
 			}
 
 			// Retry with backoff if not last attempt.
@@ -590,7 +600,7 @@ func launchNodeAdvanced(ctx context.Context, node *Node, req *schema.RunRequest,
 
 // runWithTimeout runs a node's runner with an optional per-node timeout.
 func runWithTimeout(ctx context.Context, node *Node, req *schema.RunRequest) (*schema.RunResponse, error) {
-	return runRunnerWithTimeout(ctx, node.Timeout, node.Runner, req)
+	return runRunnerWithTimeout(ctx, fmt.Sprintf("node %q", node.ID), node.Timeout, node.Runner, req)
 }
 
 func buildNodeInput(node *Node, originalReq *schema.RunRequest, results map[string]*schema.RunResponse) (*schema.RunRequest, error) {

@@ -65,6 +65,13 @@ func ExecuteDynamicSpawn(ctx context.Context, dsn *DynamicSpawnNode, req *schema
 		if err != nil {
 			return nil, fmt.Errorf("orchestrate: DynamicSpawnNode %q runner failed: %w", dsn.ID, err)
 		}
+
+		// Reject before Spawner: a suspended parent has no output to fan out
+		// from, and spawning children off a half-written turn would multiply
+		// the loss instead of surfacing it.
+		if rejectErr := rejectInterrupted(fmt.Sprintf("DynamicSpawnNode %q runner", dsn.ID), output); rejectErr != nil {
+			return nil, rejectErr
+		}
 	} else {
 		output = &schema.RunResponse{Messages: req.Messages, SessionID: req.SessionID}
 	}
@@ -127,6 +134,11 @@ func ExecuteDynamicSpawn(ctx context.Context, dsn *DynamicSpawnNode, req *schema
 	for cr := range resultCh {
 		if cr.err != nil {
 			return nil, fmt.Errorf("orchestrate: DynamicSpawnNode %q child %q failed: %w", dsn.ID, cr.id, cr.err)
+		}
+		if rejectErr := rejectInterrupted(
+			fmt.Sprintf("DynamicSpawnNode %q child %q", dsn.ID, cr.id), cr.resp,
+		); rejectErr != nil {
+			return nil, rejectErr
 		}
 		childResults[cr.id] = cr.resp
 	}

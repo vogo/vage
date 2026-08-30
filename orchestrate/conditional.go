@@ -85,6 +85,12 @@ func ExecuteConditional(ctx context.Context, cn *ConditionalNode, req *schema.Ru
 		if err != nil {
 			return nil, "", fmt.Errorf("orchestrate: ConditionalNode %q runner failed: %w", cn.ID, err)
 		}
+
+		// Branch selection reads upstream results, but a suspended runner still
+		// means this node produced no output — do not let it pick a target.
+		if rejectErr := rejectInterrupted(fmt.Sprintf("ConditionalNode %q runner", cn.ID), resp); rejectErr != nil {
+			return nil, "", rejectErr
+		}
 	}
 
 	targetID := cn.EvaluateBranches(upstreamResults)

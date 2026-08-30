@@ -31,7 +31,7 @@ import (
 
 func TestRunRunnerWithTimeout_Success(t *testing.T) {
 	runner := passthroughRunner()
-	resp, err := runRunnerWithTimeout(context.Background(), 0, runner, makeReq("hello"))
+	resp, err := runRunnerWithTimeout(context.Background(), "test", 0, runner, makeReq("hello"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRunRunnerWithTimeout_Timeout(t *testing.T) {
 			return &schema.RunResponse{}, nil
 		}
 	})
-	_, err := runRunnerWithTimeout(context.Background(), 50*time.Millisecond, slowRunner, makeReq("hello"))
+	_, err := runRunnerWithTimeout(context.Background(), "test", 50*time.Millisecond, slowRunner, makeReq("hello"))
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -57,7 +57,7 @@ func TestRunRunnerWithTimeout_Timeout(t *testing.T) {
 
 func TestRunRunnerWithTimeout_ZeroTimeout(t *testing.T) {
 	runner := passthroughRunner()
-	resp, err := runRunnerWithTimeout(context.Background(), 0, runner, makeReq("hello"))
+	resp, err := runRunnerWithTimeout(context.Background(), "test", 0, runner, makeReq("hello"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

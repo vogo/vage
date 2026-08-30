@@ -157,6 +157,17 @@ func (a *Agent) runSequence(ctx context.Context, req *schema.RunRequest) (*schem
 			return nil, fmt.Errorf("workflowagent: workflow step %d (%s): nil response", i+1, step.ID())
 		}
 
+		// A suspended step has not produced an output: feeding its half-written
+		// messages to the next step would build the rest of the workflow on a
+		// turn a human never decided. Stop before accumulating its usage.
+		if resp.IsInterrupted() {
+			return nil, fmt.Errorf(
+				"workflowagent: workflow step %d (%s) suspended for a human decision; "+
+					"nested human-in-the-loop is not supported — run that agent directly at the top level to resume it",
+				i+1, step.ID(),
+			)
+		}
+
 		if resp.Usage != nil {
 			hasUsage = true
 			totalUsage.Add(resp.Usage)

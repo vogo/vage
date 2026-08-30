@@ -113,6 +113,19 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		return nil, fmt.Errorf("routeragent: nil response from agent %s", result.Agent.ID())
 	}
 
+	// The router forwards the request and hands the response back verbatim;
+	// it holds no interrupt id and offers no resume entry point. Rewriting a
+	// suspended response's session/usage would present a half-written turn as
+	// the route's answer, so reject before touching it — and do not try
+	// another route, which would silently run different work.
+	if resp.IsInterrupted() {
+		return nil, fmt.Errorf(
+			"routeragent: agent %s suspended for a human decision; "+
+				"nested human-in-the-loop is not supported — run that agent directly at the top level to resume it",
+			result.Agent.ID(),
+		)
+	}
+
 	// Aggregate usage from routing decision and selected agent.
 	if result.Usage != nil {
 		totalUsage := &schema.Usage{}
