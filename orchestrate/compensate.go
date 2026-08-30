@@ -19,6 +19,7 @@ package orchestrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -157,11 +158,18 @@ func executeForwardRecovery(ctx context.Context, cfg *CompensateConfig,
 
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		resp, err := runRunnerWithTimeout(ctx, cfg.Timeout, node.Runner, req)
+		resp, err := runRunnerWithTimeout(ctx,
+			fmt.Sprintf("forward recovery for node %q", node.ID), cfg.Timeout, node.Runner, req)
 		if err == nil && resp != nil {
 			return resp, nil
 		}
 		if err != nil {
+			// Retrying is not ResumeInterrupt — it would run the node again
+			// and can persist a second pending record, so surface the
+			// suspension as-is instead of counting attempts against it.
+			if errors.Is(err, ErrInterruptedRunner) {
+				return nil, err
+			}
 			lastErr = err
 		} else {
 			lastErr = fmt.Errorf("nil response")
@@ -193,8 +201,10 @@ func compensateWithTimeout(ctx context.Context, timeout time.Duration,
 	return comp.Compensate(ctx, resp)
 }
 
-// runRunnerWithTimeout runs a Runner with an optional timeout.
-func runRunnerWithTimeout(ctx context.Context, timeout time.Duration,
+// runRunnerWithTimeout runs a Runner with an optional timeout. where names the
+// consuming boundary for the suspended-response rejection every Runner call
+// site shares.
+func runRunnerWithTimeout(ctx context.Context, where string, timeout time.Duration,
 	runner Runner, req *schema.RunRequest,
 ) (*schema.RunResponse, error) {
 	if timeout > 0 {
@@ -202,5 +212,15 @@ func runRunnerWithTimeout(ctx context.Context, timeout time.Duration,
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	return runner.Run(ctx, req)
+
+	resp, err := runner.Run(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if rejectErr := rejectInterrupted(where, resp); rejectErr != nil {
+		return nil, rejectErr
+	}
+
+	return resp, nil
 }

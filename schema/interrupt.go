@@ -58,3 +58,23 @@ type ResumeInterruptRequest struct {
 	InterruptID string              `json:"interrupt_id"`
 	Decisions   []InterruptDecision `json:"decisions,omitempty"`
 }
+
+// IsInterrupted reports whether this response suspended for an external
+// decision instead of finishing, and therefore is not a consumable result.
+//
+// Either signal alone is enough to reject: a well-formed TaskAgent sets both
+// StopReason and Interrupt, so an Agent or middleware that produces only one
+// of them must not slip past a caller's guard by omitting the other.
+//
+// Parent layers (agent-as-tool, RouterAgent, WorkflowAgent, orchestrate
+// runners) call this before reading a sub-Agent response: nested
+// human-in-the-loop has no resume path, so a suspended response has to become
+// a visible error rather than a half-written answer. A nil receiver is not
+// interrupted.
+func (r *RunResponse) IsInterrupted() bool {
+	if r == nil {
+		return false
+	}
+
+	return r.StopReason == StopReasonInterrupted || r.Interrupt != nil
+}

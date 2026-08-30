@@ -19,6 +19,7 @@ package orchestrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -568,6 +569,11 @@ func launchNodeAdvanced(ctx context.Context, node *Node, req *schema.RunRequest,
 				}
 			} else {
 				lastErr = err
+				// A suspended runner is not retryable: re-running it is not
+				// ResumeInterrupt and can persist a second pending record.
+				if errors.Is(err, ErrInterruptedRunner) {
+					break
+				}
 			}
 
 			// Retry with backoff if not last attempt.
@@ -590,7 +596,7 @@ func launchNodeAdvanced(ctx context.Context, node *Node, req *schema.RunRequest,
 
 // runWithTimeout runs a node's runner with an optional per-node timeout.
 func runWithTimeout(ctx context.Context, node *Node, req *schema.RunRequest) (*schema.RunResponse, error) {
-	return runRunnerWithTimeout(ctx, node.Timeout, node.Runner, req)
+	return runRunnerWithTimeout(ctx, fmt.Sprintf("node %q", node.ID), node.Timeout, node.Runner, req)
 }
 
 func buildNodeInput(node *Node, originalReq *schema.RunRequest, results map[string]*schema.RunResponse) (*schema.RunRequest, error) {

@@ -58,6 +58,13 @@ func ExecuteLoop(ctx context.Context, loop LoopNode, req *schema.RunRequest) (*s
 			return nil, fmt.Errorf("orchestrate: loop iteration %d: nil response", iter)
 		}
 
+		// A suspended body has not produced an iteration result: it must not
+		// become lastResp, feed the next iteration, or reach the condition and
+		// convergence checks.
+		if rejectErr := rejectInterrupted(fmt.Sprintf("loop iteration %d", iter), resp); rejectErr != nil {
+			return nil, rejectErr
+		}
+
 		lastResp = resp
 
 		if resp.Usage != nil {

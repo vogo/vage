@@ -131,6 +131,15 @@ func (e *agentToolError) Error() string { return e.msg }
 
 var errMissingInput = &agentToolError{msg: "agent tool: 'input' field must be a non-empty string"}
 
+// errNestedInterrupt is surfaced to the parent model when the sub-agent
+// suspends for a human decision. Running an agent as a tool gives the caller
+// no interrupt id and no resume entry point, so this configuration is not
+// supported — the agent has to be run directly by the top-level host.
+var errNestedInterrupt = &agentToolError{
+	msg: "agent tool: sub-agent suspended for a human decision; " +
+		"nested human-in-the-loop is not supported — run that agent directly at the top level to resume it",
+}
+
 // newHandler creates a ToolHandler closure that delegates to the given agent.
 //
 // Error policy: agent execution errors are returned as ToolResult with IsError=true
@@ -164,6 +173,14 @@ func newHandler(ag agent.Agent, extract ArgExtractor, sessCfg *sessionConfig) to
 		resp, err := ag.Run(runCtx, &req)
 		if err != nil {
 			return schema.ErrorResult("", "agent tool: execution failed: "+err.Error()), nil
+		}
+
+		// A suspended sub-agent has no resume path from here: the parent model
+		// would receive a half-written turn as if it were the answer, and the
+		// pending interrupt record would never be decided. Fail visibly
+		// instead, without echoing the partial text or the interrupt id.
+		if resp.IsInterrupted() {
+			return schema.ErrorResult("", errNestedInterrupt.Error()), nil
 		}
 
 		var parts []string
