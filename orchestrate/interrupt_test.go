@@ -22,6 +22,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vogo/vage/schema"
 )
@@ -308,5 +309,37 @@ func TestForwardRecovery_InterruptedRunner_NotRetried(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("runner called %d times, want 1", calls.Load())
+	}
+}
+
+// TestDAG_InterruptedNode_ForwardRecoveryDoesNotRerun covers the path where the
+// suspension is discovered by the DAG: the node has already run and created a
+// pending record, so forward recovery must not call the Runner a second time —
+// a fresh Run is not ResumeInterrupt and would persist a duplicate pending
+// record for the same decision.
+func TestDAG_InterruptedNode_ForwardRecoveryDoesNotRerun(t *testing.T) {
+	var calls atomic.Int32
+	nodes := []Node{{ID: "A", Runner: interruptedRunner(&calls, suspendedResponse())}}
+
+	cfg := DAGConfig{
+		ErrorStrategy: Compensate,
+		CompensateCfg: &CompensateConfig{
+			Strategy:   ForwardRecovery,
+			MaxRetries: 3,
+			Timeout:    time.Second,
+		},
+	}
+
+	result, err := ExecuteDAG(context.Background(), cfg, nodes, makeReq("go"))
+	assertInterruptedErr(t, err)
+
+	if calls.Load() != 1 {
+		t.Fatalf("runner called %d times, want 1", calls.Load())
+	}
+	if result.NodeStatus["A"] != NodeFailed {
+		t.Errorf("node A status = %v, want NodeFailed", result.NodeStatus["A"])
+	}
+	if _, ok := result.NodeResults["A"]; ok {
+		t.Error("suspended response leaked into NodeResults")
 	}
 }

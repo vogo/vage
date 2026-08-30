@@ -310,7 +310,11 @@ func (de *dagExecutor) handleNodeError(comp nodeCompletion) (bool, error) {
 
 	// Handle Compensate error strategy.
 	if de.cfg.ErrorStrategy == Compensate && de.cfg.CompensateCfg != nil {
-		if de.cfg.CompensateCfg.Strategy == ForwardRecovery {
+		// Forward recovery re-runs the same Runner, which is not
+		// ResumeInterrupt: a suspended node would run again from the top and
+		// persist a second pending record for the same decision. Fall through
+		// to backward compensation, which only touches completed nodes.
+		if de.cfg.CompensateCfg.Strategy == ForwardRecovery && !errors.Is(comp.err, ErrInterruptedRunner) {
 			// Try forward recovery.
 			nodeReq, buildErr := buildNodeInput(node, de.req, de.result.NodeResults)
 			if buildErr == nil {
