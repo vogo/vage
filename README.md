@@ -487,7 +487,7 @@ unit — store and policy source must be configured together or neither, and
 the policy source is exactly one of a custom `InterruptPolicy` or
 `ToolNames`. A broken combination is rejected at construction time by
 `taskagent.NewValidated` / `QuickValidated` (as `taskagent.ErrInterruptConfig`,
-before any I/O) and at the first Run/RunStream/ResumeInterrupt preflight on
+before any I/O) and at the first Run/RunStream/Resume/ResumeInterrupt preflight on
 the legacy `New` / `Quick` — never a silent no-op — and this is deliberately
 not a wrapper around `ask_user`'s blocking mode or `checkpoint`'s crash-replay
 `Resume(sessionID)`: all three answer different questions and none

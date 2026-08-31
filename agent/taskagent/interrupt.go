@@ -58,8 +58,8 @@ var (
 // option state: store and policy are either both configured or neither, and
 // a policy comes from exactly one source (custom policy or tool names). It
 // is the single validation shared by NewValidated / QuickValidated at
-// construction time and by preflightRun (Run/RunStream) plus ResumeInterrupt
-// as the runtime defense.
+// construction time and by preflightRun (Run/RunStream/Resume) plus
+// ResumeInterrupt as the runtime defense.
 func (a *Agent) checkInterruptConfig() error {
 	switch {
 	case a.interruptStore == nil && a.interruptPolicy == nil:
