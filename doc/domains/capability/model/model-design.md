@@ -65,7 +65,7 @@
 - **装饰器链而非配置开关**:每个治理关注点是一个独立中间件,使用方按需组合、自定排序。语义由组合顺序显式表达,而非隐藏在标志位里。
 - **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
 - **浅拷贝编辑**:编辑作用于 `Request` 的浅拷贝(`Request.Clone`),绝不篡改调用方原始请求。
-- **资源感知折叠**:stale_resource 判定通过 `ResourceLookupFunc` 查询工具资源语义(每个被检查的工具调用查一次,须廉价,在热路径上),识别被后续写操作作废的旧读结果。
+- **资源感知折叠**:stale_resource 判定通过 `ResourceLookupFunc`(`schema.ResourceTracker` 契约;`tool.ResourceTracker` 为兼容别名)查询工具资源语义(每个被检查的工具调用查一次,须廉价,在热路径上),识别被后续写操作作废的旧读结果。
 - **工件外置**:超过单条字节上限的工具结果经 `ArtifactWriter` 按 (sessionID, name) 外置,提示里留短引用;写入须对跨会话并发安全。
 - **ResponseSchema:按 codec 静态选择、只选一种表达**:`Request.ResponseSchema` 是 `any`,与 `schema.ToolDef.Parameters` 同形,公共层不引入厂商专属包装类型,也不改写或裁剪 schema。是否走原生映射由 provider codec 静态决定(不按模型名猜测,不发探测请求):
   - **OpenAI Chat**(`openai_chat.go`):`response_format = {"type":"json_schema","json_schema":{"name":"vage_response_schema","schema":<原样>,"strict":true}}`,固定名称保证同一 schema 产生同一 wire 形状。

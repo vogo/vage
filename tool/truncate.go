@@ -22,9 +22,25 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
+
+// estimateTextTokens returns an approximate token count for plain text.
+// Heuristic: len(text)/4 with a minimum of 1 for non-empty text — the
+// same rule as memory.EstimateTextTokens, duplicated here so tool
+// truncation does not depend on the L1 memory package.
+func estimateTextTokens(text string) int {
+	if len(text) == 0 {
+		return 0
+	}
+
+	tokens := len(text) / 4
+	if tokens == 0 {
+		tokens = 1
+	}
+
+	return tokens
+}
 
 // TruncateUTF8 returns the longest prefix of s that is at most maxBytes bytes
 // long and remains valid UTF-8, never splitting a multi-byte rune. When s
@@ -116,7 +132,7 @@ func (t *TruncatingToolRegistry) Execute(ctx context.Context, name, args string)
 			continue
 		}
 
-		estimated := memory.EstimateTextTokens(part.Text)
+		estimated := estimateTextTokens(part.Text)
 		if estimated <= t.maxTokens {
 			continue
 		}

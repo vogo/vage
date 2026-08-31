@@ -6,12 +6,13 @@
 
 | 包/关键类型 | 设计角色 |
 |-------------|----------|
+| `schema`(`ResourceTracker`/`ResourceRef`/`ResourceMode`) | 工具资源读/写事实的 L0 契约,供上下文编辑 stale_resource 判定 |
 | `tool`(`Registry`/`ToolRegistry`/`ToolExecutor`/`ExternalToolCaller`) | 工具注册与执行契约 |
 | `tool`(`ExecuteMiddleware`/`WithExecuteMiddleware`) | Registry 执行链装饰:审计、权限、结果/错误改写 |
 | `tool`(`TruncatingToolRegistry`) | 过大输出截断治理(token 级);位于 Registry 中间件之外 |
 | `tool`(`TruncateUTF8`) | 字节级 UTF-8 安全截断的统一入口 |
 | `schema`(`ToolResult.Text`) | 工具结果取文本的唯一推荐入口(契约层,见 [agent-core](../../agent/agent-core/agent-core.md)) |
-| `tool`(`ResourceTracker`/`ResourceRef`) | 工具资源语义,供上下文编辑与编排限流 |
+| `tool`(`ResourceTracker`/`ResourceRef`) | `schema` 资源契约的兼容别名;现有调用方可继续 import `tool` |
 | `tool/bash` | 进程隔离的命令执行 |
 | `tool/read`/`write`/`edit`/`glob`/`grep` | 文件类工具,`tool/toolkit` 提供共享路径校验 |
 | `tool/agenttool` | agent-as-tool,发布 `sessionview` 到子代理 context |
@@ -28,7 +29,7 @@
 - **执行中间件包裹完整分派,而非逐 handler 装饰**:`ExecuteMiddleware` 以 `func(next ToolHandler) ToolHandler` 装饰 `Registry.Execute` 的查找+执行路径,因此同一条策略覆盖本地、MCP、agent-as-tool,也能审计被拒绝或无法路由的尝试。第一个注册者最外层(`A.before → B.before → dispatch → B.after → A.after`);`nil` 跳过;链在 `NewRegistry` 后固定,分派仍每次读取当下注册表状态。`TruncatingToolRegistry` 仍是外层结果治理:Registry 中间件完成后再截断。不向 `ToolExecutor`/`ToolRegistry` 接口加方法。
 - **并发与绕过责任在实现者**:并发 `Execute` 共享同一组中间件实例,可变状态须自保安全;锁只用于取得分派快照。直接调用某个 `ToolHandler` 绕过中间件 —— 需要强制策略时须在统一构造 Registry 时配置。中间件可见原始参数与结果,审计不得无差别记录敏感载荷。
 - **内建工具刻意收窄参数面**:多数文件/状态工具做严格校验、不接受任意路径,把危险操作面缩到最小(纵深防御,配合 bash 进程隔离)。
-- **资源语义显式化**:工具通过 `ResourceTracker` 声明读/写资源,使上下文编辑能识别"后写作废前读",使编排能按资源标签限流 —— 一处声明,多处复用。
+- **资源语义显式化**:工具通过 `ResourceTracker`(规范类型在 `schema`, `tool` 提供别名)声明读/写资源,使上下文编辑能识别"后写作废前读",使编排能按资源标签限流 —— 一处声明,多处复用。
 - **MCP 边界是攻击面**:client/server 两端都内置 `ScanEvent` 凭证扫描,与 `security`(credscrub)协作,防止第三方 I/O 泄露凭证。
 - **通用取值收在框架,策略留在治理层**:"从结果取文本"和"按字节安全截断"是每个调用方都要写一遍的通用逻辑,散落各处就会各自漂移,因此收成两个稳定入口 —— `schema.ToolResult.Text()` 与 `tool.TruncateUTF8()`。而"多大算大、截断后留什么标记、错误结果要不要处理"是策略,仍归 `TruncatingToolRegistry`:它复用 `TruncateUTF8` 做边界裁切,但不把 token 阈值与标记格式下沉进通用助手。
 - **技能四件套**:Loader(从文件加载)/ Registry(索引)/ Manager(激活)/ Validator(名称、大小、结构、组合校验)职责分离,兼容 Agent Skills 开放标准。

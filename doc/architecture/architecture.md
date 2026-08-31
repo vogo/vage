@@ -50,6 +50,72 @@ graph TD
 
 > `vector` 归属 platform `service` 领域(可插拔召回后端),不在 L1 编排层;见 [overview.md](../overview.md) 领域地图。
 
+## 生产依赖拓扑判定
+
+CI 在 `integrations/architecture_test.go` 中扫描**全部受管生产 Go 包**的直接 import 边(不含 `_test.go`、`integrations` 夹具;含各 `GOOS`/`GOARCH` 构建标签下的生产文件,不限于当前 CI 宿主平台)。规则与下表逐项一致;维护者新增包或合法组合边时须同步更新测试与本文。
+
+### 判定口径
+
+1. **基本单位**是直接 import 边,不是 `go list -deps` 闭包。同一架构组件内的根包/子包不构成跨组件边。
+2. **L0 契约**:`schema`/`prompt` 只依赖标准库;任意组件均可 import L0。
+3. **默许同组件**:包路径归属同一组件时,跨子包 import 合法。
+4. **层级下降**:源组件层级 **严格高于** 目标组件层级时 import 合法(如 L3→L2、L4→L3、L2→L0)。
+5. **组合/适配边**:不满足层级下降但属有意集成的跨组件边,须在下方允许表或 ADR 精确豁免中列出;宽泛前缀白名单禁止。
+6. **硬红线**:L2 能力组件不得反向借用 L1 状态(`tool→memory` 等);`largemodel` 不得 import `tool`/`memory`(资源契约已下沉至 `schema`)。
+
+### 组件归属
+
+| 组件 | 层级 | 包前缀 |
+|------|------|--------|
+| `schema` | L0 | `schema` |
+| `prompt` | L0 | `prompt` |
+| `agent` | L3 | `agent`(根包) |
+| `taskagent` | L3 | `agent/taskagent` |
+| `routeragent` | L3 | `agent/routeragent` |
+| `workflowagent` | L3 | `agent/workflowagent` |
+| `memory` | L1 | `memory` |
+| `context` | L1 | `context` |
+| `session` | L1 | `session`, `session/tree`, `session/tree/vectorhook` |
+| `workspace` | L1 | `workspace` |
+| `sessionview` | L1 | `sessionview` |
+| `orchestrate` | L1 | `orchestrate` |
+| `checkpoint` | L1 | `checkpoint` |
+| `interrupt` | L1 | `interrupt` |
+| `largemodel` | L2 | `largemodel` 及子包 |
+| `tool` | L2 | `tool` 及子包 |
+| `mcp` | L2 | `mcp/client`, `mcp/server` |
+| `skill` | L2 | `skill` |
+| `guard` | L2 | `guard` |
+| `security` | L2 | `security/credscrub` |
+| `service` | L4 | `service` |
+| `hook` | L4 | `hook` |
+| `eval` | L4 | `eval` |
+| `vector` | platform | `vector` 及子包 |
+
+未映射的生产包会使 CI 失败。
+
+### 允许的组合/适配边(跨组件)
+
+| 源组件 | 目标组件 | 用途 |
+|--------|----------|------|
+| `routeragent` | `agent` | 路由 Agent 基类 |
+| `taskagent` | `agent`, `hook` | Task Agent 基类与事件 hook |
+| `workflowagent` | `agent` | Workflow Agent 基类 |
+| `context` | `memory`, `session`, `workspace`, `vector`, `hook` | 上下文装配 |
+| `session` | `memory`, `largemodel`, `hook`, `vector` | 会话树、压缩 hook 与向量 hook |
+| `tool` | `agent`, `session`, `sessionview`, `workspace`, `vector` | agent-as-tool、状态/检索工具 |
+| `mcp` | `tool`, `security`, `agent` | MCP 工具桥接与脱敏 |
+| `vector` | `hook` | 归档 hook |
+
+其余跨组件边须层级下降或 import L0。暂不能移除的违规边只能以**精确 source 包→target 包**写入 `edgeExemptions` 并附 ADR 路径。
+
+### 禁止的跨组件边(硬红线)
+
+| 源组件 | 目标组件 |
+|--------|----------|
+| `tool` | `memory` |
+| `largemodel` | `tool`, `memory` |
+
 ## 依赖拓扑核心规则
 
 1. **`schema` 是根契约包**:只依赖标准库,零 vage 内部依赖、零 `aimodel` 依赖。厂商 wire 编解码收敛在 `largemodel/provider/*`。所有其他包依赖它,反向依赖被禁止。
@@ -110,7 +176,7 @@ sequenceDiagram
 | Token 预算 | `RunOptions` + largemodel budget 中间件 | 每轮 LLM 调用前、每次工具批前双点检查 |
 | 上下文膨胀 | `largemodel` 上下文编辑 + `memory` 压缩 | 折叠旧工具结果、按重要度/预算压缩历史 |
 | 安全 | `guard` + `security` | 三态护栏 + 跨边界凭证脱敏 |
-| 资源隔离 | `tool.ResourceTracker` + `sessionview` | 工具资源标签、子代理只读快照与预算 |
+| 资源隔离 | `schema.ResourceTracker`(规范) / `tool.ResourceTracker`(别名) + `sessionview` | 工具资源标签、子代理只读快照与预算 |
 
 ## 架构决策记录(ADR)
 

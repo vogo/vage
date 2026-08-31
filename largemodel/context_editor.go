@@ -27,7 +27,6 @@ import (
 	"sort"
 
 	"github.com/vogo/vage/schema"
-	"github.com/vogo/vage/tool"
 )
 
 const (
@@ -60,7 +59,7 @@ type PlaceholderV2Func func(toolCallID string, originalBytes int, reason, detail
 // nil means the tool does not advertise resource semantics and the
 // stale_resource pass should skip it. The lookup itself must be cheap
 // — it is on the per-request hot path.
-type ResourceLookupFunc func(toolName string) tool.ResourceTracker
+type ResourceLookupFunc func(toolName string) schema.ResourceTracker
 
 // ArtifactWriter externalises an oversized tool_result body to a
 // persistent store keyed by (sessionID, name). The editor consults the
@@ -365,7 +364,7 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []schema.Message) map[int]str
 				continue
 			}
 			for _, ref := range tracker.ResourceIDs(args) {
-				if ref.Mode != tool.ResourceWrite || ref.ID == "" {
+				if ref.Mode != schema.ResourceWrite || ref.ID == "" {
 					continue
 				}
 				if existing, ok := latestWrite[ref.ID]; !ok || existing.assistantIdx < i {
@@ -398,7 +397,7 @@ func (m *ContextEditorMiddleware) scanByStale(msgs []schema.Message) map[int]str
 			continue
 		}
 		for _, ref := range tracker.ResourceIDs(info.args) {
-			if ref.Mode != tool.ResourceRead || ref.ID == "" {
+			if ref.Mode != schema.ResourceRead || ref.ID == "" {
 				continue
 			}
 			w, ok := latestWrite[ref.ID]
