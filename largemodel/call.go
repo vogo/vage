@@ -68,7 +68,7 @@ type Request struct {
 	// A protocol caller with a native structured-output mapping (OpenAI Chat,
 	// Anthropic Messages) sends it as that vendor's own constraint field.
 	// Codecs with no native mapping degrade it into a deterministic system
-	// instruction instead (see DegradeResponseSchemaPrompt); either way vage
+	// instruction instead (see degradeResponseSchemaPrompt); either way vage
 	// does not parse, validate, or strip code fences from the resulting text.
 	ResponseSchema any
 }

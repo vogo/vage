@@ -23,10 +23,16 @@
 // in the protocol-neutral [github.com/vogo/vage/largemodel/router] core, and this
 // package binds it to `openai` types. Two interaction forms are
 // covered, each with its own method set over the same endpoint pool and the
-// same health state:
+// same health state, but only one of them is a public promise:
 //
 //   - Chat Completions — [ComposeClient.ChatCompletions] / [ComposeClient.ChatCompletionsStream]
-//   - Responses        — [ComposeClient.Responses] / [ComposeClient.ResponsesStream]
+//   - Responses        — package-internal only, no exported entry point
+//
+// The Responses route is deliberately unexported: no public largemodel.Caller
+// reaches it and schema.ProtocolOpenAIResponses fails validation, so exporting
+// it would promise a capability that cannot actually be executed. The
+// implementation is kept — pinned by in-package tests — so a future change that
+// genuinely wires up a Responses Caller has a working seam to build on.
 //
 // A pool here is OpenAI-wire only. Composing Anthropic backends is
 // [github.com/vogo/vage/largemodel/provider/anthropics] — a separate pool over the same
@@ -55,26 +61,32 @@ type ChatCompleter interface {
 	ChatCompletionsStream(ctx context.Context, request *openai.ChatCompletionRequest) (*openai.ChatCompletionStream, error)
 }
 
-// Responder is the method set a backend must provide to take part in Responses
+// responder is the method set a backend must provide to take part in Responses
 // dispatch. It is a separate, narrow method set rather than a widening of
 // ChatCompleter: an entry whose client implements only ChatCompleter keeps
 // working for chat and simply does not take part in Responses routing.
-type Responder interface {
+//
+// It names exported methods because that is the shape aimodel's native client
+// already has; the interface itself stays unexported so the Responses route
+// cannot be entered from outside this package.
+type responder interface {
 	Responses(ctx context.Context, request *openai.ResponsesRequest) (*openai.Response, error)
 	ResponsesStream(ctx context.Context, request *openai.ResponsesRequest) (*openai.ResponseStream, error)
 }
 
 // ComposeClient dispatches OpenAI-wire calls across multiple backends. It
-// implements both ChatCompleter and Responder, so pools nest.
+// implements ChatCompleter, so pools nest; a nested pool takes part in the
+// internal Responses route through composeResponder, since ComposeClient's own
+// Responses methods are unexported.
 type ComposeClient struct {
 	entries []ModelEntry
 	router  *router.Router
-	// responders lists the entry indices whose client also implements Responder.
+	// responders lists the entry indices whose client can also serve Responses.
 	// It is computed once at construction and passed as Call.Eligible.
 	responders []int
 	// responderClients mirrors entries: non-nil at every responders index so
 	// Responses dispatch never type-asserts on the hot path.
-	responderClients []Responder
+	responderClients []responder
 }
 
 // NewComposeClient creates a ComposeClient with the given strategy and model
@@ -117,14 +129,14 @@ func NewComposeClient(
 		return nil, err
 	}
 
-	responderClients := make([]Responder, len(owned))
+	responderClients := make([]responder, len(owned))
 
 	var responders []int
 
 	for i := range owned {
-		if responder, ok := owned[i].Client.(Responder); ok {
+		if r := responderFor(owned[i].Client); r != nil {
 			responders = append(responders, i)
-			responderClients[i] = responder
+			responderClients[i] = r
 		}
 	}
 
@@ -165,11 +177,11 @@ func (c *ComposeClient) ChatCompletionsStream(
 		})
 }
 
-// Responses sends a non-streaming Responses request, routing via the configured
-// strategy. Only entries whose client implements Responder take part; when no
-// entry does, the call fails with a *router.CapabilityError before any
+// responses sends a non-streaming Responses request, routing via the configured
+// strategy. Only entries whose client can serve Responses take part; when no
+// entry can, the call fails with a *router.CapabilityError before any
 // network I/O.
-func (c *ComposeClient) Responses(
+func (c *ComposeClient) responses(
 	ctx context.Context, request *openai.ResponsesRequest,
 ) (*openai.Response, error) {
 	call, err := c.responsesCall(request, false)
@@ -183,10 +195,10 @@ func (c *ComposeClient) Responses(
 		})
 }
 
-// ResponsesStream sends a streaming Responses request, routing via the
+// responsesStream sends a streaming Responses request, routing via the
 // configured strategy. As with chat, only stream establishment is covered by
 // failover.
-func (c *ComposeClient) ResponsesStream(
+func (c *ComposeClient) responsesStream(
 	ctx context.Context, request *openai.ResponsesRequest,
 ) (*openai.ResponseStream, error) {
 	call, err := c.responsesCall(request, true)
@@ -215,7 +227,7 @@ func chatCall(request *openai.ChatCompletionRequest, stream bool) router.Call {
 func (c *ComposeClient) responsesCall(request *openai.ResponsesRequest, stream bool) (router.Call, error) {
 	if len(c.responders) == 0 {
 		return router.Call{}, &router.CapabilityError{
-			Required:   []string{CapabilityResponses},
+			Required:   []string{capabilityResponses},
 			Considered: c.router.Aliases(),
 		}
 	}
@@ -261,12 +273,45 @@ func (c *ComposeClient) modelFor(endpoint int, fallback string) string {
 	return fallback
 }
 
-// Compile-time checks: a ComposeClient is itself a backend for both interaction
-// forms, so compose clients nest; and the native OpenAI client can be used as
-// one directly.
+// composeResponder enrols a nested pool in the internal Responses route.
+// ComposeClient serves Responses through unexported methods, so it cannot
+// satisfy responder directly; this shim keeps nesting behaving the same for
+// both interaction forms without re-exporting the route.
+type composeResponder struct{ inner *ComposeClient }
+
+func (c composeResponder) Responses(
+	ctx context.Context, request *openai.ResponsesRequest,
+) (*openai.Response, error) {
+	return c.inner.responses(ctx, request)
+}
+
+func (c composeResponder) ResponsesStream(
+	ctx context.Context, request *openai.ResponsesRequest,
+) (*openai.ResponseStream, error) {
+	return c.inner.responsesStream(ctx, request)
+}
+
+// responderFor reports how a backend takes part in Responses dispatch, or nil
+// when it cannot serve one. A nested pool is reached through composeResponder;
+// any other client qualifies by carrying the native Responses method set.
+func responderFor(client ChatCompleter) responder {
+	if nested, ok := client.(*ComposeClient); ok {
+		return composeResponder{inner: nested}
+	}
+
+	if r, ok := client.(responder); ok {
+		return r
+	}
+
+	return nil
+}
+
+// Compile-time checks: a ComposeClient is itself a chat backend, so compose
+// clients nest; the native OpenAI client can be used as one directly and also
+// carries the Responses method set the internal route needs.
 var (
 	_ ChatCompleter = (*ComposeClient)(nil)
-	_ Responder     = (*ComposeClient)(nil)
 	_ ChatCompleter = (*openai.Client)(nil)
-	_ Responder     = (*openai.Client)(nil)
+	_ responder     = (*openai.Client)(nil)
+	_ responder     = composeResponder{}
 )
