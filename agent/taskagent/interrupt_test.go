@@ -38,6 +38,8 @@ func TestCheckInterruptConfig(t *testing.T) {
 		{"both configured", interrupt.NewMapStore(), InterruptPolicyFunc(func(context.Context, string, []schema.ToolCall) []string { return nil }), false},
 		{"store only", interrupt.NewMapStore(), nil, true},
 		{"policy only", nil, InterruptPolicyFunc(func(context.Context, string, []schema.ToolCall) []string { return nil }), true},
+		{"tool names only", nil, interruptPolicyByToolName(map[string]struct{}{"ask_user": {}}), true},
+		{"policy and tool names", interrupt.NewMapStore(), interruptBothSources{}, true},
 	}
 
 	for _, tt := range tests {

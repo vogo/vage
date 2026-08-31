@@ -32,10 +32,12 @@ import (
 
 // Sentinel errors for the interrupt/resume path. Match with errors.Is.
 var (
-	// ErrInterruptConfig is returned at the first Run/RunStream/
-	// ResumeInterrupt call when exactly one of WithInterruptStore /
-	// WithInterruptPolicy is configured. Both or neither is required —
-	// see the option docs.
+	// ErrInterruptConfig reports a broken interrupt configuration: exactly
+	// one of store / policy is set, or both a custom policy and tool names
+	// are configured at once. NewValidated / QuickValidated return it at
+	// construction time; the runtime entry points keep it as a last line of
+	// defense. Both-or-neither and exactly-one-source is required — see the
+	// InterruptConfig docs.
 	ErrInterruptConfig = errors.New("vage: WithInterruptStore and WithInterruptPolicy must both be configured, or neither")
 
 	// ErrInterruptAgentMismatch is returned by ResumeInterrupt when the
@@ -51,15 +53,108 @@ var (
 	ErrIncompatibleInterruptTools = errors.New("vage: interrupt record references tools this agent cannot execute")
 )
 
-// checkInterruptConfig enforces that WithInterruptStore and
-// WithInterruptPolicy are configured together or not at all. Called from
-// preflightRun (Run/RunStream) and from ResumeInterrupt directly, since
-// Resume does not go through preflightRun.
+// checkInterruptConfig enforces the interrupt invariants on the final
+// option state: store and policy are either both configured or neither, and
+// a policy comes from exactly one source (custom policy or tool names). It
+// is the single validation shared by NewValidated / QuickValidated at
+// construction time and by preflightRun (Run/RunStream) plus ResumeInterrupt
+// as the runtime defense.
 func (a *Agent) checkInterruptConfig() error {
-	if (a.interruptStore == nil) != (a.interruptPolicy == nil) {
-		return ErrInterruptConfig
+	switch {
+	case a.interruptStore == nil && a.interruptPolicy == nil:
+		return nil
+	case a.interruptStore == nil:
+		return fmt.Errorf("%w: InterruptPolicy configured without InterruptStore", ErrInterruptConfig)
+	case a.interruptPolicy == nil:
+		return fmt.Errorf("%w: InterruptStore configured without InterruptPolicy", ErrInterruptConfig)
+	case isInterruptBothSources(a.interruptPolicy):
+		return fmt.Errorf("%w: both InterruptPolicy and ToolNames are set; choose one policy source", ErrInterruptConfig)
+	default:
+		return nil
 	}
-	return nil
+}
+
+// isInterruptBothSources reports whether p is the marker installed when a
+// single InterruptConfig sets both Policy and ToolNames. Validation rejects
+// it instead of silently preferring one source; a later option that
+// replaces interruptPolicy clears the conflict.
+func isInterruptBothSources(p InterruptPolicy) bool {
+	_, ok := p.(interruptBothSources)
+	return ok
+}
+
+// interruptBothSources is the marker policy installed by WithInterrupt when
+// its InterruptConfig sets both Policy and ToolNames — a combination the
+// framework refuses to disambiguate. Intercept never runs on it: both the
+// validated constructors and the runtime preflight reject the agent first.
+type interruptBothSources struct{}
+
+func (interruptBothSources) Intercept(context.Context, string, []schema.ToolCall) []string {
+	panic("vage: interruptBothSources must never reach Intercept; configuration validation should have rejected it")
+}
+
+// InterruptConfig aggregates the four settings that jointly enable the
+// interrupt choke point — the persistence store, the policy that decides
+// which tool calls in a batch need an external decision, the tool-name
+// shortcut that derives such a policy, and the resume lease TTL. Prefer
+// WithInterrupt over the four single-field options so the group reads as
+// one reviewable unit and NewValidated / QuickValidated surface a bad
+// combination at construction time.
+//
+// Store and Policy (or ToolNames) are the enable pair: both set enables the
+// interrupt, neither disables it, and exactly one is a configuration error.
+// Policy and ToolNames are two ways to say the same thing — do not set both;
+// the framework refuses to pick one silently. ToolNames derives a
+// name-matching policy; a non-nil empty list is a legal explicit empty
+// policy that never interrupts. LeaseTTL <= 0 keeps the current default
+// lease; a lease override alone neither enables nor disables the interrupt.
+type InterruptConfig struct {
+	Store     interrupt.Store
+	Policy    InterruptPolicy
+	ToolNames []string
+	LeaseTTL  time.Duration
+}
+
+// WithInterrupt assigns the interrupt configuration as one unit, replacing
+// every field of the group at its position in the option list. Later
+// single-field interrupt options still override — or break — what it set,
+// following the package's "later-applied-wins" rule; validation always
+// runs on the final state.
+//
+// ToolNames is the name-matching shortcut for Policy. Setting both is an
+// error reported as ErrInterruptConfig by NewValidated / QuickValidated.
+// LeaseTTL <= 0 keeps the current lease default and never enables the
+// interrupt by itself.
+func WithInterrupt(c InterruptConfig) Option {
+	return func(a *Agent) {
+		a.interruptStore = c.Store
+		switch {
+		case c.ToolNames != nil && c.Policy != nil:
+			a.interruptPolicy = interruptBothSources{}
+		case c.ToolNames != nil:
+			a.interruptPolicy = interruptPolicyByToolName(toolNameSet(c.ToolNames))
+		case c.Policy != nil:
+			a.interruptPolicy = c.Policy
+		default:
+			a.interruptPolicy = nil
+		}
+		if c.LeaseTTL > 0 {
+			a.interruptLeaseTTL = c.LeaseTTL
+		}
+	}
+}
+
+// toolNameSet builds the name→empty map behind the tool-name policy,
+// skipping empty names.
+func toolNameSet(names []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		set[n] = struct{}{}
+	}
+	return set
 }
 
 // maybeInterrupt asks the configured InterruptPolicy about the current tool
