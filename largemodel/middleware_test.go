@@ -15,27 +15,26 @@
  * limitations under the License.
  */
 
-package largemodel
+package largemodel_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware"
 	"github.com/vogo/vage/schema"
 )
 
-// mockCompleter records calls and returns a configurable response.
 type mockCompleter struct {
 	chatCalls   int
 	streamCalls int
-	chatResp    *Response
+	chatResp    *largemodel.Response
 	chatErr     error
-	streamResp  *Stream
+	streamResp  *largemodel.Stream
 	streamErr   error
-
-	// proto is the protocol the mock reports; empty means OpenAI chat.
-	proto schema.Protocol
+	proto       schema.Protocol
 }
 
 func (m *mockCompleter) Protocol() schema.Protocol {
@@ -46,21 +45,21 @@ func (m *mockCompleter) Protocol() schema.Protocol {
 	return m.proto
 }
 
-func (m *mockCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
+func (m *mockCompleter) Call(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	m.chatCalls++
 	return m.chatResp, m.chatErr
 }
 
-func (m *mockCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
+func (m *mockCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	m.streamCalls++
 	return m.streamResp, m.streamErr
 }
 
 func TestChainEmpty(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{ID: "test"}}
-	wrapped := Chain(mock)
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "test"}}
+	wrapped := largemodel.Chain(mock)
 
-	resp, err := wrapped.Call(context.Background(), &Request{})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,29 +76,29 @@ func TestChainEmpty(t *testing.T) {
 func TestChainOrder(t *testing.T) {
 	var order []string
 
-	mkMiddleware := func(name string) Middleware {
-		return MiddlewareFunc(func(next Caller) Caller {
-			return &CallerFunc{
+	mkMiddleware := func(name string) largemodel.Middleware {
+		return largemodel.MiddlewareFunc(func(next largemodel.Caller) largemodel.Caller {
+			return &largemodel.CallerFunc{
 				Proto: schema.ProtocolOpenAIChat,
 
-				Chat: func(ctx context.Context, req *Request) (*Response, error) {
+				Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 					order = append(order, name+"-before")
 					resp, err := next.Call(ctx, req)
 					order = append(order, name+"-after")
 
 					return resp, err
 				},
-				ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+				ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 					return next.CallStream(ctx, req)
 				},
 			}
 		})
 	}
 
-	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
-	wrapped := Chain(mock, mkMiddleware("A"), mkMiddleware("B"), mkMiddleware("C"))
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "ok"}}
+	wrapped := largemodel.Chain(mock, mkMiddleware("A"), mkMiddleware("B"), mkMiddleware("C"))
 
-	_, err := wrapped.Call(context.Background(), &Request{})
+	_, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,7 +117,7 @@ func TestChainOrder(t *testing.T) {
 
 func TestMiddlewareFunc(t *testing.T) {
 	called := false
-	mw := MiddlewareFunc(func(next Caller) Caller {
+	mw := largemodel.MiddlewareFunc(func(next largemodel.Caller) largemodel.Caller {
 		called = true
 		return next
 	})
@@ -132,16 +131,16 @@ func TestMiddlewareFunc(t *testing.T) {
 }
 
 func TestDefaultChain_AllMiddlewares(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
-	wrapped := DefaultChain(
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "ok"}}
+	wrapped := largemodel.DefaultChain(
 		mock,
-		NewLogMiddleware(),
-		NewRateLimitMiddleware(),
-		NewTimeoutMiddleware(5*time.Second),
-		NewCacheMiddleware(NewMapCache()),
+		middleware.NewLogMiddleware(),
+		middleware.NewRateLimitMiddleware(),
+		middleware.NewTimeoutMiddleware(5*time.Second),
+		middleware.NewCacheMiddleware(middleware.NewMapCache()),
 	)
 
-	resp, err := wrapped.Call(context.Background(), &Request{})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,10 +151,10 @@ func TestDefaultChain_AllMiddlewares(t *testing.T) {
 }
 
 func TestDefaultChain_NilMiddlewares(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
-	wrapped := DefaultChain(mock, nil, nil, nil)
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "ok"}}
+	wrapped := largemodel.DefaultChain(mock, nil, nil, nil)
 
-	resp, err := wrapped.Call(context.Background(), &Request{})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

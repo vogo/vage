@@ -27,6 +27,7 @@ import (
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware"
 	"github.com/vogo/vage/schema"
 )
 
@@ -48,7 +49,7 @@ func ExampleNewOpenAIChatCallerFromConfig_singleEndpoint() {
 	model := largemodel.New(
 		caller,
 		largemodel.WithMiddleware(
-			largemodel.NewTimeoutMiddleware(30*time.Second),
+			middleware.NewTimeoutMiddleware(30*time.Second),
 		),
 	)
 
@@ -81,7 +82,7 @@ func ExampleNewAnthropicMessagesCallerFromConfig() {
 	model := largemodel.New(
 		caller,
 		largemodel.WithMiddleware(
-			largemodel.NewLogMiddleware(),
+			middleware.NewLogMiddleware(),
 		),
 	)
 

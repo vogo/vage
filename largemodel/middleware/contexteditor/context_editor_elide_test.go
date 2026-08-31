@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package contexteditor
 
 import (
 	"context"
@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/vogo/vage/largemodel"
 
 	"github.com/vogo/vage/schema"
 )
@@ -62,7 +64,7 @@ func (w *memArtifactWriter) all() []memArtifactWrite {
 }
 
 func staticSID(sid string) SessionIDFunc {
-	return func(*Request) string { return sid }
+	return func(*largemodel.Request) string { return sid }
 }
 
 // TestElide_DisabledByDefault: without WithMaxBytesPerMessage no
@@ -101,7 +103,7 @@ func TestElide_HappyPath(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "anything"}}),
 		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
@@ -160,7 +162,7 @@ func TestElide_DegradeNoWriter(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
 		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
@@ -197,7 +199,7 @@ func TestElide_DegradeNoSession(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
 		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
@@ -230,7 +232,7 @@ func TestElide_DegradeWriterError(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 5000)
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
 		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
@@ -259,7 +261,7 @@ func TestElide_BelowThreshold(t *testing.T) {
 	wrapped := mw.Wrap(cap)
 
 	body := strings.Repeat("a", 100) // 100 < 10000
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{{ID: "c1", Name: "x"}}),
 		schema.NewToolResultMessage(schema.ProtocolOpenAIChat, "c1", body, false),
 	}}
@@ -294,7 +296,7 @@ func TestElide_MultipleMessages(t *testing.T) {
 	bodyB := strings.Repeat("b", 5000)
 	bodyADup := strings.Repeat("a", 5000) // identical to bodyA
 
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
 			{ID: "c1", Name: "x"},
 			{ID: "c2", Name: "x"},
@@ -347,7 +349,7 @@ func TestElide_LosesToKeepLastK_StillReportsArtifact(t *testing.T) {
 	//                            1,2 → keep_last_k.
 	body0 := strings.Repeat("a", 5000)
 	short := strings.Repeat("b", 100)
-	req := &Request{Model: "test", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "test", Messages: []schema.Message{
 		schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", []schema.ToolCall{
 			{ID: "c1", Name: "x"},
 			{ID: "c2", Name: "x"},

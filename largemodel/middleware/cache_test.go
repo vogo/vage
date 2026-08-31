@@ -15,23 +15,25 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
 func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatResp: &Response{ID: "fresh"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "fresh"}}
 
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 	ctx := context.Background()
-	req := &Request{Model: "gpt-4", Messages: []schema.Message{
+	req := &largemodel.Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
 
@@ -50,7 +52,7 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 	}
 
 	// Hit: should NOT call through again.
-	mock.chatResp = &Response{ID: "should-not-see"}
+	mock.chatResp = &largemodel.Response{ID: "should-not-see"}
 
 	resp, err = wrapped.Call(ctx, req)
 	if err != nil {
@@ -68,21 +70,21 @@ func TestCacheMiddleware_HitAndMiss(t *testing.T) {
 
 func TestCacheMiddleware_DifferentRequests(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatResp: &Response{ID: "resp-1"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "resp-1"}}
 
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 	ctx := context.Background()
 
-	req1 := &Request{Model: "gpt-4", Messages: []schema.Message{
+	req1 := &largemodel.Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}}
-	req2 := &Request{Model: "gpt-4", Messages: []schema.Message{
+	req2 := &largemodel.Request{Model: "gpt-4", Messages: []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "world"),
 	}}
 
 	_, _ = wrapped.Call(ctx, req1)
 
-	mock.chatResp = &Response{ID: "resp-2"}
+	mock.chatResp = &largemodel.Response{ID: "resp-2"}
 
 	resp, _ := wrapped.Call(ctx, req2)
 	if resp.ID != "resp-2" {
@@ -101,17 +103,17 @@ func TestCacheMiddleware_Expiry(t *testing.T) {
 	cache := NewMapCache()
 	cache.nowFn = func() time.Time { return currentTime }
 
-	mock := &mockCompleter{chatResp: &Response{ID: "v1"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "v1"}}
 	wrapped := NewCacheMiddleware(cache, WithCacheTTL(time.Minute)).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{Model: "gpt-4"}
+	req := &largemodel.Request{Model: "gpt-4"}
 
 	_, _ = wrapped.Call(ctx, req)
 
 	// Advance past TTL.
 	currentTime = now.Add(2 * time.Minute)
-	mock.chatResp = &Response{ID: "v2"}
+	mock.chatResp = &largemodel.Response{ID: "v2"}
 
 	resp, _ := wrapped.Call(ctx, req)
 	if resp.ID != "v2" {
@@ -128,7 +130,7 @@ func TestCacheMiddleware_StreamPassthrough(t *testing.T) {
 	mock := &mockCompleter{}
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
-	_, _ = wrapped.CallStream(context.Background(), &Request{})
+	_, _ = wrapped.CallStream(context.Background(), &largemodel.Request{})
 
 	if mock.streamCalls != 1 {
 		t.Fatalf("expected 1 stream call, got %d", mock.streamCalls)
@@ -137,11 +139,11 @@ func TestCacheMiddleware_StreamPassthrough(t *testing.T) {
 
 func TestCacheMiddleware_ErrorNotCached(t *testing.T) {
 	cache := NewMapCache()
-	mock := &mockCompleter{chatErr: ErrEmptyResponse}
+	mock := &mockCompleter{chatErr: largemodel.ErrEmptyResponse}
 	wrapped := NewCacheMiddleware(cache).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{Model: "gpt-4"}
+	req := &largemodel.Request{Model: "gpt-4"}
 
 	_, err := wrapped.Call(ctx, req)
 	if err == nil {
@@ -150,7 +152,7 @@ func TestCacheMiddleware_ErrorNotCached(t *testing.T) {
 
 	// Try again; should call through (not cached).
 	mock.chatErr = nil
-	mock.chatResp = &Response{ID: "ok"}
+	mock.chatResp = &largemodel.Response{ID: "ok"}
 
 	resp, err := wrapped.Call(ctx, req)
 	if err != nil {
@@ -172,7 +174,7 @@ func TestMapCache_GetMiss(t *testing.T) {
 }
 
 func TestCacheKey_Deterministic(t *testing.T) {
-	req := &Request{
+	req := &largemodel.Request{
 		Model: "gpt-4",
 		Messages: []schema.Message{
 			schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "test"),
@@ -206,8 +208,8 @@ func TestCacheKey_DifferentTemperature(t *testing.T) {
 	temp1 := 0.2
 	temp2 := 0.9
 
-	req1 := &Request{Model: "gpt-4", Messages: base, Temperature: &temp1}
-	req2 := &Request{Model: "gpt-4", Messages: base, Temperature: &temp2}
+	req1 := &largemodel.Request{Model: "gpt-4", Messages: base, Temperature: &temp1}
+	req2 := &largemodel.Request{Model: "gpt-4", Messages: base, Temperature: &temp2}
 
 	k1, err := cacheKey(schema.ProtocolOpenAIChat, req1)
 	if err != nil {
@@ -234,7 +236,7 @@ func TestMapCache_EvictsExpired(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	resp := func(id string) *Response { return &Response{ID: id} }
+	resp := func(id string) *largemodel.Response { return &largemodel.Response{ID: id} }
 
 	c.Set(ctx, "key-a", resp("a"), ttl)
 	c.Set(ctx, "key-b", resp("b"), ttl)
@@ -280,10 +282,10 @@ func TestMapCache_EvictsOldestAtCapacity(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Hour
 
-	c.Set(ctx, "oldest", &Response{ID: "oldest"}, ttl)
-	c.Set(ctx, "middle", &Response{ID: "middle"}, ttl)
+	c.Set(ctx, "oldest", &largemodel.Response{ID: "oldest"}, ttl)
+	c.Set(ctx, "middle", &largemodel.Response{ID: "middle"}, ttl)
 	// This third Set must evict the oldest entry to stay within maxEntries=2.
-	c.Set(ctx, "newest", &Response{ID: "newest"}, ttl)
+	c.Set(ctx, "newest", &largemodel.Response{ID: "newest"}, ttl)
 
 	c.mu.RLock()
 	count := len(c.entries)
@@ -312,7 +314,7 @@ func TestNewMapCache_BackwardCompatible(t *testing.T) {
 
 	// Verify the cache is usable end-to-end without options.
 	ctx := context.Background()
-	resp := &Response{ID: "test"}
+	resp := &largemodel.Response{ID: "test"}
 	c.Set(ctx, "k", resp, time.Minute)
 
 	got, ok := c.Get(ctx, "k")
@@ -334,9 +336,9 @@ func TestCacheKey_DifferentResponseSchema(t *testing.T) {
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
-	reqNone := &Request{Model: "gpt-4", Messages: base}
-	reqA := &Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "object"}}
-	reqB := &Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "string"}}
+	reqNone := &largemodel.Request{Model: "gpt-4", Messages: base}
+	reqA := &largemodel.Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "object"}}
+	reqB := &largemodel.Request{Model: "gpt-4", Messages: base, ResponseSchema: map[string]any{"type": "string"}}
 
 	kNone, err := cacheKey(schema.ProtocolOpenAIChat, reqNone)
 	if err != nil {
@@ -370,8 +372,8 @@ func TestCacheKey_DifferentProtocol(t *testing.T) {
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
 	}
 
-	req1 := &Request{Model: "gpt-4", Messages: base}
-	req2 := &Request{Model: "gpt-4", Messages: base}
+	req1 := &largemodel.Request{Model: "gpt-4", Messages: base}
+	req2 := &largemodel.Request{Model: "gpt-4", Messages: base}
 
 	k1, err := cacheKey(schema.ProtocolOpenAIChat, req1)
 	if err != nil {

@@ -15,13 +15,15 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/vogo/vage/largemodel"
 )
 
 // ErrRateLimited is returned when a request exceeds the configured rate limit.
@@ -71,10 +73,10 @@ func NewRateLimitMiddleware(opts ...RateLimitOption) *RateLimitMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *RateLimitMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *RateLimitMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}
@@ -88,7 +90,7 @@ func (m *RateLimitMiddleware) Wrap(next Caller) Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
@@ -26,6 +26,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
@@ -35,7 +37,7 @@ func TestMetricsMiddleware_ChatCompletion(t *testing.T) {
 		events = append(events, e)
 	}
 
-	mock := &mockCompleter{chatResp: &Response{
+	mock := &mockCompleter{chatResp: &largemodel.Response{
 		ID:    "ok",
 		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
@@ -43,7 +45,7 @@ func TestMetricsMiddleware_ChatCompletion(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	resp, err := wrapped.Call(context.Background(), &Request{
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{
 		Model:    "gpt-4",
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "")},
 	})
@@ -100,7 +102,7 @@ func TestMetricsMiddleware_ChatCompletion_Error(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.Call(context.Background(), &Request{Model: "gpt-4"})
+	_, err := wrapped.Call(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -133,7 +135,7 @@ func TestMetricsMiddleware_Stream_Error(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
+	_, err := wrapped.CallStream(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -179,7 +181,7 @@ func TestMetricsMiddleware_Stream_Success(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
+	_, err := wrapped.CallStream(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,8 +228,8 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "sk-test", BaseURL: srv.URL}},
+	c, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
 	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -241,7 +243,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(c)
 
-	stream, err := wrapped.CallStream(context.Background(), &Request{
+	stream, err := wrapped.CallStream(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
 		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})
@@ -303,7 +305,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
 
-		// Stream without usage data in any chunk.
+		// largemodel.Stream without usage data in any chunk.
 		chunks := []string{
 			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}`,
 			`{"id":"1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
@@ -319,8 +321,8 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "sk-test", BaseURL: srv.URL}},
+	c, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
 	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -334,7 +336,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	mw := NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(c)
 
-	stream, err := wrapped.CallStream(context.Background(), &Request{
+	stream, err := wrapped.CallStream(context.Background(), &largemodel.Request{
 		Model:    "gpt-4o",
 		Messages: []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "Hi")},
 	})

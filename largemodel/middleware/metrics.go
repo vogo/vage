@@ -15,18 +15,16 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
-
-// DispatchFunc is the function signature for dispatching events.
-// Compatible with hook.Manager.Dispatch.
-type DispatchFunc func(ctx context.Context, event schema.Event)
 
 // MetricsMiddleware dispatches LLM call lifecycle events to an event system.
 // It accepts a DispatchFunc (e.g. hook.Manager.Dispatch) to decouple from the hook package.
@@ -45,10 +43,10 @@ func NewMetricsMiddleware(dispatch DispatchFunc) *MetricsMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *MetricsMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *MetricsMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallStart, "", "", schema.LLMCallStartData{
 				Model:    req.Model,
 				Messages: len(req.Messages),
@@ -81,7 +79,7 @@ func (m *MetricsMiddleware) Wrap(next Caller) Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallStart, "", "", schema.LLMCallStartData{
 				Model:    req.Model,
 				Messages: len(req.Messages),
@@ -105,7 +103,7 @@ func (m *MetricsMiddleware) Wrap(next Caller) Caller {
 			}
 
 			// Return a wrapped stream that emits EventLLMCallEnd with usage on close.
-			return WrapStreamClose(s, func(usage *schema.Usage) {
+			return largemodel.WrapStreamClose(s, func(usage *schema.Usage) {
 				duration := time.Since(start).Milliseconds()
 				data := schema.LLMCallEndData{
 					Model:    req.Model,

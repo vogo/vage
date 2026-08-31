@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package contexteditor
 
 import "fmt"
 

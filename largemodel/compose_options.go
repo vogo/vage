@@ -59,7 +59,7 @@ func WithRecoverTime(d time.Duration) ComposeOption {
 
 // WithAttemptObserver registers a callback invoked when each endpoint attempt
 // finishes. Observers may run concurrently when several pools are active.
-func WithAttemptObserver(fn func(AttemptResult)) ComposeOption {
+func WithAttemptObserver(fn func(router.AttemptResult)) ComposeOption {
 	return WithComposeRouterOptions(router.WithAttemptObserver(fn))
 }
 

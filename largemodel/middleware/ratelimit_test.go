@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
@@ -23,12 +23,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
 func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {
 	now := time.Now()
-	mock := &mockCompleter{chatResp: &Response{}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{}}
 
 	wrapped := NewRateLimitMiddleware(
 		WithRequestsPerMin(2),
@@ -36,7 +38,7 @@ func TestRateLimitMiddleware_RequestsPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{}
+	req := &largemodel.Request{}
 
 	// First two should succeed.
 	if _, err := wrapped.Call(ctx, req); err != nil {
@@ -58,7 +60,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	now := time.Now()
 	currentTime := now
 
-	mock := &mockCompleter{chatResp: &Response{}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{}}
 
 	wrapped := NewRateLimitMiddleware(
 		WithRequestsPerMin(1),
@@ -66,7 +68,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{}
+	req := &largemodel.Request{}
 
 	if _, err := wrapped.Call(ctx, req); err != nil {
 		t.Fatalf("call 1: unexpected error: %v", err)
@@ -88,7 +90,7 @@ func TestRateLimitMiddleware_WindowSlides(t *testing.T) {
 
 func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	now := time.Now()
-	mock := &mockCompleter{chatResp: &Response{
+	mock := &mockCompleter{chatResp: &largemodel.Response{
 		Usage: schema.Usage{TotalTokens: 600},
 	}}
 
@@ -98,7 +100,7 @@ func TestRateLimitMiddleware_TokensPerMin(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{}
+	req := &largemodel.Request{}
 
 	// First call: 600 tokens used.
 	if _, err := wrapped.Call(ctx, req); err != nil {
@@ -128,7 +130,7 @@ func TestRateLimitMiddleware_StreamRateLimit(t *testing.T) {
 	).Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{}
+	req := &largemodel.Request{}
 
 	if _, err := wrapped.CallStream(ctx, req); err != nil {
 		t.Fatalf("stream call 1: unexpected error: %v", err)
@@ -141,11 +143,11 @@ func TestRateLimitMiddleware_StreamRateLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_NoLimits(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{}}
 	wrapped := NewRateLimitMiddleware().Wrap(mock)
 
 	ctx := context.Background()
-	req := &Request{}
+	req := &largemodel.Request{}
 
 	for range 100 {
 		if _, err := wrapped.Call(ctx, req); err != nil {

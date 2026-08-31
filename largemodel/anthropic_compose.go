@@ -78,14 +78,14 @@ func NewAnthropicMessagesCallerFromBackend(backend AnthropicMessagesBackend) (Ca
 }
 
 // Stats reports endpoint health merged across the caller's pools.
-func (c *AnthropicMessagesComposeCaller) Stats() []EndpointStat {
+func (c *AnthropicMessagesComposeCaller) Stats() []router.EndpointStat {
 	return mergeEndpointStats(c.pool.snapshot(func(cc *anthropics.ComposeClient) []router.EndpointStat {
 		return cc.Stats()
 	}))
 }
 
 // EndpointStats reports endpoint health merged across the caller's pools.
-func (c *AnthropicMessagesComposeCaller) EndpointStats() []EndpointStat { return c.Stats() }
+func (c *AnthropicMessagesComposeCaller) EndpointStats() []router.EndpointStat { return c.Stats() }
 
 // anthropicComposeBackend borrows a pool for the duration of one call.
 type anthropicComposeBackend struct {
