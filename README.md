@@ -428,7 +428,8 @@ custom events as observability, never as the only trigger for a state change.
 `ask_user` (see `tool/askuser`) blocks synchronously inside a tool handler and
 is lost if the process exits before it returns — fine for a human sitting at
 a terminal, not for approval that may take hours and land on another
-machine. `WithInterruptStore` + `WithInterruptPolicy` give TaskAgent a
+machine. `taskagent.WithInterrupt` + `InterruptConfig` (or the flat
+`WithInterruptStore` + `WithInterruptPolicy` pair) give TaskAgent a
 different, resumable suspend point: when the policy flags a tool call, the
 whole batch is frozen *before* any handler runs, persisted, and the call
 returns `schema.StopReasonInterrupted` instead of executing anything.
@@ -442,8 +443,10 @@ if err != nil {
 a := taskagent.New(cfg,
 	taskagent.WithCaller(caller),
 	taskagent.WithToolRegistry(registry), // must still declare ask_user's ToolDef
-	taskagent.WithInterruptStore(store),
-	taskagent.WithInterruptToolNames("ask_user"), // or a custom taskagent.InterruptPolicy
+	taskagent.WithInterrupt(taskagent.InterruptConfig{
+		Store:     store,
+		ToolNames: []string{"ask_user"}, // or Policy: a custom taskagent.InterruptPolicy
+	}),
 )
 
 resp, _ := a.Run(ctx, req)
@@ -479,10 +482,14 @@ without asking the human again. `ResumeInterrupt` does not run the agent middlew
 chain or input guards (the original `Run` already did), starts with an empty
 run-value store (see above — nothing from the suspended run carries over),
 and requires a matching tool registry: a sibling call naming a tool the new
-process cannot execute fails before anything runs. `WithInterruptStore` and
-`WithInterruptPolicy` must be configured together — configuring only one is a
-construction-time error, not a silent no-op — and this is deliberately not a
-wrapper around `ask_user`'s blocking mode or `checkpoint`'s crash-replay
+process cannot execute fails before anything runs. Interrupt is an on/off
+unit — store and policy source must be configured together or neither, and
+the policy source is exactly one of a custom `InterruptPolicy` or
+`ToolNames`. A broken combination is rejected at construction time by
+`taskagent.NewValidated` / `QuickValidated` (as `taskagent.ErrInterruptConfig`,
+before any I/O) and at the first Run/RunStream/ResumeInterrupt preflight on
+the legacy `New` / `Quick` — never a silent no-op — and this is deliberately
+not a wrapper around `ask_user`'s blocking mode or `checkpoint`'s crash-replay
 `Resume(sessionID)`: all three answer different questions and none
 substitutes for another (see [doc/glossary.md](doc/glossary.md) — "Interrupt").
 

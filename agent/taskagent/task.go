@@ -220,11 +220,13 @@ func WithHookManager(m *hook.Manager) Option {
 }
 
 // WithInputGuards sets guards to check user input before agent processing.
+// Prefer WithGuards(GuardsConfig{...}) for the grouped form.
 func WithInputGuards(guards ...guard.Guard) Option {
 	return func(a *Agent) { a.inputGuards = guards }
 }
 
 // WithOutputGuards sets guards to check agent output before returning to the user.
+// Prefer WithGuards(GuardsConfig{...}) for the grouped form.
 func WithOutputGuards(guards ...guard.Guard) Option {
 	return func(a *Agent) { a.outputGuards = guards }
 }
@@ -233,6 +235,7 @@ func WithOutputGuards(guards ...guard.Guard) Option {
 // appended to the model message queue. Guards see messages with
 // Direction == DirectionToolResult and Metadata carrying tool_call_id /
 // tool_name. If no guards are configured the scan is skipped entirely.
+// Prefer WithGuards(GuardsConfig{...}) for the grouped form.
 func WithToolResultGuards(guards ...guard.Guard) Option {
 	return func(a *Agent) { a.toolResultGuards = guards }
 }
@@ -308,7 +311,9 @@ func WithIterationStore(s checkpoint.IterationStore) Option {
 // batches — see vage/interrupt. It is one half of the configuration
 // ResumeInterrupt needs; WithInterruptPolicy is the other. Configuring
 // only one of the two is a configuration error surfaced at the first
-// Run/RunStream call (see checkInterruptConfig), not silently ignored.
+// Run/RunStream call (see checkInterruptConfig), or at construction time
+// by NewValidated. Prefer WithInterrupt(InterruptConfig{...}) for the
+// grouped form.
 func WithInterruptStore(s interrupt.Store) Option {
 	return func(a *Agent) { a.interruptStore = s }
 }
@@ -318,7 +323,7 @@ func WithInterruptStore(s interrupt.Store) Option {
 // handlers run. nil (the default) disables the interrupt choke point
 // entirely — every batch executes exactly as before this option existed.
 // See WithInterruptToolNames for the common "flag these tool names"
-// shortcut.
+// shortcut, and WithInterrupt(InterruptConfig{...}) for the grouped form.
 func WithInterruptPolicy(p InterruptPolicy) Option {
 	return func(a *Agent) { a.interruptPolicy = p }
 }
@@ -328,22 +333,17 @@ func WithInterruptPolicy(p InterruptPolicy) Option {
 // common case of "pause whenever the model calls ask_user" without having
 // to implement InterruptPolicy. Calling WithInterruptPolicy afterward
 // replaces it; option order follows the package's normal
-// "later-applied-wins" rule.
+// "later-applied-wins" rule. Prefer WithInterrupt(InterruptConfig{...})
+// for the grouped form.
 func WithInterruptToolNames(names ...string) Option {
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		if n == "" {
-			continue
-		}
-		set[n] = struct{}{}
-	}
-	return func(a *Agent) { a.interruptPolicy = interruptPolicyByToolName(set) }
+	return func(a *Agent) { a.interruptPolicy = interruptPolicyByToolName(toolNameSet(names)) }
 }
 
 // WithInterruptLeaseTTL overrides how long ResumeInterrupt holds the store
 // lease (see interrupt.Store.AcquireLease) before another attempt may
 // reclaim it after a crash. Defaults to defaultInterruptLeaseTTL (5
-// minutes). Values <= 0 are ignored.
+// minutes). Values <= 0 are ignored. Prefer
+// WithInterrupt(InterruptConfig{...}) for the grouped form.
 func WithInterruptLeaseTTL(d time.Duration) Option {
 	return func(a *Agent) {
 		if d > 0 {
@@ -416,8 +416,40 @@ func WithExtraSources(srcs ...vctx.Source) Option {
 	}
 }
 
-// New creates a new Agent with the given config and options.
+// New creates a new Agent with the given config and options. It never
+// fails at construction: a misconfigured interrupt pair surfaces at the
+// first Run/RunStream/ResumeInterrupt call. Use NewValidated when the
+// assembly failure should be diagnosed earlier.
 func New(cfg agent.Config, opts ...Option) *Agent {
+	return newAgent(cfg, opts...)
+}
+
+// NewValidated is the construction-time-checking counterpart to New: it
+// builds the same agent (same defaults, option order, protocol derivation
+// and ContextEditor wrapping) and then verifies the final configuration.
+// A broken interrupt pair — store without policy, policy without store, or
+// both a custom policy and tool names at once — is returned here as
+// ErrInterruptConfig, before any model, store or tool I/O happens, instead
+// of surfacing at the first Run/RunStream/ResumeInterrupt call.
+//
+// New keeps its single-return signature for compatibility; reach for
+// NewValidated whenever a diagnostic assembly-time failure is preferable to
+// a first-run failure.
+func NewValidated(cfg agent.Config, opts ...Option) (*Agent, error) {
+	a := newAgent(cfg, opts...)
+	if err := a.checkInterruptConfig(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// newAgent is the single construction path shared by New and NewValidated:
+// it seeds the defaults, applies every option in order, then performs the
+// caller-protocol adoption and ContextEditor wrapping that must happen once
+// all options have resolved. It deliberately performs no validation — that
+// is NewValidated's job — so the two constructors cannot drift on defaults
+// or derivation.
+func newAgent(cfg agent.Config, opts ...Option) *Agent {
 	a := &Agent{
 		Base:                 agent.NewBase(cfg),
 		maxIterations:        defaultMaxIterations,

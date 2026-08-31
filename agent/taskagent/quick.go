@@ -51,3 +51,21 @@ func Quick(id, name string, caller largemodel.Caller, model, systemPrompt string
 		}, opts...)...,
 	)
 }
+
+// QuickValidated is the validated counterpart to Quick: it expands to the
+// same NewValidated call the equivalent New call would, so the three preset
+// options are applied first and trailing opts win. Unlike Quick it returns
+// a construction-time ErrInterruptConfig for a broken interrupt pair (see
+// NewValidated); the returned agent is nil on error. Migration from Quick
+// is a mechanical signature change — handle the error instead of discarding
+// it.
+func QuickValidated(id, name string, caller largemodel.Caller, model, systemPrompt string, opts ...Option) (*Agent, error) {
+	return NewValidated(
+		agent.Config{ID: id, Name: name},
+		append([]Option{
+			WithCaller(caller),
+			WithModel(model),
+			WithSystemPrompt(prompt.StringPrompt(systemPrompt)),
+		}, opts...)...,
+	)
+}

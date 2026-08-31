@@ -28,6 +28,30 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
+// GuardsConfig aggregates the three execution-position guard lists —
+// input, output, tool-result — into one reviewable unit for WithGuards. It
+// only organizes assembly: the three chains stay separate, keep their
+// order and their Pass/Rewrite/Block semantics, and are still each
+// executed at their existing position.
+type GuardsConfig struct {
+	Input      []guard.Guard
+	Output     []guard.Guard
+	ToolResult []guard.Guard
+}
+
+// WithGuards assigns the three guard lists as one unit, replacing each list
+// at its position in the option list. Equivalent to calling the three
+// single-list options WithInputGuards / WithOutputGuards /
+// WithToolResultGuards in any order — a later WithGuards or a later
+// single-list option wins for the lists it touches.
+func WithGuards(c GuardsConfig) Option {
+	return func(a *Agent) {
+		a.inputGuards = c.Input
+		a.outputGuards = c.Output
+		a.toolResultGuards = c.ToolResult
+	}
+}
+
 // runInputGuards checks user input through input guards.
 // Returns the (possibly rewritten) text content, or a BlockedError.
 func (a *Agent) runInputGuards(ctx context.Context, req *schema.RunRequest) error {
