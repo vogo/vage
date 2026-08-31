@@ -65,6 +65,8 @@
 
 ## Agent 运行中间件链
 
+完整 ReAct 拦截点选型与执行顺序见 [agent-core-design.md § ReAct interception point decision guide](agent-core-design.md#react-interception-point-decision-guide)。
+
 一次 Run 只有**一个装饰器接缝**。四个相邻扩展点按层级分工,各自只做自己的事:
 
 | 层 | 机制 | 做什么 | 不做什么 |

@@ -61,6 +61,99 @@
 - **所有权**:Payload 原样保存、不复制。发射后继续并发修改被引用对象会与消费者产生竞态,同步由调用方负责。
 - **顺序**:工具批在调用 handler 前于单一注入点绑定 SessionID 与 Emitter,所以 handler 内同步发出的事件进入同一条 `RunStream`,且落在该工具的 `tool_call_start` 与 `tool_call_end` 之间。单个工具内按调用顺序投递;**并行工具之间可以交错**,不新增跨工具的确定性排序承诺,需要关联就在 Payload 里自带关联字段。
 
+## ReAct interception point decision guide
+
+Behavioral acceptance criteria for each plane live in [agent-core.md](agent-core.md). This section is the integrator **selection and ordering** guide: when several planes can block or rewrite tool execution, which one to choose and how they nest on a single TaskAgent run.
+
+A normal `Run` / `RunStream` flows through preflight (input guards, then context build), one pass of `agent.Middleware`, the shared `runReactLoop`, and post-chain finalization (output guards, memory, `AgentEnd`). `Resume` / `ResumeInterrupt` re-enter the loop and finalize path but deliberately bypass `agent.Middleware`.
+
+### Execution order
+
+```mermaid
+flowchart TD
+  subgraph preflight [Preflight — before agent.Middleware]
+    IG[input guards]
+    PC[prepareContext]
+    IG --> PC
+  end
+
+  subgraph envelope [Run envelope — once per Run/Stream]
+    AM[agent.Middleware]
+  end
+
+  subgraph loop [runReactLoop — per iteration]
+    BC[budget check]
+    LM[largemodel.Middleware + LLM call]
+    IP[InterruptPolicy]
+    ETB[executeToolBatch]
+    EM[tool.ExecuteMiddleware]
+    TRG[tool-result guards]
+    RD[ReturnDirect check]
+    BC --> LM
+    LM -->|tool calls| IP
+    IP -->|no hit| ETB
+    ETB --> EM --> TRG --> RD
+    RD -->|continue| BC
+  end
+
+  subgraph terminal [After agent.Middleware]
+    OG[output guards]
+    MEM[memory + AgentEnd]
+    OG --> MEM
+  end
+
+  subgraph side [Side channels — no result change]
+    HK[hook.Hook]
+    SM[StreamMiddleware — stream only]
+  end
+
+  preflight --> envelope
+  envelope --> loop
+  loop --> terminal
+  loop -. events .-> HK
+  loop -. stream events .-> SM
+```
+
+The draft-vs-final split still applies: middleware produces a draft `RunResponse`; output guards and memory promotion run only after the chain returns. The framework keeps the loop’s actual `stopReason` separate from the middleware-reported one so partial results (budget, max iterations, interrupt) do not inherit a forged stop reason for budget events or guard leniency. On interrupt suspend, request messages are committed but the open assistant/tool-call pair is withheld until `ResumeInterrupt` completes — see the interrupt design bullets above.
+
+### Decision table
+
+| Plane | Config / type | Trigger | Can change outcome? | Tool execution effect | Recoverability | Typical use | Do not use for |
+|-------|---------------|---------|---------------------|----------------------|----------------|-------------|----------------|
+| Input guard | `taskagent.WithInputGuards` / `GuardsConfig.Input` | Preflight, once per Run/Stream/Resume entry, on the last user message **before** `prepareContext` | Block fails the run; Rewrite mutates `req.Messages` in place; Pass observes only | None — runs before any model or tool work | Same-run only (no cross-process state) | PII scrubbing, prompt-injection checks, input policy on user text | Model-visible context built from session memory or `vctx` (use those sources or Rewrite here, not middleware after build); per-tool policy |
+| Agent run middleware | `agent.Middleware`, `taskagent.WithMiddleware` | Once per `Run` / `RunStream`, wrapping the entire `runReactLoop` | Short-circuit (skip loop), Rewrite/replace draft response, or observe | Short-circuit: no model calls and no tools; otherwise none at this layer | Same-run only; **`Resume` / `ResumeInterrupt` bypass this chain** | Audit, tenancy, canned answers, whole-run response rewriting | Per-iteration caching or rate limits (`largemodel.Middleware`); per-tool deny/rewrite (`ExecuteMiddleware`); blocking a single tool batch (`InterruptPolicy`); changing model input after context build |
+| Model call middleware | `largemodel.WithMiddleware` on the TaskAgent `Caller` | Every `Caller.Call` / `CallStream` inside each ReAct iteration | Observe, rewrite request/response, or fail the call (errors propagate to the loop) | None — affects LLM I/O only | Same-run only | Caching, rate limiting, timeouts, call logging/metrics on each model round | Whole-run shortcuts; tool dispatch; retry/failover (belongs in `largemodel/router` endpoint pool) |
+| Interrupt policy | `taskagent.WithInterruptPolicy` (+ `WithInterruptStore`) | After assistant message with tool calls and post-call budget check, **before** `executeToolBatch` — whole batch | Durable suspend with `StopReasonInterrupted`; freezes every call in the batch | **Prevents dispatch** — no handler runs, no `tool_call_start/end` | **Cross-process** — `ResumeInterrupt` with decisions | Human-in-the-loop approval, compliance gates that must survive process restarts | Per-call deny without suspend; post-hoc result scrubbing; replacing tool output after execution |
+| Tool execute middleware | `tool.WithExecuteMiddleware` on the Registry | Per tool call inside `Registry.Execute`, before/after the handler | Deny or synthesize (skip handler), rewrite args/result/error, or observe | **Pre-dispatch deny/synthesize** or run handler then rewrite | Same-run only (unless the handler itself is durable) | AuthZ per tool, arg normalization, audit around dispatch, synthetic results for denied calls | Whole-batch freeze with resume (`InterruptPolicy`); scanning result text for injection (`tool-result guard`); ending the agent run (`ReturnDirect` / run middleware) |
+| Tool-result guard | `taskagent.WithToolResultGuards` / `GuardsConfig.ToolResult` | After handler, inside `executeToolBatch`, on each successful text result | Rewrite result text, Block → `ErrorResult` seen by model, Pass/Log observe | **Run handler, then replace or error the result** | Same-run only | Tool output injection detection, redaction of secrets in tool text | Preventing side effects before run (use `ExecuteMiddleware` deny or `InterruptPolicy`); skipping the next LLM round (`ReturnDirect`) |
+| ReturnDirect | `taskagent.WithReturnDirectTools` | After the **full** tool batch completes and tool-result guards run | Ends ReAct loop with `StopReasonComplete`; first configured-and-successful call in model `ToolCalls` order wins | **Batch runs to completion**, then skips the next LLM iteration | Same-run only (normal finalize path) | Tools whose successful output is the final answer (lookup, calculator, retrieval) | Blocking or rewriting individual calls; durable suspend; guard semantics (failures and Block never short-circuit) |
+| Output guard | `taskagent.WithOutputGuards` / `GuardsConfig.Output` | After `agent.Middleware` returns, in `finalizeRun` / `finalizeStream` on the draft response messages | Block, Rewrite final text, or Pass | None — all tools for the run have already executed | Same-run only | Final answer policy, output redaction before user/memory | Input checking; tool-result injection (use tool-result guards); partial-result hard fail on sync (Block downgrades to warn when `partialResult()`; stream still errors on Block for normal completion) |
+
+### Three ways to stop or reshape tool work
+
+These three planes are often confused because each can prevent or alter what the model sees from tools, but timing, events, and recoverability differ:
+
+| | InterruptPolicy | ExecuteMiddleware | Tool-result guard (Block) |
+|---|-----------------|-------------------|---------------------------|
+| **When** | Before any handler in the batch | Per call, before handler | After handler returns |
+| **Scope** | Whole batch frozen | Single call | Single call result text |
+| **Side effects** | None — handlers never run | Handler skipped if denied | Handler already ran |
+| **Model sees** | Suspend — no tool messages yet | Synthetic or denied result | `ErrorResult` with block reason |
+| **Resume** | `ResumeInterrupt` cross-process | N/A | N/A |
+
+**ReturnDirect** is not a guard: it is post-batch control flow. The batch always finishes (including failed siblings); only then may the loop exit early without another model turn. Output guards still run on the synthesized final message.
+
+### Neighbouring seams (not counted in the eight)
+
+These paths run alongside the table above. They observe or transform delivery but **cannot** change `RunResponse`, skip model/tool work, or substitute middleware outcomes.
+
+| Seam | Config | Role | Boundary |
+|------|--------|------|----------|
+| `hook.Hook` | `taskagent.WithHookManager` / hook registration | Lifecycle event observation via `dispatch` | Read-only; no result mutation |
+| `agent.StreamMiddleware` | Stream pipeline on `RunStream` | Intercept/transform/drop events bound for the stream consumer | Stream-only; does not alter run result or tool/model scheduling |
+
+For layer-level summaries and migration notes, see [agent-core.md § Agent 运行中间件链](agent-core.md#agent-运行中间件链).
+
 ## LLM 路由输出契约
 
 `LLMFunc` 要求模型仅回一个索引数字;解析失败 / 越界 / 调用失败时按 fallback 索引兜底(fallback <0 则报错)。这是把不可靠的自然语言输出收敛为确定分支的关键约束。
