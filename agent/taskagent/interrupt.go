@@ -58,8 +58,8 @@ var (
 // option state: store and policy are either both configured or neither, and
 // a policy comes from exactly one source (custom policy or tool names). It
 // is the single validation shared by NewValidated / QuickValidated at
-// construction time and by preflightRun (Run/RunStream/Resume) plus
-// ResumeInterrupt as the runtime defense.
+// construction time and by preflightEntry on every run-class entry as the
+// runtime defense.
 func (a *Agent) checkInterruptConfig() error {
 	switch {
 	case a.interruptStore == nil && a.interruptPolicy == nil:
@@ -376,22 +376,13 @@ func generateLeaseOwner() string {
 // guards; the final response still passes through output guards, message
 // persistence and the terminal event path.
 func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptRequest) (*schema.RunResponse, error) {
-	// Same preflight Run/Resume perform, and for the same reason — but it
-	// matters more here: a resumer reached mid-way through this method has
-	// already taken the lease and possibly executed sibling tools, side
-	// effects an incompletely configured process must never pay for.
-	if a.caller == nil {
-		return nil, errors.New("vage: model caller is required")
-	}
-	if err := a.checkInterruptConfig(); err != nil {
+	policy := policyResume
+
+	ctx = bindRunValues(ctx, policy)
+
+	if _, err := a.preflightEntry(ctx, policy, nil); err != nil {
 		return nil, err
 	}
-
-	// A resume is a new local entry point: it gets its own empty Run-value
-	// store, same as Run/RunStream/Resume. Nothing from the suspended
-	// process's run values is — or could be — carried over; see
-	// WithRunValues' scoping contract.
-	ctx = schema.WithRunValues(ctx)
 
 	if req.InterruptID == "" {
 		return nil, fmt.Errorf("%w: interrupt id is empty", interrupt.ErrInvalidArgument)

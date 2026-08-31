@@ -31,16 +31,18 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// preflightRun performs the pre-context preparation shared by Run and
-// RunStream: it validates the Caller, runs input guards (which may
-// rewrite the request in place), and resolves the effective run parameters.
+// preflightEntry performs universal and policy-gated preparation shared by
+// all run-class entries. Caller validation and interrupt-config checks always
+// run; input guards and run-parameter resolution run only when the entry
+// policy and request shape allow it.
 //
 // It deliberately stops before building the context so callers can place
 // their mode-specific AgentStart emission at the right point relative to
 // EventContextBuilt: Run dispatches AgentStart before prepareContext, while
 // RunStream builds the context up front and sends AgentStart inside the
-// stream body.
-func (a *Agent) preflightRun(ctx context.Context, req *schema.RunRequest) (runParams, error) {
+// stream body. Resume-only steps (checkpoint load, interrupt store access,
+// lease acquisition) stay in each entry after this returns.
+func (a *Agent) preflightEntry(ctx context.Context, policy entryPolicy, req *schema.RunRequest) (runParams, error) {
 	if a.caller == nil {
 		return runParams{}, errors.New("vage: model caller is required")
 	}
@@ -49,11 +51,17 @@ func (a *Agent) preflightRun(ctx context.Context, req *schema.RunRequest) (runPa
 		return runParams{}, err
 	}
 
-	if err := a.runInputGuards(ctx, req); err != nil {
-		return runParams{}, err
+	if policy.inputGuards && req != nil {
+		if err := a.runInputGuards(ctx, req); err != nil {
+			return runParams{}, err
+		}
 	}
 
-	return a.resolveRunParams(req.Options), nil
+	if req != nil {
+		return a.resolveRunParams(req.Options), nil
+	}
+
+	return runParams{}, nil
 }
 
 // prepareContext performs the context-building preparation shared by Run and

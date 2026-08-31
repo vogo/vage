@@ -136,15 +136,11 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // mid-run would let a short-circuiting middleware discard work the checkpoint
 // already paid for.
 func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunResponse, error) {
-	// A resume is a new in-process run: it gets its own empty store. Run
-	// values are never checkpointed, so nothing from the interrupted run is
-	// restored here.
-	ctx = schema.WithRunValues(ctx)
+	policy := policyResume
 
-	if a.caller == nil {
-		return nil, errors.New("vage: model caller is required")
-	}
-	if err := a.checkInterruptConfig(); err != nil {
+	ctx = bindRunValues(ctx, policy)
+
+	if _, err := a.preflightEntry(ctx, policy, nil); err != nil {
 		return nil, err
 	}
 	if a.iterationStore == nil {
