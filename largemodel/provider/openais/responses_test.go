@@ -128,7 +128,7 @@ func TestResponses_RoutesAndOverridesTheModel(t *testing.T) {
 
 	request := responsesRequest()
 
-	resp, err := cc.Responses(context.Background(), request)
+	resp, err := cc.responses(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestResponses_FailsOverAndAttributesEveryAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := cc.Responses(context.Background(), responsesRequest())
+	resp, err := cc.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestResponses_AllFailAggregatesByAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = cc.Responses(context.Background(), responsesRequest())
+	_, err = cc.responses(context.Background(), responsesRequest())
 
 	var multi *router.MultiError
 	if !errors.As(err, &multi) {
@@ -216,7 +216,7 @@ func TestResponsesStream_FailsOverOnEstablishment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream, err := cc.ResponsesStream(context.Background(), responsesRequest())
+	stream, err := cc.responsesStream(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestResponses_EveryStrategyFailsOverToTheHealthyEndpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			resp, err := cc.Responses(context.Background(), responsesRequest())
+			resp, err := cc.responses(context.Background(), responsesRequest())
 			if err != nil {
 				t.Fatalf("%s: expected failover to succeed, got %v", strategy, err)
 			}
@@ -296,13 +296,13 @@ func TestResponses_SuccessiveCallsStayOnOneBackend(t *testing.T) {
 
 	ctx := context.Background()
 
-	first, err := cc.Responses(ctx, responsesRequest())
+	first, err := cc.responses(ctx, responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for range 10 {
-		resp, err := cc.Responses(ctx, responsesRequest())
+		resp, err := cc.responses(ctx, responsesRequest())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +358,7 @@ func TestResponses_HealthIsSharedWithChat(t *testing.T) {
 	}
 
 	// ...and the Responses call sees that same state, so it never contacts it.
-	resp, err := cc.Responses(context.Background(), responsesRequest())
+	resp, err := cc.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestResponses_SkipsEntriesWithoutTheMethodSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := cc.Responses(context.Background(), responsesRequest())
+	resp, err := cc.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestResponses_RoutesAroundAChatOnlyActiveEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := cc.Responses(context.Background(), responsesRequest())
+	resp, err := cc.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestResponses_NoCapableEndpointFailsFast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = cc.Responses(context.Background(), responsesRequest())
+	_, err = cc.responses(context.Background(), responsesRequest())
 
 	if !errors.Is(err, router.ErrCapabilityNotSatisfied) {
 		t.Fatalf("expected router.ErrCapabilityNotSatisfied, got %v", err)
@@ -476,8 +476,8 @@ func TestResponses_NoCapableEndpointFailsFast(t *testing.T) {
 		t.Fatalf("expected *router.CapabilityError, got %T", err)
 	}
 
-	if len(capErr.Required) != 1 || capErr.Required[0] != CapabilityResponses {
-		t.Fatalf("required = %v, want [%s]", capErr.Required, CapabilityResponses)
+	if len(capErr.Required) != 1 || capErr.Required[0] != capabilityResponses {
+		t.Fatalf("required = %v, want [%s]", capErr.Required, capabilityResponses)
 	}
 
 	if len(capErr.Considered) != 1 || capErr.Considered[0] != "only" {
@@ -485,7 +485,7 @@ func TestResponses_NoCapableEndpointFailsFast(t *testing.T) {
 	}
 
 	// The streaming form fails the same way.
-	if _, err := cc.ResponsesStream(context.Background(), responsesRequest()); !errors.Is(err, router.ErrCapabilityNotSatisfied) {
+	if _, err := cc.responsesStream(context.Background(), responsesRequest()); !errors.Is(err, router.ErrCapabilityNotSatisfied) {
 		t.Fatalf("stream: expected router.ErrCapabilityNotSatisfied, got %v", err)
 	}
 }
@@ -518,7 +518,7 @@ func TestResponses_CapabilityFilterUsesResponsesFields(t *testing.T) {
 	request := responsesRequest()
 	request.Tools = []openai.ResponseTool{{Type: "function", Name: "get_weather"}}
 
-	resp, err := cc.Responses(context.Background(), request)
+	resp, err := cc.responses(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func TestResponses_VisionRequirementFromInputImage(t *testing.T) {
 		},
 	})
 
-	_, err = cc.Responses(context.Background(), request)
+	_, err = cc.responses(context.Background(), request)
 
 	var capErr *router.CapabilityError
 	if !errors.As(err, &capErr) {

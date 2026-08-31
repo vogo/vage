@@ -20,8 +20,6 @@ package largemodel
 import (
 	"time"
 
-	"github.com/vogo/aimodel/anthropic"
-	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/largemodel/router"
 )
 
@@ -40,8 +38,10 @@ type composeConfig struct {
 	// Provider client options reach the single-endpoint constructors, which
 	// own the client they build. The declaratively built pools take their
 	// connection details from their endpoint specs instead, and ignore these.
-	openAIClientOpts    []openai.ClientOption
-	anthropicClientOpts []anthropic.ClientOption
+	// Each provider's options are held in a struct that provider's compose
+	// glue owns, so no vendor type reaches this neutral file.
+	openAI    openAIComposeOptions
+	anthropic anthropicComposeOptions
 }
 
 // WithRetryPolicy sets the in-call retry policy for each router pool the
@@ -92,25 +92,6 @@ func WithComposeRouterOptions(opts ...router.Option) ComposeOption {
 func WithComposeConcurrency(n int) ComposeOption {
 	return func(c *composeConfig) {
 		c.concurrency = n
-	}
-}
-
-// WithOpenAIClientOptions passes provider client options — base URL overrides,
-// timeouts, custom headers — to the clients [NewOpenAIChatCallerFromConfig]
-// builds. It has no effect on a pool built from endpoint specs, which carries
-// its connection details per endpoint.
-func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
-	return func(c *composeConfig) {
-		c.openAIClientOpts = append(c.openAIClientOpts, opts...)
-	}
-}
-
-// WithAnthropicClientOptions is the Anthropic counterpart of
-// [WithOpenAIClientOptions], for the clients [NewAnthropicMessagesCallerFromConfig]
-// builds.
-func WithAnthropicClientOptions(opts ...anthropic.ClientOption) ComposeOption {
-	return func(c *composeConfig) {
-		c.anthropicClientOpts = append(c.anthropicClientOpts, opts...)
 	}
 }
 

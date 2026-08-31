@@ -19,6 +19,7 @@ package largemodel
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/vogo/aimodel/anthropic"
 	"github.com/vogo/vage/largemodel/provider/anthropics"
@@ -60,7 +61,7 @@ func newAnthropicComposeCaller(
 	}
 
 	return &AnthropicMessagesComposeCaller{
-		caller: &anthropicMessagesCaller{client: &anthropicComposeBackend{pool: pool}},
+		caller: newAnthropicMessagesCaller(&anthropicComposeBackend{pool: pool}),
 		pool:   pool,
 	}, nil
 }
@@ -73,7 +74,7 @@ func NewAnthropicMessagesCallerFromBackend(backend AnthropicMessagesBackend) (Ca
 		return nil, ErrNoBackend
 	}
 
-	return &anthropicMessagesCaller{client: backend}, nil
+	return newAnthropicMessagesCaller(backend), nil
 }
 
 // Stats reports endpoint health merged across the caller's pools.
@@ -118,6 +119,101 @@ func (b *anthropicComposeBackend) MessagesStream(
 	defer b.pool.release(client)
 
 	return client.MessagesStream(ctx, request)
+}
+
+// anthropicComposeOptions carries the Anthropic client options a caller
+// supplied for the clients this file builds, keeping the vendor option type on
+// this side of the provider boundary.
+type anthropicComposeOptions struct {
+	clientOpts []anthropic.ClientOption
+}
+
+// WithAnthropicClientOptions is the Anthropic counterpart of
+// [WithOpenAIClientOptions], for the clients [NewAnthropicMessagesCallerFromConfig]
+// builds.
+func WithAnthropicClientOptions(opts ...anthropic.ClientOption) ComposeOption {
+	return func(c *composeConfig) {
+		c.anthropic.clientOpts = append(c.anthropic.clientOpts, opts...)
+	}
+}
+
+// NewAnthropicMessagesCallerFromConfig builds a Caller over one or more
+// Anthropic-compatible endpoints described by cfg.
+func NewAnthropicMessagesCallerFromConfig(
+	cfg AnthropicConfig, opts ...CallerOption,
+) (*AnthropicMessagesComposeCaller, error) {
+	if len(cfg.Endpoints) == 0 {
+		return nil, fmt.Errorf("vage: at least one Anthropic endpoint is required")
+	}
+
+	composeCfg := newComposeConfig(opts...)
+
+	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
+		return buildAnthropicComposeClient(cfg, composeCfg)
+	}, composeCfg)
+}
+
+// buildAnthropicComposeClient turns the neutral endpoint configuration into a
+// provider pool, constructing clients here only when caller-supplied client
+// options leave the declarative path unable to express the endpoint.
+func buildAnthropicComposeClient(cfg AnthropicConfig, composeCfg *composeConfig) (*anthropics.ComposeClient, error) {
+	strategy := strategyOrFailover(cfg.Strategy)
+
+	if len(composeCfg.anthropic.clientOpts) == 0 {
+		return anthropics.NewFromEndpoints(strategy, toAnthropicSpecs(cfg.Endpoints), composeCfg.routerOpts...)
+	}
+
+	entries := make([]anthropics.ModelEntry, len(cfg.Endpoints))
+
+	for i, e := range cfg.Endpoints {
+		clientOpts := composeCfg.anthropic.clientOpts
+		if e.BaseURL != "" {
+			clientOpts = append([]anthropic.ClientOption{anthropic.WithBaseURL(e.BaseURL)}, clientOpts...)
+		}
+
+		if e.Version != "" {
+			clientOpts = append(clientOpts, anthropic.WithVersion(e.Version))
+		}
+
+		if len(e.Beta) > 0 {
+			clientOpts = append(clientOpts, anthropic.WithBeta(e.Beta...))
+		}
+
+		entries[i] = anthropics.ModelEntry{
+			Name:    e.Model,
+			Client:  anthropic.NewClient(e.APIKey, clientOpts...),
+			Weight:  e.Weight,
+			Alias:   e.Alias,
+			Tags:    e.Tags,
+			Cost:    e.Cost,
+			Latency: e.Latency,
+		}
+	}
+
+	return anthropics.NewComposeClient(strategy, entries, composeCfg.routerOpts...)
+}
+
+// toAnthropicSpecs maps the neutral endpoint configuration onto the provider's
+// own endpoint specs.
+func toAnthropicSpecs(endpoints []AnthropicEndpoint) []anthropics.EndpointSpec {
+	specs := make([]anthropics.EndpointSpec, len(endpoints))
+
+	for i, e := range endpoints {
+		specs[i] = anthropics.EndpointSpec{
+			BaseURL: e.BaseURL,
+			APIKey:  e.APIKey,
+			Model:   e.Model,
+			Alias:   e.Alias,
+			Weight:  e.Weight,
+			Tags:    e.Tags,
+			Version: e.Version,
+			Beta:    e.Beta,
+			Cost:    e.Cost,
+			Latency: e.Latency,
+		}
+	}
+
+	return specs
 }
 
 var (

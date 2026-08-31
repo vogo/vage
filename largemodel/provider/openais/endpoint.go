@@ -32,9 +32,9 @@ type ModelEntry struct {
 	// whichever OpenAI-wire request the call carries. If empty, the request's
 	// own model is left in place.
 	Name string
-	// Client is the underlying API client for this backend. Implementing
-	// [Responder] as well as [ChatCompleter] — as *openai.Client and a nested
-	// *ComposeClient both do — additionally enrols it in Responses dispatch.
+	// Client is the underlying API client for this backend. Clients that also
+	// implement the internal Responses route — as *openai.Client and a nested
+	// *ComposeClient both do — additionally enrol in Responses dispatch.
 	Client ChatCompleter
 	// Weight is used by router.StrategyWeight. Zero is treated as 1.
 	Weight int
@@ -68,8 +68,8 @@ type ModelEntry struct {
 // connection coordinates, the model name sent to the backend, and the
 // endpoint's operational identity and routing metadata. NewFromEndpoints builds
 // an independent openai.Client per spec, so N endpoints no longer require N
-// copies of construction code. Those clients implement [Responder] too, so a
-// declaratively built pool serves both interaction forms.
+// copies of construction code. Those clients can also serve the internal
+// Responses route, so a declaratively built pool covers both interaction forms.
 type EndpointSpec struct {
 	// BaseURL is the endpoint's API base URL.
 	BaseURL string

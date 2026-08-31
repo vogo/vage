@@ -24,6 +24,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -93,6 +94,118 @@ func hasProviderImport(imports map[string]bool, want string) bool {
 	}
 
 	return false
+}
+
+// rootVendorImportWhitelist is the exhaustive, per-file list of root-package
+// production files allowed to import an aimodel vendor package, together with
+// the exact imports each may take.
+//
+// It is a controlled exception, not an extension point. These two files are
+// the compose glue: they bind a provider's routed pool to the root package's
+// backend interfaces, and the method sets they implement are spelled in vendor
+// wire types, so the import cannot be avoided there. Everything else that
+// depends on a vendor wire shape — request assembly, response and usage
+// normalization, stream decoding, error classification, capability derivation —
+// belongs to largemodel/provider/{openais,anthropics}.
+//
+// Adding an entry means widening the provider boundary and needs boundary
+// review, so the map is keyed by exact file name with an exact import set:
+// no directory rule, no prefix, no wildcard. Routing a vendor import through
+// another root file, or re-exporting it indirectly, is the thing this gate
+// exists to catch.
+var rootVendorImportWhitelist = map[string]map[string]bool{
+	"openai_compose.go":    {"github.com/vogo/aimodel/openai": true},
+	"anthropic_compose.go": {"github.com/vogo/aimodel/anthropic": true},
+}
+
+// vendorImportPaths are the aimodel protocol packages the root package must not
+// reach for outside the whitelist.
+var vendorImportPaths = []string{
+	"github.com/vogo/aimodel/openai",
+	"github.com/vogo/aimodel/anthropic",
+}
+
+// TestRootPackageVendorImportsAreWhitelisted verifies the largemodel root
+// package holds no vendor protocol knowledge: only the listed compose glue
+// files may name an aimodel vendor package, and only the import listed for
+// them.
+//
+// Test files are deliberately not checked. A test may drive a vendor wire
+// shape end to end, and doing so says nothing about where production knowledge
+// lives — nor can a test import be used to widen this whitelist.
+func TestRootPackageVendorImportsAreWhitelisted(t *testing.T) {
+	fset := token.NewFileSet()
+	files := parsePackageFiles(t, fset, ".", parser.ImportsOnly)
+
+	for path, file := range files {
+		name := filepath.Base(path)
+		allowed := rootVendorImportWhitelist[name]
+
+		for _, imp := range file.Imports {
+			importPath, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
+			}
+
+			if !isVendorImport(importPath) {
+				continue
+			}
+
+			if !allowed[importPath] {
+				t.Errorf("%s: root package file must not import %q; "+
+					"vendor wire knowledge belongs in largemodel/provider, and the compose-glue "+
+					"whitelist in this test is the only exception", name, importPath)
+			}
+		}
+	}
+}
+
+// TestRootVendorImportWhitelistIsExact verifies every whitelisted file exists
+// and still takes the vendor import it was granted, so an entry cannot outlive
+// the reason it was added.
+func TestRootVendorImportWhitelistIsExact(t *testing.T) {
+	fset := token.NewFileSet()
+	files := parsePackageFiles(t, fset, ".", parser.ImportsOnly)
+
+	byName := map[string]*ast.File{}
+	for path, file := range files {
+		byName[filepath.Base(path)] = file
+	}
+
+	for name, allowed := range rootVendorImportWhitelist {
+		file, ok := byName[name]
+		if !ok {
+			t.Errorf("whitelisted file %s no longer exists; drop its entry", name)
+
+			continue
+		}
+
+		for want := range allowed {
+			found := false
+
+			for _, imp := range file.Imports {
+				importPath, err := strconv.Unquote(imp.Path.Value)
+				if err != nil {
+					t.Fatalf("unquote import %s: %v", imp.Path.Value, err)
+				}
+
+				if importPath == want {
+					found = true
+
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("%s no longer imports %q; drop the whitelist entry rather than keeping "+
+					"a licence to import it again", name, want)
+			}
+		}
+	}
+}
+
+func isVendorImport(path string) bool {
+	return slices.Contains(vendorImportPaths, path)
 }
 
 // TestRouterCoreImportsNoProvider verifies the routing core is protocol-neutral.

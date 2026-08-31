@@ -32,10 +32,10 @@ const (
 	CapabilityTools = "tools"
 	// CapabilityVision marks image input.
 	CapabilityVision = "vision"
-	// CapabilityResponses names the Responses method set in a capability error.
+	// capabilityResponses names the Responses method set in a capability error.
 	// Unlike the others it is never declared on an entry: it is derived from
-	// whether the entry's client implements [Responder].
-	CapabilityResponses = "responses"
+	// whether the entry's client can serve Responses.
+	capabilityResponses = "responses"
 )
 
 // Capability is the strong-typed contract an endpoint exposes to the router. It
@@ -57,10 +57,6 @@ type Capability struct {
 	Tools bool
 	// Vision marks the endpoint able to accept image content parts.
 	Vision bool
-	// MaxContextTokens is the endpoint's context window. It is part of the
-	// contract for future token-budget routing; this SDK does not estimate
-	// token counts, so it is not used for filtering today.
-	MaxContextTokens int
 }
 
 // CapabilityProvider is optionally implemented by a ChatCompleter (e.g. a

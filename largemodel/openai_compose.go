@@ -19,6 +19,7 @@ package largemodel
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/largemodel/provider/openais"
@@ -78,7 +79,7 @@ func newOpenAIComposeCaller(
 	}
 
 	return &OpenAIChatComposeCaller{
-		caller: &openAIChatCaller{client: &openAIComposeBackend{pool: pool}},
+		caller: newOpenAIChatCaller(&openAIComposeBackend{pool: pool}),
 		pool:   pool,
 	}, nil
 }
@@ -93,7 +94,7 @@ func NewOpenAIChatCallerFromBackend(backend OpenAIChatBackend) (Caller, error) {
 		return nil, ErrNoBackend
 	}
 
-	return &openAIChatCaller{client: backend}, nil
+	return newOpenAIChatCaller(backend), nil
 }
 
 // Stats reports endpoint health merged across the caller's pools. See
@@ -142,6 +143,92 @@ func (b *openAIComposeBackend) ChatCompletionsStream(
 	defer b.pool.release(client)
 
 	return client.ChatCompletionsStream(ctx, request)
+}
+
+// openAIComposeOptions carries the OpenAI client options a caller supplied for
+// the clients this file builds. It lives with the rest of the OpenAI glue
+// rather than in the neutral compose config, so the vendor option type stays
+// on this side of the provider boundary.
+type openAIComposeOptions struct {
+	clientOpts []openai.ClientOption
+}
+
+// WithOpenAIClientOptions passes provider client options — base URL overrides,
+// timeouts, custom headers — to the clients [NewOpenAIChatCallerFromConfig]
+// builds. It has no effect on a pool built from endpoint specs, which carries
+// its connection details per endpoint.
+func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
+	return func(c *composeConfig) {
+		c.openAI.clientOpts = append(c.openAI.clientOpts, opts...)
+	}
+}
+
+// NewOpenAIChatCallerFromConfig builds a Caller over one or more
+// OpenAI-compatible endpoints described by cfg.
+func NewOpenAIChatCallerFromConfig(cfg OpenAIConfig, opts ...CallerOption) (*OpenAIChatComposeCaller, error) {
+	if len(cfg.Endpoints) == 0 {
+		return nil, fmt.Errorf("vage: at least one OpenAI endpoint is required")
+	}
+
+	composeCfg := newComposeConfig(opts...)
+
+	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
+		return buildOpenAIComposeClient(cfg, composeCfg)
+	}, composeCfg)
+}
+
+// buildOpenAIComposeClient turns the neutral endpoint configuration into a
+// provider pool. The declarative path lets the provider construct its own
+// clients; only a caller-supplied client option forces construction here,
+// because those options have no place in an endpoint spec.
+func buildOpenAIComposeClient(cfg OpenAIConfig, composeCfg *composeConfig) (*openais.ComposeClient, error) {
+	strategy := strategyOrFailover(cfg.Strategy)
+
+	if len(composeCfg.openAI.clientOpts) == 0 {
+		return openais.NewFromEndpoints(strategy, toOpenAISpecs(cfg.Endpoints), composeCfg.routerOpts...)
+	}
+
+	entries := make([]openais.ModelEntry, len(cfg.Endpoints))
+
+	for i, e := range cfg.Endpoints {
+		clientOpts := composeCfg.openAI.clientOpts
+		if e.BaseURL != "" {
+			clientOpts = append([]openai.ClientOption{openai.WithBaseURL(e.BaseURL)}, clientOpts...)
+		}
+
+		entries[i] = openais.ModelEntry{
+			Name:    e.Model,
+			Client:  openai.NewClient(e.APIKey, clientOpts...),
+			Weight:  e.Weight,
+			Alias:   e.Alias,
+			Tags:    e.Tags,
+			Cost:    e.Cost,
+			Latency: e.Latency,
+		}
+	}
+
+	return openais.NewComposeClient(strategy, entries, composeCfg.routerOpts...)
+}
+
+// toOpenAISpecs maps the neutral endpoint configuration onto the provider's
+// own endpoint specs.
+func toOpenAISpecs(endpoints []OpenAIEndpoint) []openais.EndpointSpec {
+	specs := make([]openais.EndpointSpec, len(endpoints))
+
+	for i, e := range endpoints {
+		specs[i] = openais.EndpointSpec{
+			BaseURL: e.BaseURL,
+			APIKey:  e.APIKey,
+			Model:   e.Model,
+			Alias:   e.Alias,
+			Weight:  e.Weight,
+			Tags:    e.Tags,
+			Cost:    e.Cost,
+			Latency: e.Latency,
+		}
+	}
+
+	return specs
 }
 
 var (
