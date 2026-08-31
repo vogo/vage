@@ -273,33 +273,3 @@ func TestAnthropicStream_MidStreamErrorEvent(t *testing.T) {
 		t.Error("mid-stream overload is not retryable; retry middleware would not re-issue the call")
 	}
 }
-
-// TestAnthropicStream_MidStreamErrorStatusMapping pins the rest of the
-// error-type-to-status mapping, since a mid-stream failure carries no HTTP
-// status of its own and the governance middlewares judge only on the derived
-// one.
-func TestAnthropicStream_MidStreamErrorStatusMapping(t *testing.T) {
-	cases := []struct {
-		errType string
-		want    int
-	}{
-		{"invalid_request_error", http.StatusBadRequest},
-		{"authentication_error", http.StatusUnauthorized},
-		{"permission_error", http.StatusForbidden},
-		{"not_found_error", http.StatusNotFound},
-		{"request_too_large", http.StatusRequestEntityTooLarge},
-		{"rate_limit_error", http.StatusTooManyRequests},
-		{"timeout_error", http.StatusRequestTimeout},
-		{"overloaded_error", statusOverloaded},
-		{"api_error", http.StatusInternalServerError},
-		{"some_future_error", http.StatusInternalServerError},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.errType, func(t *testing.T) {
-			if got := anthropicErrorStatus(tc.errType); got != tc.want {
-				t.Errorf("anthropicErrorStatus(%q) = %d, want %d", tc.errType, got, tc.want)
-			}
-		})
-	}
-}

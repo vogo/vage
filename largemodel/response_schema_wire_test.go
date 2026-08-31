@@ -36,6 +36,12 @@ import (
 // captureWireBody starts a server that records the request body verbatim and
 // answers every request with respBody, and returns the server URL plus a
 // decoder for whatever was last captured.
+// responseSchemaFormatWireName is the json_schema name vage must put on the
+// wire. It is spelled out here rather than read from the codec so the test
+// pins the observable request shape, not whatever constant produced it: the
+// name is part of the prompt-cache key every identical request depends on.
+const responseSchemaFormatWireName = "vage_response_schema"
+
 func captureWireBody(t *testing.T, respBody, contentType string) (string, func() map[string]any) {
 	t.Helper()
 
@@ -160,8 +166,8 @@ func TestProviderCall_ResponseSchemaSet_NativeField(t *testing.T) {
 			t.Fatalf("response_format.json_schema = %#v", rf["json_schema"])
 		}
 
-		if js["name"] != responseSchemaFormatName {
-			t.Errorf("json_schema.name = %v, want %q", js["name"], responseSchemaFormatName)
+		if js["name"] != responseSchemaFormatWireName {
+			t.Errorf("json_schema.name = %v, want %q", js["name"], responseSchemaFormatWireName)
 		}
 
 		if strict, _ := js["strict"].(bool); !strict {
