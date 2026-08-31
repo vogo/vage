@@ -463,7 +463,8 @@ func TestQuickValidated(t *testing.T) {
 // the iteration store or any side effect.
 func TestResume_RejectsBrokenInterruptConfig(t *testing.T) {
 	t.Run("both policy and tool names", func(t *testing.T) {
-		a := New(agent.Config{ID: "a", Name: "b"},
+		a := New(
+			agent.Config{ID: "a", Name: "b"},
 			WithCaller(newMock()),
 			WithIterationStore(checkpoint.NewMapIterationStore()),
 			WithInterrupt(InterruptConfig{Store: interrupt.NewMapStore(), Policy: noopPolicy(), ToolNames: []string{"ask_user"}}),
@@ -475,7 +476,8 @@ func TestResume_RejectsBrokenInterruptConfig(t *testing.T) {
 	})
 
 	t.Run("policy without store", func(t *testing.T) {
-		a := New(agent.Config{ID: "a", Name: "b"},
+		a := New(
+			agent.Config{ID: "a", Name: "b"},
 			WithCaller(newMock()),
 			WithIterationStore(checkpoint.NewMapIterationStore()),
 			WithInterrupt(InterruptConfig{Policy: noopPolicy()}),
@@ -494,7 +496,8 @@ func TestResume_RejectsBrokenInterruptConfig(t *testing.T) {
 func TestWithInterrupt_LeaseOnlyGroupReplacesGroup(t *testing.T) {
 	store := interrupt.NewMapStore()
 
-	a := New(agent.Config{},
+	a := New(
+		agent.Config{},
 		WithInterrupt(InterruptConfig{Store: store, Policy: noopPolicy()}),
 		WithInterrupt(InterruptConfig{LeaseTTL: 90 * time.Second}),
 	)
