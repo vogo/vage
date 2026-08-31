@@ -11,7 +11,15 @@
 
 1. **需人工评审后方可写入**:不得直接落盘 ADR。先向相关方提交草案,获显式批准后再写文件。
 2. **默认 `proposed`**:新建 ADR 状态为 `proposed`,经确认后才升为 `accepted`。`proposed` 应在一个迭代内收敛。
-3. **永不删除**:被取代的 ADR 移入 `deprecated/`,并在头部注明指向替代 ADR 的链接。状态改为 `superseded`。
+3. **永不删除**:被取代的 ADR 移入 `deprecated/`,并在头部注明指向替代 ADR 的链接。状态改为 `superseded`.
+
+### 新增横切接缝(seam)时
+
+ReAct 热路径上的拦截/装饰平面已记录在 [agent-core-design.md](../../domains/agent/agent-core/agent-core-design.md) 的决策表中。任何**新增**拦截或装饰平面 —— 包括 Run 级、每迭代级、尚未列入该表的热路径扩展点 —— 须遵守:
+
+1. **先 ADR,后代码**:提案须先提交 ADR 草案,按上文「需人工评审后方可写入」获显式批准;README 或包注释中的说明**不能**替代 ADR 准入。新平面的运行时代码在 ADR 状态升为 `accepted` 之前不得合并。
+2. **ADR 必答项**:现有平面为何不足、扩展已有平面为何不够、触发时机、可观测性/事件、与护栏及 interrupt/resume 的交互、向后兼容影响。
+3. **本项不做自动 enforcement**:违规 seam 不由此文档或 CI 自动检测;维护者在评审时引用本节与决策表。
 
 ## 必备章节
 
