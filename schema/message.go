@@ -397,113 +397,27 @@ func (m *Message) AppendPart(part MessagePart) {
 func (m *Message) invalidateOrigin() { m.origin = nil }
 
 // Validate checks the canonical message invariants shared by provider codecs.
+// Part structure is checked against the messagePartRules table rather than
+// per-kind branches here; see message_part_rule.go.
 func (m Message) Validate() error {
 	if err := m.protocol.Validate(); err != nil {
 		return err
 	}
-	switch m.role {
-	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
-	default:
+	if roleBits[m.role] == 0 {
 		return fmt.Errorf("vage: invalid message role %q", m.role)
 	}
 	for i, part := range m.parts {
-		switch part.Type {
-		case MessagePartText:
-			if part.Thinking != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError ||
-				hasMediaFields(part) {
-				return fmt.Errorf("vage: message part %d text has fields for another part type", i)
-			}
-		case MessagePartThinking:
-			if part.Text != "" || part.ToolCall != nil || part.ToolCallID != "" || part.IsError ||
-				hasMediaFields(part) {
-				return fmt.Errorf("vage: message part %d thinking has fields for another part type", i)
-			}
-		case MessagePartToolCall:
-			if part.ToolCall == nil {
-				return fmt.Errorf("vage: message part %d tool_call is nil", i)
-			}
-			if part.Text != "" || part.Thinking != "" || part.ToolCallID != "" || part.IsError ||
-				hasMediaFields(part) {
-				return fmt.Errorf("vage: message part %d tool_call has fields for another part type", i)
-			}
-			if part.ToolCall.ID == "" || part.ToolCall.Name == "" {
-				return fmt.Errorf("vage: message part %d tool_call requires id and name", i)
-			}
-			if args := part.ToolCall.Arguments; args != "" && !json.Valid([]byte(args)) {
-				return fmt.Errorf("vage: message part %d tool_call arguments are invalid JSON", i)
-			}
-		case MessagePartToolResult:
-			if part.ToolCallID == "" {
-				return fmt.Errorf("vage: message part %d tool_result requires tool_call_id", i)
-			}
-			if part.Thinking != "" || part.ToolCall != nil || hasMediaFields(part) {
-				return fmt.Errorf("vage: message part %d tool_result has fields for another part type", i)
-			}
-		case MessagePartImage:
-			if part.Text != "" || part.Thinking != "" || part.ToolCall != nil ||
-				part.ToolCallID != "" || part.IsError || part.FileID != "" || part.Filename != "" {
-				return fmt.Errorf("vage: message part %d image has fields for another part type", i)
-			}
-			if m.role != RoleUser {
-				return fmt.Errorf("vage: message part %d image is only valid on user messages", i)
-			}
-			switch {
-			case part.URL != "" && len(part.Data) > 0, part.URL == "" && len(part.Data) == 0:
-				return fmt.Errorf("vage: message part %d image requires exactly one of url or data", i)
-			case part.URL != "":
-				// Only the inline source has a wire field for the media type;
-				// on a url source every codec would drop MimeType, so it fails
-				// closed here instead of misleading the caller.
-				if part.MimeType != "" {
-					return fmt.Errorf("vage: message part %d image url source must not set mime_type", i)
-				}
-			default:
-				if part.MimeType == "" {
-					return fmt.Errorf("vage: message part %d image data requires mime_type", i)
-				}
-				if !strings.HasPrefix(part.MimeType, "image/") {
-					return fmt.Errorf("vage: message part %d image mime_type %q is not an image/* type", i, part.MimeType)
-				}
-			}
-		case MessagePartFile:
-			if part.Text != "" || part.Thinking != "" || part.ToolCall != nil ||
-				part.ToolCallID != "" || part.IsError {
-				return fmt.Errorf("vage: message part %d file has fields for another part type", i)
-			}
-			if m.role != RoleUser {
-				return fmt.Errorf("vage: message part %d file is only valid on user messages", i)
-			}
-			sources := 0
-			if part.URL != "" {
-				sources++
-			}
-			if len(part.Data) > 0 {
-				sources++
-			}
-			if part.FileID != "" {
-				sources++
-			}
-			if sources != 1 {
-				return fmt.Errorf("vage: message part %d file requires exactly one of url, data, or file_id", i)
-			}
-			// Only the inline source has wire fields for the media type and the
-			// filename. On a url or file_id source both would be dropped by
-			// every codec, so they fail closed rather than vanish.
-			if len(part.Data) == 0 {
-				if part.MimeType != "" || part.Filename != "" {
-					source := "url"
-					if part.FileID != "" {
-						source = "file_id"
-					}
-					return fmt.Errorf("vage: message part %d file %s source must not set mime_type or filename", i, source)
-				}
-			} else if part.MimeType == "" {
-				return fmt.Errorf("vage: message part %d file data requires mime_type", i)
-			}
-		default:
+		rule, ok := messagePartRules[part.Type]
+		if !ok {
 			return fmt.Errorf("vage: message part %d has unsupported type %q", i, part.Type)
 		}
+		if err := rule.validate(part.Type, m.role, part); err != nil {
+			return fmt.Errorf("vage: message part %d %w", i, err)
+		}
 	}
+	// A tool message is the answer to a call, so the correlation must be
+	// present somewhere in it. This is a message-level rule, not a part-level
+	// one, which is why the rule table cannot express it.
 	if m.role == RoleTool {
 		hasResult := false
 		for _, part := range m.parts {
@@ -516,6 +430,7 @@ func (m Message) Validate() error {
 			return fmt.Errorf("vage: tool message requires a tool_result part")
 		}
 	}
+
 	return nil
 }
 
@@ -555,15 +470,6 @@ func cloneMessageParts(parts []MessagePart) []MessagePart {
 		out[i] = cloneMessagePart(part)
 	}
 	return out
-}
-
-// hasMediaFields reports whether part carries any image/file-only field. A
-// non-media part holding one would be silently dropped by every codec (they
-// read media sources only from image and file parts), so Validate rejects it
-// instead of letting a caller believe the source was sent.
-func hasMediaFields(part MessagePart) bool {
-	return part.URL != "" || len(part.Data) > 0 || part.MimeType != "" ||
-		part.FileID != "" || part.Filename != ""
 }
 
 func cloneMessagePart(part MessagePart) MessagePart {
