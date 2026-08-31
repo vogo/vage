@@ -42,14 +42,7 @@ import (
 // Reach for New directly when the agent needs a description, a named or
 // versioned prompt template, or any other Config field.
 func Quick(id, name string, caller largemodel.Caller, model, systemPrompt string, opts ...Option) *Agent {
-	return New(
-		agent.Config{ID: id, Name: name},
-		append([]Option{
-			WithCaller(caller),
-			WithModel(model),
-			WithSystemPrompt(prompt.StringPrompt(systemPrompt)),
-		}, opts...)...,
-	)
+	return New(agent.Config{ID: id, Name: name}, quickOptions(caller, model, systemPrompt, opts...)...)
 }
 
 // QuickValidated is the validated counterpart to Quick: it expands to the
@@ -60,12 +53,16 @@ func Quick(id, name string, caller largemodel.Caller, model, systemPrompt string
 // is a mechanical signature change — handle the error instead of discarding
 // it.
 func QuickValidated(id, name string, caller largemodel.Caller, model, systemPrompt string, opts ...Option) (*Agent, error) {
-	return NewValidated(
-		agent.Config{ID: id, Name: name},
-		append([]Option{
-			WithCaller(caller),
-			WithModel(model),
-			WithSystemPrompt(prompt.StringPrompt(systemPrompt)),
-		}, opts...)...,
-	)
+	return NewValidated(agent.Config{ID: id, Name: name}, quickOptions(caller, model, systemPrompt, opts...)...)
+}
+
+// quickOptions expands the Quick presets — caller, model, system prompt —
+// in front of the caller-supplied options, so Quick and QuickValidated
+// share one construction expansion and cannot drift on preset order.
+func quickOptions(caller largemodel.Caller, model, systemPrompt string, opts ...Option) []Option {
+	return append([]Option{
+		WithCaller(caller),
+		WithModel(model),
+		WithSystemPrompt(prompt.StringPrompt(systemPrompt)),
+	}, opts...)
 }

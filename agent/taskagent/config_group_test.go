@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vogo/vage/agent"
+	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/interrupt"
 	"github.com/vogo/vage/prompt"
@@ -453,4 +454,54 @@ func TestQuickValidated(t *testing.T) {
 				q.model, q.maxIterations, n.model, n.maxIterations)
 		}
 	})
+}
+
+// TestResume_RejectsBrokenInterruptConfig guards the Resume entry point: it
+// is the one runtime path that used to skip checkInterruptConfig, letting
+// the both-sources marker reach Intercept (a panic) or a policy-only config
+// reach a nil store. It must fail with ErrInterruptConfig before touching
+// the iteration store or any side effect.
+func TestResume_RejectsBrokenInterruptConfig(t *testing.T) {
+	t.Run("both policy and tool names", func(t *testing.T) {
+		a := New(agent.Config{ID: "a", Name: "b"},
+			WithCaller(newMock()),
+			WithIterationStore(checkpoint.NewMapIterationStore()),
+			WithInterrupt(InterruptConfig{Store: interrupt.NewMapStore(), Policy: noopPolicy(), ToolNames: []string{"ask_user"}}),
+		)
+		_, err := a.Resume(context.Background(), "sess")
+		if !errors.Is(err, ErrInterruptConfig) {
+			t.Fatalf("Resume err = %v, want ErrInterruptConfig (marker must not reach Intercept)", err)
+		}
+	})
+
+	t.Run("policy without store", func(t *testing.T) {
+		a := New(agent.Config{ID: "a", Name: "b"},
+			WithCaller(newMock()),
+			WithIterationStore(checkpoint.NewMapIterationStore()),
+			WithInterrupt(InterruptConfig{Policy: noopPolicy()}),
+		)
+		_, err := a.Resume(context.Background(), "sess")
+		if !errors.Is(err, ErrInterruptConfig) {
+			t.Fatalf("Resume err = %v, want ErrInterruptConfig (nil store must not be dereferenced)", err)
+		}
+	})
+}
+
+// TestWithInterrupt_LeaseOnlyGroupReplacesGroup pins the whole-group
+// replacement semantic for the lease edge case: a group that names only
+// LeaseTTL resets Store and Policy to nil — the interrupt is disabled — and
+// applies the lease, exactly as if the full group were written out.
+func TestWithInterrupt_LeaseOnlyGroupReplacesGroup(t *testing.T) {
+	store := interrupt.NewMapStore()
+
+	a := New(agent.Config{},
+		WithInterrupt(InterruptConfig{Store: store, Policy: noopPolicy()}),
+		WithInterrupt(InterruptConfig{LeaseTTL: 90 * time.Second}),
+	)
+	if a.interruptStore != nil || a.interruptPolicy != nil {
+		t.Errorf("lease-only group must reset store/policy: store=%v policy=%v", a.interruptStore, a.interruptPolicy)
+	}
+	if a.interruptLeaseTTL != 90*time.Second {
+		t.Errorf("interruptLeaseTTL = %v, want 90s", a.interruptLeaseTTL)
+	}
 }

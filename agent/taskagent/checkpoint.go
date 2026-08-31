@@ -114,6 +114,7 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // IterationStore checkpoint.
 //
 // Errors:
+//   - ErrInterruptConfig when the interrupt store/policy pair is broken.
 //   - checkpoint.ErrInvalidArgument when no IterationStore is configured
 //     or when the latest checkpoint references a different agent.
 //   - checkpoint.ErrCheckpointNotFound when the session has no checkpoints.
@@ -124,6 +125,11 @@ func cloneMessagesForCheckpoint(in []schema.Message) []schema.Message {
 // Resume bypasses input guards (the original Run already vetted the
 // input). Output guards run on the resumed final response. Tool result
 // guards continue to run on every fresh tool execution.
+//
+// Like the other entry points it rejects a broken interrupt configuration
+// with ErrInterruptConfig before touching the store: a resumed turn can hit
+// the interrupt gate, and an incompletely configured agent must not pay for
+// a checkpoint load, lease or tool side effect before failing.
 //
 // The agent middleware chain (WithMiddleware) does not run here: a resume
 // continues a run that already passed through it, and re-entering the chain
@@ -137,6 +143,9 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 
 	if a.caller == nil {
 		return nil, errors.New("vage: model caller is required")
+	}
+	if err := a.checkInterruptConfig(); err != nil {
+		return nil, err
 	}
 	if a.iterationStore == nil {
 		return nil, fmt.Errorf("%w: no IterationStore configured", checkpoint.ErrInvalidArgument)

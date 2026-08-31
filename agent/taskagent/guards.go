@@ -39,11 +39,12 @@ type GuardsConfig struct {
 	ToolResult []guard.Guard
 }
 
-// WithGuards assigns the three guard lists as one unit, replacing each list
-// at its position in the option list. Equivalent to calling the three
-// single-list options WithInputGuards / WithOutputGuards /
-// WithToolResultGuards in any order — a later WithGuards or a later
-// single-list option wins for the lists it touches.
+// WithGuards assigns the three guard lists as one unit. It replaces the
+// whole group at its position in the option list: any list the config
+// leaves nil is cleared, so pass the full GuardsConfig you want to end up
+// with. Unlike the single-list options, a partial group is not a merge — it
+// wipes the chains it does not name. A later single-list option still wins
+// for the list it touches.
 func WithGuards(c GuardsConfig) Option {
 	return func(a *Agent) {
 		a.inputGuards = c.Input
