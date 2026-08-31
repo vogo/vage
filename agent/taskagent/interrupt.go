@@ -37,7 +37,8 @@ var (
 	// are configured at once. NewValidated / QuickValidated return it at
 	// construction time; the runtime entry points keep it as a last line of
 	// defense. Both-or-neither and exactly-one-source is required — see the
-	// InterruptConfig docs.
+	// InterruptConfig docs. The error is returned wrapped with context, so
+	// match it with errors.Is rather than ==.
 	ErrInterruptConfig = errors.New("vage: WithInterruptStore and WithInterruptPolicy must both be configured, or neither")
 
 	// ErrInterruptAgentMismatch is returned by ResumeInterrupt when the
@@ -63,12 +64,15 @@ func (a *Agent) checkInterruptConfig() error {
 	switch {
 	case a.interruptStore == nil && a.interruptPolicy == nil:
 		return nil
+	case isInterruptBothSources(a.interruptPolicy):
+		// Reported before the store-missing case so the caller sees the most
+		// specific defect first: a both-sources marker with a nil store is
+		// doubly broken, and the policy-source conflict is the actionable one.
+		return fmt.Errorf("%w: both InterruptPolicy and ToolNames are set; choose one policy source", ErrInterruptConfig)
 	case a.interruptStore == nil:
 		return fmt.Errorf("%w: InterruptPolicy configured without InterruptStore", ErrInterruptConfig)
 	case a.interruptPolicy == nil:
 		return fmt.Errorf("%w: InterruptStore configured without InterruptPolicy", ErrInterruptConfig)
-	case isInterruptBothSources(a.interruptPolicy):
-		return fmt.Errorf("%w: both InterruptPolicy and ToolNames are set; choose one policy source", ErrInterruptConfig)
 	default:
 		return nil
 	}
@@ -106,8 +110,12 @@ func (interruptBothSources) Intercept(context.Context, string, []schema.ToolCall
 // Policy and ToolNames are two ways to say the same thing — do not set both;
 // the framework refuses to pick one silently. ToolNames derives a
 // name-matching policy; a non-nil empty list is a legal explicit empty
-// policy that never interrupts. LeaseTTL <= 0 keeps the current default
-// lease; a lease override alone neither enables nor disables the interrupt.
+// policy that never interrupts (nil ToolNames means "no policy source" and
+// is an error when Store is set). LeaseTTL <= 0 keeps the current default
+// lease. Because the grouped option replaces the whole group, a lease-only
+// InterruptConfig resets Store and Policy to nil — the "lease override alone
+// neither enables nor disables" guarantee holds only for the flat
+// WithInterruptLeaseTTL.
 type InterruptConfig struct {
 	Store     interrupt.Store
 	Policy    InterruptPolicy
@@ -123,8 +131,14 @@ type InterruptConfig struct {
 //
 // ToolNames is the name-matching shortcut for Policy. Setting both is an
 // error reported as ErrInterruptConfig by NewValidated / QuickValidated.
-// LeaseTTL <= 0 keeps the current lease default and never enables the
-// interrupt by itself.
+// A nil ToolNames is "no policy source" (an error when Store is set); pass
+// an explicit empty slice for a never-firing policy, matching the flat
+// WithInterruptToolNames() with zero names.
+//
+// LeaseTTL <= 0 keeps the current lease default. Because the whole group is
+// replaced, a lease-only InterruptConfig also resets Store and Policy to
+// nil — write the full group, or use the flat WithInterruptLeaseTTL for a
+// lease that leaves the enable pair untouched.
 func WithInterrupt(c InterruptConfig) Option {
 	return func(a *Agent) {
 		a.interruptStore = c.Store
@@ -140,6 +154,8 @@ func WithInterrupt(c InterruptConfig) Option {
 		}
 		if c.LeaseTTL > 0 {
 			a.interruptLeaseTTL = c.LeaseTTL
+		} else {
+			a.interruptLeaseTTL = defaultInterruptLeaseTTL
 		}
 	}
 }

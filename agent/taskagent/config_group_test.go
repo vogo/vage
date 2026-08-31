@@ -228,6 +228,7 @@ func TestNewValidated_MixedOldAndNewOptions(t *testing.T) {
 	t.Run("group with zero value disables interrupt", func(t *testing.T) {
 		a, err := NewValidated(
 			agent.Config{},
+			WithInterruptLeaseTTL(30*time.Second),
 			WithInterrupt(InterruptConfig{Store: store, Policy: policy}),
 			WithInterrupt(InterruptConfig{}),
 		)
@@ -237,16 +238,19 @@ func TestNewValidated_MixedOldAndNewOptions(t *testing.T) {
 		if a.interruptStore != nil || a.interruptPolicy != nil {
 			t.Errorf("interrupt should be disabled, store=%v policy=%v", a.interruptStore, a.interruptPolicy)
 		}
+		if a.interruptLeaseTTL != defaultInterruptLeaseTTL {
+			t.Errorf("interruptLeaseTTL = %v, want default %v (empty group resets lease too)", a.interruptLeaseTTL, defaultInterruptLeaseTTL)
+		}
 	})
 
-	t.Run("lease override kept unless a later group sets a new one", func(t *testing.T) {
+	t.Run("later group with unset LeaseTTL resets to default", func(t *testing.T) {
 		a, _ := NewValidated(
 			agent.Config{},
 			WithInterruptLeaseTTL(30*time.Second),
 			WithInterrupt(InterruptConfig{Store: store, Policy: policy}),
 		)
-		if a.interruptLeaseTTL != 30*time.Second {
-			t.Errorf("interruptLeaseTTL = %v, want 30s (<=0 group lease keeps the earlier override)", a.interruptLeaseTTL)
+		if a.interruptLeaseTTL != defaultInterruptLeaseTTL {
+			t.Errorf("interruptLeaseTTL = %v, want default %v (whole-group assignment resets unset LeaseTTL)", a.interruptLeaseTTL, defaultInterruptLeaseTTL)
 		}
 
 		b, _ := NewValidated(
