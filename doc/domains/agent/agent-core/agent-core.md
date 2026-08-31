@@ -83,6 +83,20 @@
 - 流式路径不缓冲、不重放已发送的 `TextDelta`。终态改写只体现在最终 `AgentEnd` 与框架持久化结果;若需逐事件改写,用 `StreamMiddleware`。这是保留实时首包能力的明确取舍。
 - `Resume` 不进入链:它续跑的是一次已经过链的运行,重复进入会令短路中间件丢弃检查点已付出的工作。
 
+### Entry × cross-cut capability
+
+TaskAgent declares an internal **entry policy** for each run-class entry (`Run`, `RunStream`, `Resume`, `ResumeInterrupt`). The policy controls three cross-cut layers; caller validation and interrupt-config checks (`checkInterruptConfig`, AC-17) always run on every entry via shared preflight regardless of policy flags.
+
+| Entry | Run values (`WithRunValues`) | Input guards | Agent middleware (`WithMiddleware`) | Caller + interrupt preflight |
+|-------|:----------------------------:|:------------:|:-----------------------------------:|:----------------------------:|
+| `Run` / `RunStream` | yes | yes | yes | yes |
+| `Resume` | yes | no | no | yes |
+| `ResumeInterrupt` | yes | no | no | yes |
+
+Fresh-run entries enable all three policy-controlled cross-cuts. Resume-class entries enable run-values initialization only; middleware and input guards are explicitly off because the original run already passed them (ADR 0001, AC-10, AC-14). Output guards, tool-result guards, hook dispatch, `AgentStart` timing, and stream event ordering are **not** entry-policy flags — they follow existing per-path rules unchanged.
+
+New run-class methods must declare an entry policy constant and route through shared preflight; `entry_policy_test.go` conformance tests guard the matrix above.
+
 选型与迁移:
 
 - **观察事件、不改结果** → Hook。既有 Hook 无需迁移。

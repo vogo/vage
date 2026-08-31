@@ -652,12 +652,11 @@ func (a *Agent) dispatch(ctx context.Context, event schema.Event) {
 // persistence and AgentEnd run after the chain, on whatever response it
 // produced.
 func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunResponse, error) {
-	// One fresh run-value store per call, established before anything else so
-	// every stage of this run — and only this run — shares it. See
-	// schema.WithRunValues for the scoping contract.
-	ctx = schema.WithRunValues(ctx)
+	policy := policyFreshRun
 
-	p, err := a.preflightRun(ctx, req)
+	ctx = bindRunValues(ctx, policy)
+
+	p, err := a.preflightEntry(ctx, policy, req)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +691,14 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 		return a.draftResponse(rc), nil
 	}
 
-	resp, err := a.runMiddlewareChain(ctx, req, react)
+	var resp *schema.RunResponse
+
+	if policy.agentMiddleware {
+		resp, err = a.runMiddlewareChain(ctx, req, react)
+	} else {
+		resp, err = react(ctx, req)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -733,12 +739,11 @@ func (a *Agent) runMiddlewareChain(
 // response Run sees. Text deltas already sent are never replayed: a terminal
 // rewrite shows up in AgentEnd and in the persisted messages only.
 func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.RunStream, error) {
-	// The stream body's ctx derives from this one, so binding the store here
-	// keeps it alive for the whole production and gives back-to-back streams
-	// separate stores even on the same agent and session.
-	ctx = schema.WithRunValues(ctx)
+	policy := policyFreshRun
 
-	p, err := a.preflightRun(ctx, req)
+	ctx = bindRunValues(ctx, policy)
+
+	p, err := a.preflightEntry(ctx, policy, req)
 	if err != nil {
 		return nil, err
 	}
@@ -778,7 +783,14 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 			return a.draftResponse(rc), nil
 		}
 
-		resp, err := a.runMiddlewareChain(ctx, req, react)
+		var resp *schema.RunResponse
+
+		if policy.agentMiddleware {
+			resp, err = a.runMiddlewareChain(ctx, req, react)
+		} else {
+			resp, err = react(ctx, req)
+		}
+
 		if err != nil {
 			return err
 		}
