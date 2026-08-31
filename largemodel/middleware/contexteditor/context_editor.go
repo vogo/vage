@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package contexteditor
 
 import (
 	"context"
@@ -25,6 +25,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+
+	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware"
 
 	"github.com/vogo/vage/schema"
 )
@@ -72,10 +75,10 @@ type ArtifactWriter interface {
 }
 
 // SessionIDFunc extracts the session ID associated with an outgoing
-// Request. The middleware needs the ID only to namespace artifact
+// largemodel.Request. The middleware needs the ID only to namespace artifact
 // names; callers that operate without sessions can leave the option
 // unset, in which case the elision pass falls back to the inline form.
-type SessionIDFunc func(req *Request) string
+type SessionIDFunc func(req *largemodel.Request) string
 
 // DefaultContextEditPlaceholderV2 is the V2 default. It surfaces the
 // editor's reason inline so a human reading the prompt can immediately
@@ -94,22 +97,22 @@ func DefaultContextEditPlaceholderV2(toolCallID string, originalBytes int, reaso
 }
 
 // ContextEditorMiddleware folds older tool_result messages into short
-// placeholders before the request reaches the underlying Caller, so
+// placeholders before the request reaches the underlying largemodel.Caller, so
 // multi-iteration ReAct loops do not pay for the full tool_result
 // payload on every turn.
 //
-// Editing is applied to a SHALLOW COPY of *Request. The
+// Editing is applied to a SHALLOW COPY of *largemodel.Request. The
 // caller's request and its Messages slice are never mutated; modified
 // messages are constructed as new schema.Message values placed in a
 // fresh slice.
 //
-// The middleware is stateless: each Chat / Stream call is judged
+// The middleware is stateless: each Call / CallStream is judged
 // independently from req.Messages alone.
 type ContextEditorMiddleware struct {
 	keepLast           int
 	minElidedBytes     int
 	maxBytesPerMessage int
-	dispatch           DispatchFunc
+	dispatch           middleware.DispatchFunc
 	placeholderFn      PlaceholderFunc
 	placeholderV2      PlaceholderV2Func
 	resourceLookup     ResourceLookupFunc
@@ -149,7 +152,7 @@ func WithMinElidedBytes(n int) ContextEditorOption {
 // WithContextEditDispatch wires an event sink. When at least one
 // tool_result is elided in a request, the middleware dispatches a
 // schema.EventContextEdited event. nil dispatch ⇒ silent (no panic).
-func WithContextEditDispatch(d DispatchFunc) ContextEditorOption {
+func WithContextEditDispatch(d middleware.DispatchFunc) ContextEditorOption {
 	return func(m *ContextEditorMiddleware) { m.dispatch = d }
 }
 
@@ -191,7 +194,7 @@ func WithArtifactWriter(w ArtifactWriter) ContextEditorOption {
 }
 
 // WithSessionIDFunc tells the editor how to derive the session ID
-// from an outgoing Request. Required for artifact externalisation
+// from an outgoing largemodel.Request. Required for artifact externalisation
 // (without a session id the editor cannot namespace the artifact);
 // safely no-op for callers who never enable single-message elision.
 func WithSessionIDFunc(fn SessionIDFunc) ContextEditorOption {
@@ -214,14 +217,14 @@ func NewContextEditorMiddleware(opts ...ContextEditorOption) *ContextEditorMiddl
 }
 
 // Wrap implements Middleware.
-func (m *ContextEditorMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *ContextEditorMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			edReq := m.edit(ctx, req)
 			return next.Call(ctx, edReq)
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			edReq := m.edit(ctx, req)
 			return next.CallStream(ctx, edReq)
 		},
@@ -235,7 +238,7 @@ func (m *ContextEditorMiddleware) Wrap(next Caller) Caller {
 // (opt-in via WithStaleResourceTracker), and keep_last_k (always on,
 // controlled by keepLast). Side-effect: emits an event when any
 // elision happened and a dispatch is configured.
-func (m *ContextEditorMiddleware) edit(ctx context.Context, req *Request) *Request {
+func (m *ContextEditorMiddleware) edit(ctx context.Context, req *largemodel.Request) *largemodel.Request {
 	if req == nil || len(req.Messages) == 0 {
 		return req
 	}
@@ -527,7 +530,7 @@ func (m *ContextEditorMiddleware) applyElision(
 // or no message tripped the threshold. The pass writes to the artifact
 // store synchronously — write failures degrade to elide_inline rather
 // than aborting the request.
-func (m *ContextEditorMiddleware) scanByElide(ctx context.Context, req *Request) map[int]elideOutcome {
+func (m *ContextEditorMiddleware) scanByElide(ctx context.Context, req *largemodel.Request) map[int]elideOutcome {
 	if m.maxBytesPerMessage <= 0 {
 		return nil
 	}

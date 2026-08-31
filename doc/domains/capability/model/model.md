@@ -8,7 +8,7 @@
 | 状态 | active |
 | 依赖领域 | agent-core(`schema`)、tooling(上下文编辑感知工具资源) |
 | 对外 API | 是(Go 库 API) |
-| 覆盖包 | `largemodel` |
+| 覆盖包 | `largemodel`、`largemodel/middleware`、`largemodel/middleware/contexteditor`、`largemodel/router` |
 
 ## 概述
 

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
@@ -32,8 +34,8 @@ const defaultCacheTTL = 5 * time.Minute
 
 // Cache stores and retrieves chat completion responses.
 type Cache interface {
-	Get(ctx context.Context, key string) (*Response, bool)
-	Set(ctx context.Context, key string, resp *Response, ttl time.Duration)
+	Get(ctx context.Context, key string) (*largemodel.Response, bool)
+	Set(ctx context.Context, key string, resp *largemodel.Response, ttl time.Duration)
 }
 
 // CacheMiddleware caches Call responses.
@@ -62,10 +64,10 @@ func NewCacheMiddleware(c Cache, opts ...CacheOption) *CacheMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *CacheMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *CacheMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			key, err := cacheKey(next.Protocol(), req)
 			if err != nil {
 				// Skip cache on marshal failure; call downstream directly.
@@ -85,13 +87,13 @@ func (m *CacheMiddleware) Wrap(next Caller) Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			return next.CallStream(ctx, req)
 		},
 	}
 }
 
-// cacheKeyData is the deterministic subset of a Request used for cache keys.
+// cacheKeyData is the deterministic subset of a largemodel.Request used for cache keys.
 // Every field that influences model output must be included here.
 //
 // Protocol is part of the key because messages are stored in vendor-native
@@ -110,7 +112,7 @@ type cacheKeyData struct {
 }
 
 // cacheKey produces a SHA-256 hex digest from the deterministic request fields.
-func cacheKey(proto schema.Protocol, req *Request) (string, error) {
+func cacheKey(proto schema.Protocol, req *largemodel.Request) (string, error) {
 	data := cacheKeyData{
 		Protocol:       proto,
 		Model:          req.Model,
@@ -144,7 +146,7 @@ type MapCache struct {
 }
 
 type cacheEntry struct {
-	resp      *Response
+	resp      *largemodel.Response
 	expiresAt time.Time
 	createdAt time.Time
 }
@@ -172,7 +174,7 @@ func NewMapCache(opts ...MapCacheOption) *MapCache {
 }
 
 // Get returns a cached response if present and not expired.
-func (c *MapCache) Get(_ context.Context, key string) (*Response, bool) {
+func (c *MapCache) Get(_ context.Context, key string) (*largemodel.Response, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -191,7 +193,7 @@ func (c *MapCache) Get(_ context.Context, key string) (*Response, bool) {
 // Set stores a response with the given TTL.
 // It lazily removes expired entries and evicts the oldest entry when the cache
 // is at capacity before inserting the new one.
-func (c *MapCache) Set(_ context.Context, key string, resp *Response, ttl time.Duration) {
+func (c *MapCache) Set(_ context.Context, key string, resp *largemodel.Response, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

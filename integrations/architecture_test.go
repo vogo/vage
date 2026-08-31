@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware/contexteditor"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -473,7 +473,7 @@ func TestArchitectureUnmappedPackageRejected(t *testing.T) {
 // TestResourceLookupFuncAcceptsToolAlias verifies tool.ResourceTracker remains
 // identical to schema.ResourceTracker for WithStaleResourceTracker wiring.
 func TestResourceLookupFuncAcceptsToolAlias(t *testing.T) {
-	var lookup largemodel.ResourceLookupFunc = func(toolName string) tool.ResourceTracker {
+	var lookup contexteditor.ResourceLookupFunc = func(toolName string) tool.ResourceTracker {
 		switch toolName {
 		case "read":
 			return stubReadTracker{}
@@ -482,13 +482,13 @@ func TestResourceLookupFuncAcceptsToolAlias(t *testing.T) {
 		}
 	}
 
-	_ = largemodel.NewContextEditorMiddleware(
-		largemodel.WithStaleResourceTracker(lookup),
+	_ = contexteditor.NewContextEditorMiddleware(
+		contexteditor.WithStaleResourceTracker(lookup),
 	)
 }
 
 func TestResourceLookupFuncAcceptsSchemaType(t *testing.T) {
-	var lookup largemodel.ResourceLookupFunc = func(toolName string) schema.ResourceTracker {
+	var lookup contexteditor.ResourceLookupFunc = func(toolName string) schema.ResourceTracker {
 		switch toolName {
 		case "read":
 			return stubReadTracker{}
@@ -497,8 +497,8 @@ func TestResourceLookupFuncAcceptsSchemaType(t *testing.T) {
 		}
 	}
 
-	_ = largemodel.NewContextEditorMiddleware(
-		largemodel.WithStaleResourceTracker(lookup),
+	_ = contexteditor.NewContextEditorMiddleware(
+		contexteditor.WithStaleResourceTracker(lookup),
 	)
 }
 

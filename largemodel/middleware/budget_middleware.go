@@ -15,10 +15,12 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
+
+	"github.com/vogo/vage/largemodel"
 
 	"github.com/vogo/vage/schema"
 )
@@ -56,10 +58,10 @@ func NewBudgetMiddleware(preCheck BudgetPreCheckFunc, postRecord BudgetPostRecor
 }
 
 // Wrap implements Middleware.
-func (m *BudgetMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *BudgetMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
@@ -77,7 +79,7 @@ func (m *BudgetMiddleware) Wrap(next Caller) Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
@@ -93,7 +95,7 @@ func (m *BudgetMiddleware) Wrap(next Caller) Caller {
 				return s, nil
 			}
 
-			return WrapStreamClose(s, func(usage *schema.Usage) {
+			return largemodel.WrapStreamClose(s, func(usage *schema.Usage) {
 				if usage == nil {
 					return
 				}

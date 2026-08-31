@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware/contexteditor"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -47,7 +47,7 @@ func TestAgent_WithContextEditor_FoldsOldToolResults(t *testing.T) {
 		},
 	)
 
-	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(1))
+	editor := contexteditor.NewContextEditorMiddleware(contexteditor.WithKeepLastTools(1))
 
 	a := New(
 		agent.Config{},

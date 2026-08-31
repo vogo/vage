@@ -16,7 +16,8 @@
  */
 
 // Package context_editor_tests holds integration tests for the
-// largemodel.ContextEditorMiddleware and the taskagent.WithContextEditor
+// largemodel_tests/context_editor_tests holds integration tests for the
+// contexteditor.ContextEditorMiddleware and the taskagent.WithContextEditor
 // option, exercising both pieces through their public API together with
 // a real hook.Manager so the event-dispatch wiring is end-to-end.
 package context_editor_tests //nolint:revive // integration test package
@@ -39,6 +40,7 @@ import (
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware/contexteditor"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -159,7 +161,7 @@ func TestIntegration_TaskAgent_ContextEditor_LongReActLoop(t *testing.T) {
 		stopResponse("FINAL_OUTPUT"),
 	}}}
 
-	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(k))
+	editor := contexteditor.NewContextEditorMiddleware(contexteditor.WithKeepLastTools(k))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-long"},
 		taskagent.WithCaller(rc),
@@ -255,9 +257,9 @@ func TestIntegration_ContextEditor_EventEmission(t *testing.T) {
 		return nil
 	}, schema.EventContextEdited))
 
-	editor := largemodel.NewContextEditorMiddleware(
-		largemodel.WithKeepLastTools(2),
-		largemodel.WithContextEditDispatch(mgr.Dispatch),
+	editor := contexteditor.NewContextEditorMiddleware(
+		contexteditor.WithKeepLastTools(2),
+		contexteditor.WithContextEditDispatch(mgr.Dispatch),
 	)
 
 	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{Responses: []*largemodel.Response{
@@ -348,9 +350,9 @@ func TestIntegration_ContextEditor_SilentPassUnderK(t *testing.T) {
 		return nil
 	}, schema.EventContextEdited))
 
-	editor := largemodel.NewContextEditorMiddleware(
-		largemodel.WithKeepLastTools(5),
-		largemodel.WithContextEditDispatch(mgr.Dispatch),
+	editor := contexteditor.NewContextEditorMiddleware(
+		contexteditor.WithKeepLastTools(5),
+		contexteditor.WithContextEditDispatch(mgr.Dispatch),
 	)
 
 	// Build a request directly so we can compare slice headers — the
@@ -404,11 +406,11 @@ func TestIntegration_ContextEditor_MinElidedBytesThreshold(t *testing.T) {
 		return nil
 	}, schema.EventContextEdited))
 
-	editor := largemodel.NewContextEditorMiddleware(
-		largemodel.WithKeepLastTools(1),
+	editor := contexteditor.NewContextEditorMiddleware(
+		contexteditor.WithKeepLastTools(1),
 		// Each tool_result is ~10 bytes; 1_000_000 floor blocks edits.
-		largemodel.WithMinElidedBytes(1_000_000),
-		largemodel.WithContextEditDispatch(mgr.Dispatch),
+		contexteditor.WithMinElidedBytes(1_000_000),
+		contexteditor.WithContextEditDispatch(mgr.Dispatch),
 	)
 
 	rc := &recordingCompleter{FakeCaller: &largemodel.FakeCaller{
@@ -470,7 +472,7 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 
 	cap := &streamCapturer{inner: client}
 
-	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(k))
+	editor := contexteditor.NewContextEditorMiddleware(contexteditor.WithKeepLastTools(k))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-edit-stream"},
 		taskagent.WithCaller(cap),
@@ -577,7 +579,7 @@ func TestIntegration_TaskAgent_ContextEditor_CallerMutationInvariant(t *testing.
 		stopResponse("done"),
 	}}}
 
-	editor := largemodel.NewContextEditorMiddleware(largemodel.WithKeepLastTools(1))
+	editor := contexteditor.NewContextEditorMiddleware(contexteditor.WithKeepLastTools(1))
 	a := taskagent.New(
 		agent.Config{ID: "ctx-mut"},
 		taskagent.WithCaller(rc),

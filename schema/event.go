@@ -111,7 +111,7 @@ const (
 	EventInterruptDecisionStored = "interrupt_decision_stored"
 	EventInterruptResumed        = "interrupt_resumed"
 
-	// Context editing event (emitted by largemodel.ContextEditorMiddleware
+	// Context editing event (emitted by contexteditor.ContextEditorMiddleware
 	// when at least one tool_result in an outgoing Request is folded
 	// into a placeholder). Payload is ContextEditedData. Silent passes
 	// (nothing eligible / under threshold) emit no event.
@@ -559,7 +559,7 @@ type InterruptResumedData struct {
 func (InterruptResumedData) eventData() {}
 
 // ContextEditedData is the payload for EventContextEdited. It is
-// emitted by largemodel.ContextEditorMiddleware after a successful
+// emitted by contexteditor.ContextEditorMiddleware after a successful
 // edit pass on a single outgoing Request. Edited is always >= 1
 // (silent passes emit no event).
 type ContextEditedData struct {

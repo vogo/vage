@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
@@ -25,6 +25,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/vogo/vage/largemodel"
 
 	"github.com/vogo/vage/schema"
 )
@@ -70,16 +72,16 @@ func NewDebugMiddleware(sink DebugSink) *DebugMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *DebugMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *DebugMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto:      next.Protocol(),
 		Chat:       m.call(next),
 		ChatStream: m.callStream(next),
 	}
 }
 
-func (m *DebugMiddleware) call(next Caller) func(ctx context.Context, req *Request) (*Response, error) {
-	return func(ctx context.Context, req *Request) (*Response, error) {
+func (m *DebugMiddleware) call(next largemodel.Caller) func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	return func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
 
@@ -103,8 +105,8 @@ func (m *DebugMiddleware) call(next Caller) func(ctx context.Context, req *Reque
 	}
 }
 
-func (m *DebugMiddleware) callStream(next Caller) func(ctx context.Context, req *Request) (*Stream, error) {
-	return func(ctx context.Context, req *Request) (*Stream, error) {
+func (m *DebugMiddleware) callStream(next largemodel.Caller) func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+	return func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 		corr := m.sink.NewCorrelationID()
 		start := time.Now()
 
@@ -126,11 +128,11 @@ func (m *DebugMiddleware) callStream(next Caller) func(ctx context.Context, req 
 		// safe to call concurrently, so we must guard the accumulator.
 		var (
 			mu        sync.Mutex
-			acc       StreamAccumulator
+			acc       largemodel.StreamAccumulator
 			lastUsage *schema.Usage
 		)
 
-		onChunk := func(chunk *Chunk) {
+		onChunk := func(chunk *largemodel.Chunk) {
 			mu.Lock()
 			defer mu.Unlock()
 
@@ -160,11 +162,11 @@ func (m *DebugMiddleware) callStream(next Caller) func(ctx context.Context, req 
 			m.sink.Emit(ctx, KindLLMResponse, corr, fields)
 		}
 
-		return InterceptStream(s, onChunk, onDone), nil
+		return largemodel.InterceptStream(s, onChunk, onDone), nil
 	}
 }
 
-func requestFields(req *Request, streamed bool) map[string]any {
+func requestFields(req *largemodel.Request, streamed bool) map[string]any {
 	if req == nil {
 		return map[string]any{}
 	}
@@ -181,7 +183,7 @@ func requestFields(req *Request, streamed bool) map[string]any {
 	}
 }
 
-func responseFields(resp *Response, dur time.Duration, streamed bool) map[string]any {
+func responseFields(resp *largemodel.Response, dur time.Duration, streamed bool) map[string]any {
 	fields := map[string]any{
 		"duration": dur,
 		"streamed": streamed,

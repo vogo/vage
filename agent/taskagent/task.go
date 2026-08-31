@@ -29,6 +29,7 @@ import (
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/interrupt"
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware/contexteditor"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -117,7 +118,7 @@ type Agent struct {
 	// contextEditor, when non-nil, is wrapped around caller at
 	// the end of New so multi-iteration ReAct loops automatically fold
 	// older tool_result messages into placeholders. See WithContextEditor.
-	contextEditor *largemodel.ContextEditorMiddleware
+	contextEditor *contexteditor.ContextEditorMiddleware
 }
 
 var (
@@ -388,7 +389,7 @@ func WithBuildReportSink(sink vctx.BuildReportSink) Option {
 // order does not matter. Pass nil to leave the chain untouched. If the
 // caller is itself nil at New time the option is a no-op (the agent will
 // fail at first Run as before).
-func WithContextEditor(mw *largemodel.ContextEditorMiddleware) Option {
+func WithContextEditor(mw *contexteditor.ContextEditorMiddleware) Option {
 	return func(a *Agent) { a.contextEditor = mw }
 }
 

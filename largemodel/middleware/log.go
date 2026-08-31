@@ -15,12 +15,14 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/vogo/vage/largemodel"
 )
 
 // LogMiddleware logs chat completion requests and responses using slog.
@@ -47,10 +49,10 @@ func NewLogMiddleware(opts ...LogOption) *LogMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *LogMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *LogMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			start := time.Now()
 			m.logger.InfoContext(
 				ctx, "chat_completion_start",
@@ -84,7 +86,7 @@ func (m *LogMiddleware) Wrap(next Caller) Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			m.logger.InfoContext(
 				ctx, "chat_completion_stream_start",
 				"model", req.Model,

@@ -17,7 +17,7 @@
 | `largemodel/compose_options.go` | 池化 Caller 的中立选项(并发、重试、恢复时间);厂商 client option 只以各 provider 胶水自有的结构体字段出现 |
 | `largemodel/compose_pool.go` | provider-neutral 池集合与端点健康视图合并 |
 | `largemodel/openai_compose.go`、`anthropic_compose.go` | **唯一允许 import aimodel 的根包文件**:池 backend 绑定、`With*ClientOptions`、native client 构造、endpoint→provider spec 转换与 `*FromConfig` 入口 |
-| `largemodel/endpoint_config.go` | 中立端点配置与公开 API 类型(`OpenAIConfig`、`WithRetryPolicy`、路由类型再导出) |
+| `largemodel/endpoint_config.go` | 中立端点配置与 Caller 契约类型(`OpenAIConfig`、`WithRetryPolicy`、`Strategy`、`EndpointCost`);路由观测类型(`EndpointStat`、`AttemptResult`、状态常量)在 `largemodel/router` |
 | `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
 | `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
 | `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
@@ -44,17 +44,18 @@
 
 ## 中间件清单
 
-| 文件 | 中间件 | 作用 |
-|------|--------|------|
-| `largemodel/timeout.go` | 超时 | 单次调用时限 |
-| `largemodel/ratelimit.go` | 限流 | 调用速率控制 |
-| `largemodel/cache.go` | 缓存 | 相同请求复用响应 |
-| `largemodel/log.go`/`debug.go`/`metrics.go` | 可观测 | 日志、调试、指标 |
-| `largemodel/budget_middleware.go` | 预算 | token 消耗核算,配合 Agent 预算终止 |
-| `largemodel/overflow.go` | 溢出 | 上下文超限处置 |
-| `largemodel/context_editor.go` | 上下文编辑 | 折叠旧工具结果、外置超大结果 |
-| `largemodel/context_editor_compat.go` | V1 兼容层 | 隔离旧版占位符行为 |
+根包保留 `Middleware` 接口与 `Chain`/`DefaultChain`/`Model` 装配;具体实现位于子包:
+
+| 包 / 文件 | 中间件 | 作用 |
+|-----------|--------|------|
+| `largemodel/middleware/timeout.go` | 超时 | 单次调用时限 |
+| `largemodel/middleware/ratelimit.go` | 限流 | 调用速率控制 |
+| `largemodel/middleware/cache.go` | 缓存 | 相同请求复用响应 |
+| `largemodel/middleware/log.go`、`debug.go`、`metrics.go` | 可观测 | 日志、调试、指标 |
+| `largemodel/middleware/budget_middleware.go` | 预算 | token 消耗核算,配合 Agent 预算终止 |
+| `largemodel/middleware/contexteditor/` | 上下文编辑 | 折叠旧工具结果、外置超大结果;含 `context_editor_compat.go` V1 兼容层 |
 | `largemodel/middleware.go`/`model.go` | 链装配 | 中间件组合入口 |
+| `largemodel/overflow.go` | (工具函数) | `IsContextOverflowError`;非中间件 |
 
 ## 关键设计决策
 
@@ -67,7 +68,7 @@
 - **信封隔离厂商类型**:`Request`/`Response`/`Chunk` 是 vage 自己的调用信封,厂商 wire 类型只出现在 provider 实现内部,因此中间件对协议无感、可跨协议复用。
 - **prompt caching 下沉到 provider**:调用层只在请求上表达"要缓存"的意图,cache_control 断点由 Anthropic provider 渲染;OpenAI 自动缓存相同前缀,该意图无 wire 效果。
 - **装饰器链而非配置开关**:每个治理关注点是一个独立中间件,使用方按需组合、自定排序。语义由组合顺序显式表达,而非隐藏在标志位里。
-- **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
+- **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到 `largemodel/middleware/contexteditor` 的兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
 - **浅拷贝编辑**:编辑作用于 `Request` 的浅拷贝(`Request.Clone`),绝不篡改调用方原始请求。
 - **资源感知折叠**:stale_resource 判定通过 `ResourceLookupFunc`(`schema.ResourceTracker` 契约;`tool.ResourceTracker` 为兼容别名)查询工具资源语义(每个被检查的工具调用查一次,须廉价,在热路径上),识别被后续写操作作废的旧读结果。
 - **工件外置**:超过单条字节上限的工具结果经 `ArtifactWriter` 按 (sessionID, name) 外置,提示里留短引用;写入须对跨会话并发安全。

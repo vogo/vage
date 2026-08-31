@@ -23,13 +23,12 @@ import (
 	"github.com/vogo/vage/largemodel/router"
 )
 
-// Routing types re-exported from the internal router so callers need not import
-// github.com/vogo/vage/largemodel/router directly.
+// Caller-configuration routing types. Endpoint health snapshots, attempt
+// observers, and status constants live in largemodel/router — import that
+// package when observing pool behaviour.
 type (
-	Strategy      = router.Strategy
-	EndpointStat  = router.EndpointStat
-	AttemptResult = router.AttemptResult
-	EndpointCost  = router.EndpointCost
+	Strategy     = router.Strategy
+	EndpointCost = router.EndpointCost
 )
 
 const (
@@ -38,10 +37,6 @@ const (
 	StrategyWeight   = router.StrategyWeight
 	StrategyCost     = router.StrategyCost
 	StrategyLatency  = router.StrategyLatency
-
-	StatusAvailable = router.StatusAvailable
-	StatusDead      = router.StatusDead
-	StatusProbation = router.StatusProbation
 )
 
 // ErrNoActiveEndpoints reports that every endpoint capable of serving the call

@@ -15,12 +15,14 @@
  * limitations under the License.
  */
 
-package largemodel
+package contexteditor
 
 import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/vogo/vage/largemodel"
 
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
@@ -89,7 +91,7 @@ type turn struct {
 	results []schema.Message // RoleTool entries; ToolCallID must match a call.ID
 }
 
-func buildReact(t *testing.T, turns []turn) *Request {
+func buildReact(t *testing.T, turns []turn) *largemodel.Request {
 	t.Helper()
 	msgs := []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
@@ -99,7 +101,7 @@ func buildReact(t *testing.T, turns []turn) *Request {
 		msgs = append(msgs, schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "", "", tn.calls))
 		msgs = append(msgs, tn.results...)
 	}
-	return &Request{Model: "test", Messages: msgs}
+	return &largemodel.Request{Model: "test", Messages: msgs}
 }
 
 // dispatchCapture records the most recent EventContextEdited payload

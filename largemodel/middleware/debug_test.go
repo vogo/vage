@@ -15,13 +15,15 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/vogo/vage/largemodel"
 
 	"github.com/vogo/vage/schema"
 )
@@ -52,18 +54,18 @@ func (s *captureSink) NewCorrelationID() string {
 }
 
 type stubCompleter struct {
-	resp   *Response
+	resp   *largemodel.Response
 	err    error
-	stream *Stream
+	stream *largemodel.Stream
 }
 
 func (s *stubCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
 
-func (s *stubCompleter) Call(_ context.Context, _ *Request) (*Response, error) {
+func (s *stubCompleter) Call(_ context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 	return s.resp, s.err
 }
 
-func (s *stubCompleter) CallStream(_ context.Context, _ *Request) (*Stream, error) {
+func (s *stubCompleter) CallStream(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 	return s.stream, s.err
 }
 
@@ -71,7 +73,7 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	sink := &captureSink{}
 	mw := NewDebugMiddleware(sink)
 	stub := &stubCompleter{
-		resp: &Response{
+		resp: &largemodel.Response{
 			Model:        "m",
 			Message:      schema.NewAssistantTurn(schema.ProtocolOpenAIChat, "hi", "", nil),
 			FinishReason: "stop",
@@ -80,7 +82,7 @@ func TestDebugMiddleware_Capture(t *testing.T) {
 	}
 	c := mw.Wrap(stub)
 
-	_, err := c.Call(context.Background(), &Request{Model: "m"})
+	_, err := c.Call(context.Background(), &largemodel.Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func TestDebugMiddleware_Error(t *testing.T) {
 	stub := &stubCompleter{err: errors.New("bad")}
 	c := mw.Wrap(stub)
 
-	_, err := c.Call(context.Background(), &Request{Model: "m"})
+	_, err := c.Call(context.Background(), &largemodel.Request{Model: "m"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -119,9 +121,9 @@ func TestDebugMiddleware_Error(t *testing.T) {
 
 func TestDebugMiddleware_NoopSink(t *testing.T) {
 	mw := NewDebugMiddleware(nil)
-	stub := &stubCompleter{resp: &Response{}}
+	stub := &stubCompleter{resp: &largemodel.Response{}}
 	c := mw.Wrap(stub)
-	if _, err := c.Call(context.Background(), &Request{}); err != nil {
+	if _, err := c.Call(context.Background(), &largemodel.Request{}); err != nil {
 		t.Fatal(err)
 	}
 }

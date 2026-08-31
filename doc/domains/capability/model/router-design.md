@@ -30,9 +30,13 @@ largemodel/endpoint_config.go  公开 API: OpenAIConfig / WithRetryPolicy / …
 
 ## 公开 API
 
-应用代码只 import `largemodel`(不必直接 import `router`,除非自定义 routed backend):
+应用代码 import `largemodel` 构建 Caller 与配置;观测路由健康或自定义 routed backend 时 import `largemodel/router`:
 
 ```go
+import (
+    "github.com/vogo/vage/largemodel"
+    "github.com/vogo/vage/largemodel/router"
+)
 caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
     Strategy: largemodel.StrategyFailover,
     Endpoints: []largemodel.OpenAIEndpoint{
@@ -44,12 +48,14 @@ caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
     largemodel.WithRecoverTime(5*time.Minute),
     largemodel.WithConcurrency(8),
 )
-stats := caller.EndpointStats()
+stats := caller.EndpointStats() // []router.EndpointStat
 ```
 
 单端点 = `Endpoints` 长度为 1 的同一构造函数。`vv` 的 `configs.NewLLMClient` 即此路径。
 
-常用类型与常量:`Strategy`、`EndpointStat`、`StrategyFailover` / `StrategyWeight` / …、`StatusAvailable` / `StatusDead` / `StatusProbation`、`ErrNoActiveEndpoints`。
+**根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`。
+
+**router 包(观测与扩展):** `EndpointStat`、`AttemptResult`、`StatusAvailable` / `StatusDead` / `StatusProbation`、`WithAttemptObserver` 回调参数类型等 —— 由 `largemodel/router` 直接 import,根包不再再导出以免与 router 演进漂移。
 
 ## Active endpoint 与 dispatch 链
 

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
@@ -23,14 +23,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
 func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "ok"}}
 	wrapped := NewTimeoutMiddleware(5 * time.Second).Wrap(mock)
 
-	resp, err := wrapped.Call(context.Background(), &Request{})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,25 +43,25 @@ func TestTimeoutMiddleware_ChatCompletion_Success(t *testing.T) {
 }
 
 func TestTimeoutMiddleware_ChatCompletion_Timeout(t *testing.T) {
-	slow := &CallerFunc{
+	slow := &largemodel.CallerFunc{
 		Proto: schema.ProtocolOpenAIChat,
 
-		Chat: func(ctx context.Context, _ *Request) (*Response, error) {
+		Chat: func(ctx context.Context, _ *largemodel.Request) (*largemodel.Response, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-time.After(5 * time.Second):
-				return &Response{}, nil
+				return &largemodel.Response{}, nil
 			}
 		},
-		ChatStream: func(_ context.Context, _ *Request) (*Stream, error) {
+		ChatStream: func(_ context.Context, _ *largemodel.Request) (*largemodel.Stream, error) {
 			return nil, nil
 		},
 	}
 
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(slow)
 
-	_, err := wrapped.Call(context.Background(), &Request{})
+	_, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -72,7 +74,7 @@ func TestTimeoutMiddleware_Stream_Passthrough(t *testing.T) {
 	mock := &mockCompleter{streamResp: nil, streamErr: nil}
 	wrapped := NewTimeoutMiddleware(50 * time.Millisecond).Wrap(mock)
 
-	_, err := wrapped.CallStream(context.Background(), &Request{})
+	_, err := wrapped.CallStream(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

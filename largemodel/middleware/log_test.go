@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"bytes"
@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
@@ -32,14 +34,14 @@ func TestLogMiddleware_ChatCompletion_Success(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	mock := &mockCompleter{chatResp: &Response{
+	mock := &mockCompleter{chatResp: &largemodel.Response{
 		ID:    "resp-1",
 		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
 	}}
 
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	resp, err := wrapped.Call(context.Background(), &Request{Model: "gpt-4"})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +71,7 @@ func TestLogMiddleware_ChatCompletion_Error(t *testing.T) {
 	mock := &mockCompleter{chatErr: errors.New("api down")}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, err := wrapped.Call(context.Background(), &Request{Model: "gpt-4"})
+	_, err := wrapped.Call(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -87,7 +89,7 @@ func TestLogMiddleware_Stream_Success(t *testing.T) {
 	mock := &mockCompleter{}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, _ = wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
+	_, _ = wrapped.CallStream(context.Background(), &largemodel.Request{Model: "gpt-4"})
 
 	output := buf.String()
 	if !strings.Contains(output, "chat_completion_stream_start") {
@@ -102,7 +104,7 @@ func TestLogMiddleware_Stream_Error(t *testing.T) {
 	mock := &mockCompleter{streamErr: errors.New("stream fail")}
 	wrapped := NewLogMiddleware(WithLogger(logger)).Wrap(mock)
 
-	_, err := wrapped.CallStream(context.Background(), &Request{Model: "gpt-4"})
+	_, err := wrapped.CallStream(context.Background(), &largemodel.Request{Model: "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

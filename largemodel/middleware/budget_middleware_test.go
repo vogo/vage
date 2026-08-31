@@ -15,19 +15,21 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
 func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 	sentinel := errors.New("budget exceeded: session tokens 100/100")
-	mock := &mockCompleter{chatResp: &Response{ID: "should-not-reach"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "should-not-reach"}}
 
 	mw := NewBudgetMiddleware(
 		func(_ context.Context) error { return sentinel },
@@ -35,7 +37,7 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.Call(context.Background(), &Request{})
+	_, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("preCheck error should propagate, got %v", err)
 	}
@@ -45,7 +47,7 @@ func TestBudgetMiddlewarePreCheckBlocksCall(t *testing.T) {
 }
 
 func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{
+	mock := &mockCompleter{chatResp: &largemodel.Response{
 		ID:    "ok",
 		Usage: schema.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}}
@@ -57,7 +59,7 @@ func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	if _, err := wrapped.Call(context.Background(), &Request{}); err != nil {
+	if _, err := wrapped.Call(context.Background(), &largemodel.Request{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if recorded.PromptTokens != 10 || recorded.CompletionTokens != 5 {
@@ -66,12 +68,12 @@ func TestBudgetMiddlewarePostRecordFires(t *testing.T) {
 }
 
 func TestBudgetMiddlewareTransparentWhenNilClosures(t *testing.T) {
-	mock := &mockCompleter{chatResp: &Response{ID: "ok"}}
+	mock := &mockCompleter{chatResp: &largemodel.Response{ID: "ok"}}
 
 	mw := NewBudgetMiddleware(nil, nil)
 	wrapped := mw.Wrap(mock)
 
-	resp, err := wrapped.Call(context.Background(), &Request{})
+	resp, err := wrapped.Call(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +96,7 @@ func TestBudgetMiddlewareStreamPreCheckBlocks(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	_, err := wrapped.CallStream(context.Background(), &Request{})
+	_, err := wrapped.CallStream(context.Background(), &largemodel.Request{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("stream preCheck error should propagate, got %v", err)
 	}
@@ -119,7 +121,7 @@ func TestBudgetMiddlewareStreamPassesThroughWhenUpstreamNil(t *testing.T) {
 	)
 	wrapped := mw.Wrap(mock)
 
-	s, err := wrapped.CallStream(context.Background(), &Request{})
+	s, err := wrapped.CallStream(context.Background(), &largemodel.Request{})
 	if err != nil {
 		t.Fatalf("unexpected stream err: %v", err)
 	}

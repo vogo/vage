@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware"
 	"github.com/vogo/vage/schema"
 )
 
@@ -71,7 +72,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Sync(t *testing.T) {
 		events = append(events, e)
 	}
 
-	mw := largemodel.NewMetricsMiddleware(dispatch)
+	mw := middleware.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
 	resp, err := wrapped.Call(context.Background(), &largemodel.Request{
@@ -149,7 +150,7 @@ func TestIntegration_MetricsMiddleware_CacheReadTokens_Stream(t *testing.T) {
 		events = append(events, e)
 	}
 
-	mw := largemodel.NewMetricsMiddleware(dispatch)
+	mw := middleware.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
 	stream, err := wrapped.CallStream(context.Background(), &largemodel.Request{
@@ -241,7 +242,7 @@ func TestIntegration_MetricsMiddleware_ZeroCacheReadTokens(t *testing.T) {
 		events = append(events, e)
 	}
 
-	mw := largemodel.NewMetricsMiddleware(dispatch)
+	mw := middleware.NewMetricsMiddleware(dispatch)
 	wrapped := mw.Wrap(client)
 
 	_, err = wrapped.Call(context.Background(), &largemodel.Request{

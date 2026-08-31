@@ -101,14 +101,14 @@ func NewOpenAIChatCallerFromBackend(backend OpenAIChatBackend) (Caller, error) {
 // mergeEndpointStats for what merging means when pools disagree.
 //
 // EndpointStats is an alias for Stats.
-func (c *OpenAIChatComposeCaller) Stats() []EndpointStat {
+func (c *OpenAIChatComposeCaller) Stats() []router.EndpointStat {
 	return mergeEndpointStats(c.pool.snapshot(func(cc *openais.ComposeClient) []router.EndpointStat {
 		return cc.Stats()
 	}))
 }
 
 // EndpointStats reports endpoint health merged across the caller's pools.
-func (c *OpenAIChatComposeCaller) EndpointStats() []EndpointStat { return c.Stats() }
+func (c *OpenAIChatComposeCaller) EndpointStats() []router.EndpointStat { return c.Stats() }
 
 // openAIComposeBackend borrows a pool for the duration of one call.
 type openAIComposeBackend struct {

@@ -19,7 +19,7 @@ package schema
 
 // ResourceTracker is the minimal cross-component contract for declaring
 // which identifiable resources a tool invocation reads or writes.
-// Consumers — most notably largemodel.ContextEditorMiddleware's
+// Consumers — most notably contexteditor.ContextEditorMiddleware's
 // stale_resource pass — call ResourceIDs to learn access mode per
 // resource ID. Implementations MUST tolerate malformed or missing args
 // and return nil rather than panic.

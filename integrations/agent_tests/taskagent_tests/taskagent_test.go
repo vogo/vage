@@ -33,6 +33,7 @@ import (
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/integrations/internal/testenv"
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/largemodel/middleware"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
@@ -121,8 +122,8 @@ func TestTaskAgentIntegration(t *testing.T) {
 	model := largemodel.New(
 		client,
 		largemodel.WithMiddleware(
-			largemodel.NewMetricsMiddleware(hm.Dispatch),
-			largemodel.NewLogMiddleware(),
+			middleware.NewMetricsMiddleware(hm.Dispatch),
+			middleware.NewLogMiddleware(),
 		),
 	)
 

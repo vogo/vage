@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package largemodel
+package contexteditor
 
 import (
 	"context"
@@ -23,28 +23,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/vage/largemodel"
+
 	"github.com/vogo/vage/schema"
 )
 
 // captureCompleter records the request the middleware finally sent
 // downstream, so tests can compare it against the caller's request.
 type captureCompleter struct {
-	gotChat   *Request
-	gotStream *Request
-	chatResp  *Response
+	gotChat   *largemodel.Request
+	gotStream *largemodel.Request
+	chatResp  *largemodel.Response
 }
 
 func (c *captureCompleter) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
 
-func (c *captureCompleter) Call(_ context.Context, req *Request) (*Response, error) {
+func (c *captureCompleter) Call(_ context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 	c.gotChat = req
 	if c.chatResp == nil {
-		return &Response{ID: "ok"}, nil
+		return &largemodel.Response{ID: "ok"}, nil
 	}
 	return c.chatResp, nil
 }
 
-func (c *captureCompleter) CallStream(_ context.Context, req *Request) (*Stream, error) {
+func (c *captureCompleter) CallStream(_ context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 	c.gotStream = req
 	return nil, nil
 }
@@ -52,7 +54,7 @@ func (c *captureCompleter) CallStream(_ context.Context, req *Request) (*Stream,
 // makeReq builds a ReAct-style request: user prompt → assistant tool_calls →
 // n tool_result messages, all with synthetic content of size bytes each.
 // Returns the request plus the original tool_call_ids in order.
-func makeReq(n int, contentBytes int) (*Request, []string) {
+func makeReq(n int, contentBytes int) (*largemodel.Request, []string) {
 	msgs := []schema.Message{
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleSystem, "sys"),
 		schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello"),
@@ -74,7 +76,7 @@ func makeReq(n int, contentBytes int) (*Request, []string) {
 		msgs = append(msgs, schema.NewToolResultMessage(schema.ProtocolOpenAIChat, id, body, false))
 	}
 
-	return &Request{Model: "test", Messages: msgs}, ids
+	return &largemodel.Request{Model: "test", Messages: msgs}, ids
 }
 
 // TC-1: the K most recent tool_result messages stay verbatim, every
@@ -391,7 +393,7 @@ func TestContextEditor_NilOrEmptyRequest(t *testing.T) {
 	mw := NewContextEditorMiddleware()
 	wrapped := mw.Wrap(cap)
 
-	if _, err := wrapped.Call(context.Background(), &Request{}); err != nil {
+	if _, err := wrapped.Call(context.Background(), &largemodel.Request{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cap.gotChat == nil {

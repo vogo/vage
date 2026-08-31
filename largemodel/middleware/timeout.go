@@ -15,11 +15,13 @@
  * limitations under the License.
  */
 
-package largemodel
+package middleware
 
 import (
 	"context"
 	"time"
+
+	"github.com/vogo/vage/largemodel"
 )
 
 // TimeoutMiddleware adds a per-call context deadline to Call.
@@ -35,16 +37,16 @@ func NewTimeoutMiddleware(d time.Duration) *TimeoutMiddleware {
 }
 
 // Wrap implements Middleware.
-func (m *TimeoutMiddleware) Wrap(next Caller) Caller {
-	return &CallerFunc{
+func (m *TimeoutMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
+	return &largemodel.CallerFunc{
 		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *Request) (*Response, error) {
+		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			ctx, cancel := context.WithTimeout(ctx, m.timeout)
 			defer cancel()
 
 			return next.Call(ctx, req)
 		},
-		ChatStream: func(ctx context.Context, req *Request) (*Stream, error) {
+		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			// Pass the caller's context directly. Applying a timeout here would
 			// cancel the derived context via defer cancel() as soon as
 			// CallStream returns, killing the stream before the caller
