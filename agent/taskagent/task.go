@@ -311,8 +311,8 @@ func WithIterationStore(s checkpoint.IterationStore) Option {
 // batches — see vage/interrupt. It is one half of the configuration
 // ResumeInterrupt needs; WithInterruptPolicy is the other. Configuring
 // only one of the two is a configuration error surfaced at the first
-// Run/RunStream call (see checkInterruptConfig), or at construction time
-// by NewValidated. Prefer WithInterrupt(InterruptConfig{...}) for the
+// Run/RunStream/Resume call (see checkInterruptConfig), or at construction
+// time by NewValidated. Prefer WithInterrupt(InterruptConfig{...}) for the
 // grouped form.
 func WithInterruptStore(s interrupt.Store) Option {
 	return func(a *Agent) { a.interruptStore = s }
@@ -418,8 +418,8 @@ func WithExtraSources(srcs ...vctx.Source) Option {
 
 // New creates a new Agent with the given config and options. It never
 // fails at construction: a misconfigured interrupt pair surfaces at the
-// first Run/RunStream/ResumeInterrupt call. Use NewValidated when the
-// assembly failure should be diagnosed earlier.
+// first Run/RunStream/Resume/ResumeInterrupt call. Use NewValidated when
+// the assembly failure should be diagnosed earlier.
 func New(cfg agent.Config, opts ...Option) *Agent {
 	return newAgent(cfg, opts...)
 }
@@ -430,7 +430,7 @@ func New(cfg agent.Config, opts ...Option) *Agent {
 // A broken interrupt pair — store without policy, policy without store, or
 // both a custom policy and tool names at once — is returned here as
 // ErrInterruptConfig, before any model, store or tool I/O happens, instead
-// of surfacing at the first Run/RunStream/ResumeInterrupt call.
+// of surfacing at the first Run/RunStream/Resume/ResumeInterrupt call.
 //
 // New keeps its single-return signature for compatibility; reach for
 // NewValidated whenever a diagnostic assembly-time failure is preferable to

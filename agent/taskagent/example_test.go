@@ -98,7 +98,6 @@ func ExampleQuick_withOptions() {
 func ExampleWithInterrupt() {
 	_, err := taskagent.NewValidated(
 		agent.Config{ID: "assistant", Name: "Assistant"},
-		taskagent.WithCaller(exampleCaller("Hello!")),
 		taskagent.WithInterrupt(taskagent.InterruptConfig{
 			Store:     interrupt.NewMapStore(),
 			ToolNames: []string{"ask_user"},
@@ -113,7 +112,6 @@ func ExampleWithInterrupt() {
 func ExampleWithInterrupt_policy() {
 	_, err := taskagent.NewValidated(
 		agent.Config{ID: "assistant", Name: "Assistant"},
-		taskagent.WithCaller(exampleCaller("Hello!")),
 		taskagent.WithInterrupt(taskagent.InterruptConfig{
 			Store: interrupt.NewMapStore(),
 			Policy: taskagent.InterruptPolicyFunc(func(_ context.Context, _ string, calls []schema.ToolCall) []string {
@@ -136,7 +134,6 @@ func ExampleWithInterrupt_policy() {
 func ExampleNewValidated() {
 	_, err := taskagent.NewValidated(
 		agent.Config{ID: "assistant", Name: "Assistant"},
-		taskagent.WithCaller(exampleCaller("Hello!")),
 		taskagent.WithInterrupt(taskagent.InterruptConfig{Store: interrupt.NewMapStore()}),
 	)
 	fmt.Println("config error:", errors.Is(err, taskagent.ErrInterruptConfig))
@@ -148,7 +145,6 @@ func ExampleNewValidated() {
 func ExampleWithGuards() {
 	_, err := taskagent.NewValidated(
 		agent.Config{ID: "assistant", Name: "Assistant"},
-		taskagent.WithCaller(exampleCaller("Hello!")),
 		taskagent.WithGuards(taskagent.GuardsConfig{
 			Input: []guard.Guard{guard.NewLengthGuard(guard.LengthConfig{MaxLength: 1000})},
 		}),
