@@ -21,7 +21,7 @@
 | `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
 | `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
 | `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
-| `largemodel/response_schema.go` | `DegradeResponseSchemaPrompt`:无原生结构化输出映射的 codec 的通用降级路径 |
+| `largemodel/response_schema.go` | 包内 ResponseSchema 提示降级:无原生结构化输出映射的 codec 的 fallback 路径 |
 
 ## 多模态消息编码(image/file)
 
@@ -74,9 +74,9 @@
 - **ResponseSchema:按 codec 静态选择、只选一种表达**:`Request.ResponseSchema` 是 `any`,与 `schema.ToolDef.Parameters` 同形,公共层不引入厂商专属包装类型,也不改写或裁剪 schema。是否走原生映射由 provider codec 静态决定(不按模型名猜测,不发探测请求):
   - **OpenAI Chat**(`provider/openais/chat_codec.go`):`response_format = {"type":"json_schema","json_schema":{"name":"vage_response_schema","schema":<原样>,"strict":true}}`,固定名称保证同一 schema 产生同一 wire 形状。
   - **Anthropic Messages**(`provider/anthropics/messages_codec.go`):`output_config.format = {"type":"json_schema","schema":<原样>}`,复用/保留 `OutputConfig` 上已有的其他配置(如 `Effort`),不使用已废弃的顶层 `output_format`。
-  - **无原生映射的 codec**:调用 `DegradeResponseSchemaPrompt(proto, req)`(该降级不依赖任何厂商 wire,因此留在协议中立层 `response_schema.go`),在请求副本的消息列表里插入一条确定性 framework system 指令(要求裸 JSON、内嵌 schema),插入点在已有的连续前导 system 消息之后,不改变它们的相对顺序,也不修改调用方原始 `Request`/`Messages`;返回的副本上 `ResponseSchema` 被清空,因为约束已完全表达为消息。schema 编不出 JSON 时在网络调用前返回错误。
+  - **无原生映射的 codec**:走包内提示降级(`response_schema.go` 的 `degradeResponseSchemaPrompt`;该降级不依赖任何厂商 wire,因此留在协议中立层),在请求副本的消息列表里插入一条确定性 framework system 指令(要求裸 JSON、内嵌 schema),插入点在已有的连续前导 system 消息之后,不改变它们的相对顺序,也不修改调用方原始 `Request`/`Messages`;返回的副本上 `ResponseSchema` 被清空,因为约束已完全表达为消息。schema 编不出 JSON 时在网络调用前返回错误。
   - 该字段只约束最终助手文本,与 `Tools` 互不干扰,可同时设置;两种表达都会被缓存键(`cache.go` 的 `cacheKeyData.ResponseSchema`)纳入,防止不同输出约束命中同一响应。
-  - 当前无第三个已接入的 provider codec,`DegradeResponseSchemaPrompt` 的契约由测试内合成的不支持 codec 场景固定(`response_schema_test.go`),留给未来新增 codec 直接复用。
+  - 当前无第三个已接入的 provider codec,该降级路径的契约由测试内合成的不支持 codec 场景固定(`response_schema_test.go`),留给未来新增 codec 直接复用。
 
 ## 折叠原因(占位符语义)
 

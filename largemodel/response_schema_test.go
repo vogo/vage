@@ -39,9 +39,9 @@ func TestDegradeResponseSchemaPrompt_NilSchemaNoOp(t *testing.T) {
 		Messages: []schema.Message{schema.NewUserMessage(syntheticProtocol, "hi")},
 	}
 
-	out, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	out, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err != nil {
-		t.Fatalf("DegradeResponseSchemaPrompt: %v", err)
+		t.Fatalf("degradeResponseSchemaPrompt: %v", err)
 	}
 
 	if out != req {
@@ -71,9 +71,9 @@ func TestDegradeResponseSchemaPrompt_InsertsOneInstruction(t *testing.T) {
 		ResponseSchema: respSchema,
 	}
 
-	out, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	out, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err != nil {
-		t.Fatalf("DegradeResponseSchemaPrompt: %v", err)
+		t.Fatalf("degradeResponseSchemaPrompt: %v", err)
 	}
 
 	// The original request must be left exactly as it was.
@@ -144,9 +144,9 @@ func TestDegradeResponseSchemaPrompt_NoLeadingSystem(t *testing.T) {
 		ResponseSchema: map[string]any{"type": "string"},
 	}
 
-	out, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	out, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err != nil {
-		t.Fatalf("DegradeResponseSchemaPrompt: %v", err)
+		t.Fatalf("degradeResponseSchemaPrompt: %v", err)
 	}
 
 	if len(out.Messages) != 2 {
@@ -169,14 +169,14 @@ func TestDegradeResponseSchemaPrompt_Deterministic(t *testing.T) {
 	respSchema := map[string]any{"type": "object", "properties": map[string]any{"a": 1, "b": 2, "c": 3}}
 	req := &Request{ResponseSchema: respSchema}
 
-	out1, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	out1, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err != nil {
-		t.Fatalf("DegradeResponseSchemaPrompt: %v", err)
+		t.Fatalf("degradeResponseSchemaPrompt: %v", err)
 	}
 
-	out2, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	out2, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err != nil {
-		t.Fatalf("DegradeResponseSchemaPrompt: %v", err)
+		t.Fatalf("degradeResponseSchemaPrompt: %v", err)
 	}
 
 	if out1.Messages[0].Text() != out2.Messages[0].Text() {
@@ -190,7 +190,7 @@ func TestDegradeResponseSchemaPrompt_Deterministic(t *testing.T) {
 func TestDegradeResponseSchemaPrompt_UnencodableSchema(t *testing.T) {
 	req := &Request{ResponseSchema: make(chan int)}
 
-	_, err := DegradeResponseSchemaPrompt(syntheticProtocol, req)
+	_, err := degradeResponseSchemaPrompt(syntheticProtocol, req)
 	if err == nil {
 		t.Fatal("expected an error for an unencodable ResponseSchema")
 	}

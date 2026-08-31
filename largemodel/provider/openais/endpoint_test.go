@@ -149,7 +149,7 @@ func TestNewFromEndpoints_ServesResponses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := cc.Responses(context.Background(), responsesRequest())
+	resp, err := cc.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestNestedComposeClient_ServesBothForms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := outer.Responses(context.Background(), responsesRequest())
+	resp, err := outer.responses(context.Background(), responsesRequest())
 	if err != nil {
 		t.Fatal(err)
 	}

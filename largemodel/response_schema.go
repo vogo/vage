@@ -24,14 +24,16 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// DegradeResponseSchemaPrompt is the fallback path for a protocol codec with
+// degradeResponseSchemaPrompt is the fallback path for a protocol codec with
 // no native structured-output mapping (the OpenAI Chat and Anthropic Messages
 // codecs under largemodel/provider instead send req.ResponseSchema as a
-// vendor-native field and never call this). It returns req unchanged when
-// ResponseSchema is nil; otherwise it returns a clone carrying one additional
-// deterministic system instruction that asks the model for raw JSON matching
-// the schema, with ResponseSchema cleared on the clone since the constraint is
-// now fully expressed as a message.
+// vendor-native field and never call this). It stays package-internal on
+// purpose: it is a codec-side detail of how vage honours Request.ResponseSchema,
+// not a capability the application-facing Caller promises. It returns req
+// unchanged when ResponseSchema is nil; otherwise it returns a clone carrying
+// one additional deterministic system instruction that asks the model for raw
+// JSON matching the schema, with ResponseSchema cleared on the clone since the
+// constraint is now fully expressed as a message.
 //
 // The instruction is inserted right after any messages already in the system
 // role, preserving their relative order and content; req and its Messages are
@@ -40,7 +42,7 @@ import (
 //
 // It fails before any network call when ResponseSchema cannot be encoded as
 // JSON, rather than silently sending a request with a weaker guarantee.
-func DegradeResponseSchemaPrompt(proto schema.Protocol, req *Request) (*Request, error) {
+func degradeResponseSchemaPrompt(proto schema.Protocol, req *Request) (*Request, error) {
 	if req.ResponseSchema == nil {
 		return req, nil
 	}

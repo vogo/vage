@@ -7,7 +7,7 @@
 多端点 dispatch 分两层:**路由机制**与**协议语义**分离,池不跨协议混用。
 
 ```
-largemodel/provider/openais     ChatCompletions · ChatCompletionsStream · Responses · ResponsesStream · message codec
+largemodel/provider/openais     ChatCompletions · ChatCompletionsStream · message codec · internal Responses route
 largemodel/provider/anthropics  Messages · MessagesStream · message codec
         │  opaque labels + per-endpoint closure              endpoint index
         ▼                                                              ▲
@@ -107,4 +107,4 @@ stats := caller.EndpointStats()
 
 - **无跨协议 failover** — OpenAI 池与 Anthropic 池独立
 - **中间件链不含 retry** — 避免与 router 重试相乘
-- **Responses API** — `largemodel/provider/openais` 已实现 Responses 路由;vage 公开 `Caller` 当前仅接 Chat / Messages
+- **Responses API** — `largemodel/provider/openais` 保留包内 Responses 路由(无公开入口);vage 公开 `Caller` 当前仅接 Chat / Messages

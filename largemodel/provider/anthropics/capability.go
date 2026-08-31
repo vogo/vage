@@ -54,10 +54,6 @@ type Capability struct {
 	Tools bool
 	// Vision marks the endpoint able to accept image content blocks.
 	Vision bool
-	// MaxContextTokens is the endpoint's context window. It is part of the
-	// contract for future token-budget routing; this SDK does not estimate
-	// token counts, so it is not used for filtering today.
-	MaxContextTokens int
 }
 
 // CapabilityProvider is optionally implemented by a Messenger that can declare

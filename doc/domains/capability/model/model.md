@@ -24,7 +24,7 @@
 
 ## 核心实体(概念层)
 
-- **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。当前公开 Caller 支持 openai-chat / anthropic-messages;`openai-responses` 常量已预留,provider 侧有 Responses 路由,但尚未接入公开 Caller(`Protocol.Valid` 拒绝)。
+- **Protocol(协议)**:模型绑定的厂商 wire 协议,配置期确定。当前公开 Caller 支持 openai-chat / anthropic-messages;`openai-responses` 常量已预留(provider 侧有包内 Responses 路由),但尚未接入公开 Caller(`Protocol.Valid` 拒绝)。
 - **Caller(调用接缝)**:一次模型调用的协议无关接口;每种协议一个实现,拥有该厂商的请求构造、响应解析、流解码与错误归一化。
 - **Backend(后端接口)**:Caller 调用的最小方法集,由 `largemodel/provider/{openais,anthropics}` 路由池实现(也可由使用方注入裸 native 客户端以绕过路由);是所有调用路径的共同接缝。
 - **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `largemodel/router`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
@@ -35,7 +35,7 @@
 - **预算中间件(budget)**:在调用前后核算 token 消耗,配合 Agent 的预算终止。
 - **溢出处理(overflow)**:上下文超限时的处置。
 - **上下文编辑器(ContextEditor)**:请求到达模型前,把较早的工具结果折叠为短占位符,并可将超大工具结果外置到工件存储。
-- **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段;无原生映射的 codec 走 `DegradeResponseSchemaPrompt` 降级为确定性 system 指令。三态互斥,一次调用只选一种;vage 不解析、不校验、不清理最终 JSON。
+- **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段;无原生映射的 codec 走包内提示降级(在请求副本插入确定性 system 指令)。三态互斥,一次调用只选一种;vage 不解析、不校验、不清理最终 JSON。
 - **多模态输入(image/file)**:`schema.MessagePartImage`/`MessagePartFile` 是用户消息可携带的 provider-neutral 媒体来源(URL、内联 Data+MimeType,文件另可 FileID);MimeType / Filename 只属于内联 Data 来源。厂商 wire 字段只出现在 `EncodeOpenAIMessage`/`EncodeAnthropicMessage` 内部,来源到 wire 的映射固定,见 [model-design](model-design.md)。
 
 ## 业务规则与不变式
