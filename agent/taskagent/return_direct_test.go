@@ -600,7 +600,7 @@ func TestAgent_RunStream_ReturnDirect_NoSecondIteration(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{toolCallChunks("tc-1", "fetch", `{}`)})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {

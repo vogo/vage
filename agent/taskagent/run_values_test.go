@@ -148,11 +148,11 @@ func TestRunValues_SharedAcrossReactRounds_Stream(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	a := New(agent.Config{ID: "rv-stream"}, WithCaller(client), WithToolRegistry(reg))
@@ -442,11 +442,11 @@ func TestRunValues_CancelledStreamLeavesNoResidue(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	streamAgent := New(agent.Config{ID: "rv-cancel"}, WithCaller(client), WithToolRegistry(reg))

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/largemodel"
@@ -31,13 +32,13 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// ExampleNewOpenAIChatCallerFromConfig_singleEndpoint builds a single OpenAI
-// endpoint the same way the multi-endpoint example does. Passing an empty base
-// URL uses OpenAI's own endpoint; any OpenAI-compatible endpoint works by
-// passing its URL instead.
-func ExampleNewOpenAIChatCallerFromConfig_singleEndpoint() {
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
-		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-your-key", BaseURL: "https://api.openai.com/v1"}},
+// ExampleNewCaller builds a caller over a single OpenAI endpoint. The type of
+// the argument picks the protocol, and an unnamed lone endpoint is aliased
+// "default". Passing an empty base URL uses OpenAI's own endpoint; any
+// OpenAI-compatible endpoint works by passing its URL instead.
+func ExampleNewCaller() {
+	caller, err := largemodel.NewCaller(largemodel.OpenAIEndpoint{
+		APIKey: "sk-your-key", BaseURL: "https://api.openai.com/v1",
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -57,20 +58,17 @@ func ExampleNewOpenAIChatCallerFromConfig_singleEndpoint() {
 	// Output: openai-chat
 }
 
-// ExampleNewAnthropicMessagesCallerFromConfig builds a model endpoint on
-// Anthropic's Messages API. The differences from OpenAI are the credential,
-// the default endpoint, and the vendor options — the call surface is identical.
-func ExampleNewAnthropicMessagesCallerFromConfig() {
+// ExampleNewCaller_anthropic builds a model endpoint on Anthropic's Messages
+// API. Only the endpoint type differs from the OpenAI example — that type is
+// what selects the wire protocol, at compile time.
+func ExampleNewCaller_anthropic() {
 	// An empty base URL uses https://api.anthropic.com. Vendor headers are
 	// set through the provider's own client options, and the pool's retry and
 	// recovery behaviour through largemodel routing options.
-	caller, err := largemodel.NewAnthropicMessagesCallerFromConfig(
-		largemodel.AnthropicConfig{
-			Endpoints: []largemodel.AnthropicEndpoint{{
-				Alias:   "default",
-				APIKey:  "sk-ant-your-key",
-				BaseURL: "",
-			}},
+	caller, err := largemodel.NewCaller(
+		largemodel.AnthropicEndpoint{
+			APIKey:  "sk-ant-your-key",
+			BaseURL: "",
 		},
 		largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")),
 		largemodel.WithRetryPolicy(time.Second, 2),
@@ -90,10 +88,10 @@ func ExampleNewAnthropicMessagesCallerFromConfig() {
 	// Output: anthropic-messages
 }
 
-// ExampleNewOpenAIChatCallerFromConfig spreads one logical model over several
+// ExampleBuildCaller spreads one logical model over several
 // OpenAI-compatible endpoints.
-func ExampleNewOpenAIChatCallerFromConfig() {
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(
+func ExampleBuildCaller() {
+	caller, err := largemodel.BuildCaller(
 		largemodel.OpenAIConfig{
 			Strategy: largemodel.StrategyFailover,
 			Endpoints: []largemodel.OpenAIEndpoint{
@@ -120,9 +118,9 @@ func ExampleNewOpenAIChatCallerFromConfig() {
 	// Output: openai-chat
 }
 
-// ExampleNewOpenAIChatCallerFromConfig_endpointStats shows per-endpoint health.
-func ExampleNewOpenAIChatCallerFromConfig_endpointStats() {
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+// ExampleBuildCaller_endpointStats shows per-endpoint health.
+func ExampleBuildCaller_endpointStats() {
+	caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{
 			{Alias: "only", APIKey: "sk-test", BaseURL: "https://api.openai.com/v1"},
 		},
@@ -138,10 +136,24 @@ func ExampleNewOpenAIChatCallerFromConfig_endpointStats() {
 	// Output: only available
 }
 
+// ExampleWrapCaller wraps a client the caller built itself. Nothing is routed,
+// retried or health-tracked around it, so the result is a plain Caller with no
+// endpoint health to report. The protocol follows from which backend methods
+// the client implements.
+func ExampleWrapCaller() {
+	caller, err := largemodel.WrapCaller(openai.NewClient("sk-your-key"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(caller.Protocol())
+	// Output: openai-chat
+}
+
 // ExampleCaller_protocolMismatch shows that messages must match the caller's
 // protocol.
 func ExampleCaller_protocolMismatch() {
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test"}},
 	})
 	if err != nil {

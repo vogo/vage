@@ -84,19 +84,6 @@ func newOpenAIComposeCaller(
 	}, nil
 }
 
-// NewOpenAIChatCallerFromBackend wraps a backend the caller built itself — a
-// bare *openai.Client, a hand-assembled compose client, a test double. The
-// backend is used as-is: nothing is routed, retried or health-tracked around
-// it, and if it is a provider pool it still serves one call at a time and must
-// not be shared with agents that run in parallel.
-func NewOpenAIChatCallerFromBackend(backend OpenAIChatBackend) (Caller, error) {
-	if backend == nil {
-		return nil, ErrNoBackend
-	}
-
-	return newOpenAIChatCaller(backend), nil
-}
-
 // Stats reports endpoint health merged across the caller's pools. See
 // mergeEndpointStats for what merging means when pools disagree.
 //
@@ -154,8 +141,8 @@ type openAIComposeOptions struct {
 }
 
 // WithOpenAIClientOptions passes provider client options — base URL overrides,
-// timeouts, custom headers — to the clients [NewOpenAIChatCallerFromConfig]
-// builds. It has no effect on a pool built from endpoint specs, which carries
+// timeouts, custom headers — to the clients [BuildCaller] builds for an
+// [OpenAIConfig]. It has no effect on a pool built from endpoint specs, which carries
 // its connection details per endpoint.
 func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
 	return func(c *composeConfig) {
@@ -163,9 +150,11 @@ func WithOpenAIClientOptions(opts ...openai.ClientOption) ComposeOption {
 	}
 }
 
-// NewOpenAIChatCallerFromConfig builds a Caller over one or more
-// OpenAI-compatible endpoints described by cfg.
-func NewOpenAIChatCallerFromConfig(cfg OpenAIConfig, opts ...CallerOption) (*OpenAIChatComposeCaller, error) {
+// newOpenAIChatCallerFromConfig builds a caller over one or more
+// OpenAI-compatible endpoints described by cfg. It is the single construction
+// path for this protocol: [BuildCaller] hands it a config, [NewCaller] hands
+// it a one-element one.
+func newOpenAIChatCallerFromConfig(cfg OpenAIConfig, opts ...CallerOption) (*OpenAIChatComposeCaller, error) {
 	if len(cfg.Endpoints) == 0 {
 		return nil, fmt.Errorf("vage: at least one OpenAI endpoint is required")
 	}
@@ -175,29 +164,6 @@ func NewOpenAIChatCallerFromConfig(cfg OpenAIConfig, opts ...CallerOption) (*Ope
 	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
 		return buildOpenAIComposeClient(cfg, composeCfg)
 	}, composeCfg)
-}
-
-// NewOpenAIChatCallerFromEndpoint builds a Caller over a single
-// OpenAI-compatible endpoint. It is [NewOpenAIChatCallerFromConfig] for the
-// common case, saving the caller a config struct wrapping a one-element slice.
-// A pool of one gets the same retry and health behaviour as a larger pool;
-// reach for the config form when there is a second endpoint or a non-default
-// [Strategy] to declare.
-//
-// An empty Alias defaults to "default". Aliases are the operational identity
-// used in health snapshots and routing errors and are required deeper down,
-// but a lone endpoint has nothing to be distinguished from, so naming it is
-// the caller's option rather than their obligation.
-func NewOpenAIChatCallerFromEndpoint(
-	endpoint OpenAIEndpoint, opts ...CallerOption,
-) (*OpenAIChatComposeCaller, error) {
-	if endpoint.Alias == "" {
-		endpoint.Alias = DefaultEndpointAlias
-	}
-
-	return NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{endpoint},
-	}, opts...)
 }
 
 // buildOpenAIComposeClient turns the neutral endpoint configuration into a

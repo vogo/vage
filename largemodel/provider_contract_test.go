@@ -64,11 +64,11 @@ type providerCase struct {
 func newOpenAICaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+	c, err := BuildCaller(OpenAIConfig{
 		Endpoints: []OpenAIEndpoint{{Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
 	}, fastRouting())
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	return c
@@ -77,11 +77,11 @@ func newOpenAICaller(t *testing.T, baseURL string) Caller {
 func newAnthropicCaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
-	c, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+	c, err := BuildCaller(AnthropicConfig{
 		Endpoints: []AnthropicEndpoint{{Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
 	}, fastRouting())
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	return c

@@ -463,11 +463,11 @@ func TestIntegration_TaskAgent_ContextEditor_StreamPath(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	cap := &streamCapturer{inner: client}

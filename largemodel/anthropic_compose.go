@@ -66,17 +66,6 @@ func newAnthropicComposeCaller(
 	}, nil
 }
 
-// NewAnthropicMessagesCallerFromBackend wraps a backend the caller built
-// itself. As on the OpenAI side, nothing is routed, retried or health-tracked
-// around it.
-func NewAnthropicMessagesCallerFromBackend(backend AnthropicMessagesBackend) (Caller, error) {
-	if backend == nil {
-		return nil, ErrNoBackend
-	}
-
-	return newAnthropicMessagesCaller(backend), nil
-}
-
 // Stats reports endpoint health merged across the caller's pools.
 func (c *AnthropicMessagesComposeCaller) Stats() []router.EndpointStat {
 	return mergeEndpointStats(c.pool.snapshot(func(cc *anthropics.ComposeClient) []router.EndpointStat {
@@ -129,17 +118,18 @@ type anthropicComposeOptions struct {
 }
 
 // WithAnthropicClientOptions is the Anthropic counterpart of
-// [WithOpenAIClientOptions], for the clients [NewAnthropicMessagesCallerFromConfig]
-// builds.
+// [WithOpenAIClientOptions], for the clients [BuildCaller] builds for an
+// [AnthropicConfig].
 func WithAnthropicClientOptions(opts ...anthropic.ClientOption) ComposeOption {
 	return func(c *composeConfig) {
 		c.anthropic.clientOpts = append(c.anthropic.clientOpts, opts...)
 	}
 }
 
-// NewAnthropicMessagesCallerFromConfig builds a Caller over one or more
-// Anthropic-compatible endpoints described by cfg.
-func NewAnthropicMessagesCallerFromConfig(
+// newAnthropicMessagesCallerFromConfig builds a caller over one or more
+// Anthropic-compatible endpoints described by cfg. As on the OpenAI side it is
+// the single construction path this protocol has.
+func newAnthropicMessagesCallerFromConfig(
 	cfg AnthropicConfig, opts ...CallerOption,
 ) (*AnthropicMessagesComposeCaller, error) {
 	if len(cfg.Endpoints) == 0 {
@@ -151,21 +141,6 @@ func NewAnthropicMessagesCallerFromConfig(
 	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
 		return buildAnthropicComposeClient(cfg, composeCfg)
 	}, composeCfg)
-}
-
-// NewAnthropicMessagesCallerFromEndpoint builds a Caller over a single
-// Anthropic endpoint. It is the Anthropic counterpart of
-// [NewOpenAIChatCallerFromEndpoint], including the empty-Alias default.
-func NewAnthropicMessagesCallerFromEndpoint(
-	endpoint AnthropicEndpoint, opts ...CallerOption,
-) (*AnthropicMessagesComposeCaller, error) {
-	if endpoint.Alias == "" {
-		endpoint.Alias = DefaultEndpointAlias
-	}
-
-	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
-		Endpoints: []AnthropicEndpoint{endpoint},
-	}, opts...)
 }
 
 // buildAnthropicComposeClient turns the neutral endpoint configuration into a

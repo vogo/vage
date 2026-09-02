@@ -28,6 +28,15 @@ import (
 // construction time.
 var ErrNoBackend = errors.New("vage: model backend is required")
 
+// ErrUnsupportedBackend reports a backend passed to [WrapCaller] that
+// implements neither protocol's method set, so no wire format fits it.
+var ErrUnsupportedBackend = errors.New("vage: backend implements no supported model protocol")
+
+// ErrAmbiguousBackend reports a backend passed to [WrapCaller] that implements
+// both protocols. Which wire format its messages take is then the caller's
+// decision to make, not one largemodel can infer.
+var ErrAmbiguousBackend = errors.New("vage: backend implements more than one model protocol")
+
 // statusOverloaded is Anthropic's 529, returned when the API is temporarily
 // over capacity. It has no net/http constant because it is outside the
 // registered status codes.

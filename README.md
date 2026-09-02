@@ -78,13 +78,13 @@ whichever governance middlewares you want:
 
 ```go
 // OpenAI Chat Completions (or any OpenAI-compatible endpoint).
-caller, err := largemodel.NewOpenAIChatCallerFromEndpoint(largemodel.OpenAIEndpoint{
+caller, err := largemodel.NewCaller(largemodel.OpenAIEndpoint{
 	APIKey: apiKey, BaseURL: "https://api.openai.com/v1",
 })
 
 // Anthropic Messages. An empty base URL uses https://api.anthropic.com;
 // vendor headers go through the provider's own options.
-caller, err := largemodel.NewAnthropicMessagesCallerFromEndpoint(
+caller, err := largemodel.NewCaller(
 	largemodel.AnthropicEndpoint{APIKey: apiKey, BaseURL: ""},
 	largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")))
 
@@ -125,7 +125,7 @@ failover.
 `WithRetryPolicy` and `WithRecoverTime` tune them:
 
 ```go
-caller, err := largemodel.NewOpenAIChatCallerFromEndpoint(
+caller, err := largemodel.NewCaller(
 	largemodel.OpenAIEndpoint{APIKey: apiKey, BaseURL: baseURL},
 	largemodel.WithRetryPolicy(time.Second, 2), // 1s then 2s, three attempts
 	largemodel.WithRecoverTime(5*time.Minute),  // how long a dead endpoint stays out
@@ -156,10 +156,10 @@ silently converted. Runnable versions of these snippets live in
 
 A single-endpoint caller is a pool of one, so spreading a model over several
 backends of the same protocol only changes how the pool is built — swap
-`*CallerFromEndpoint` for `*CallerFromConfig` and list them:
+`NewCaller` for `BuildCaller` and list them:
 
 ```go
-caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 	Strategy: largemodel.StrategyFailover,
 	Endpoints: []largemodel.OpenAIEndpoint{
 		{Alias: "primary", BaseURL: primaryURL, APIKey: primaryKey, Model: "gpt-4o"},
@@ -175,6 +175,23 @@ request named. Strategies are failover, random, weighted, cost, and latency;
 `caller.EndpointStats()` reports per-endpoint health merged across the
 caller's pools. There is no cross-protocol failover: an OpenAI pool and an
 Anthropic pool are separate, with no shared request to hand between them.
+
+Both entry points return a `largemodel.ComposeCaller` — a `Caller` that also
+reports `EndpointStats()` — and both pick the protocol from the type of their
+argument at compile time, never by guessing from a base URL or an API key.
+There is a third entry point for a client you assembled yourself:
+
+```go
+// A bare *openai.Client, a hand-built compose client, a test double: used
+// as-is, with nothing routed, retried or health-tracked around it.
+caller, err := largemodel.WrapCaller(openai.NewClient(apiKey))
+```
+
+`WrapCaller` decides the protocol from the methods the backend implements,
+because Go admits no interface with methods in a type union. The two backend
+method sets do not overlap, so a backend implementing neither is refused with
+`largemodel.ErrUnsupportedBackend`, and one implementing both with
+`largemodel.ErrAmbiguousBackend`, rather than being guessed at.
 
 ## Multimodal Input (image/file)
 

@@ -84,11 +84,11 @@ func TestParallelToolCalls_StreamOrdering(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	reg := tool.NewRegistry()
