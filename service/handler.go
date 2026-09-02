@@ -20,9 +20,7 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -117,17 +115,23 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the stream: use StreamAgent if available, otherwise wrap via RunToStream.
+	// Every exit from this handler — client gone, stream error, write failure —
+	// must stop the producer and unblock the forwarding goroutine, so both hang
+	// off one cancelable context rather than off the request's.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	var rs *schema.RunStream
 
 	if sa, ok := a.(agent.StreamAgent); ok {
 		var err error
-		rs, err = sa.RunStream(r.Context(), &req)
+		rs, err = sa.RunStream(ctx, &req)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "agent_error", err.Error())
 			return
 		}
 	} else {
-		rs = agent.RunToStream(r.Context(), a, &req)
+		rs = agent.RunToStream(ctx, a, &req)
 	}
 
 	// Write SSE headers.
@@ -142,21 +146,32 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	events := make(chan sseItem, 64)
 
-	// Receive events from stream in a goroutine.
+	// Receive events from stream in a goroutine. Every send races the context:
+	// the writer loop below can leave with the buffer full, and an unguarded
+	// send would park this goroutine forever, holding the stream open with it.
 	go func() {
 		defer close(events)
-		for {
-			e, err := rs.Recv()
-			if errors.Is(err, io.EOF) {
-				return
+
+		send := func(item sseItem) error {
+			select {
+			case events <- item:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-			if err != nil {
-				data, _ := json.Marshal(ErrorResponse{Code: "stream_error", Message: err.Error()})
-				events <- sseItem{event: "error", data: data}
-				return
-			}
+		}
+
+		err := rs.ForEach(func(e schema.Event) error {
 			data, _ := json.Marshal(e)
-			events <- sseItem{event: e.Type, data: data}
+
+			return send(sseItem{event: e.Type, data: data})
+		})
+
+		// Nobody is left to read a stream_error once the context is done, and
+		// the cancellation is not news about the stream.
+		if err != nil && ctx.Err() == nil {
+			data, _ := json.Marshal(ErrorResponse{Code: "stream_error", Message: err.Error()})
+			_ = send(sseItem{event: "error", data: data})
 		}
 	}()
 
@@ -178,7 +193,7 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
 		}
 	}

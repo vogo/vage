@@ -276,7 +276,16 @@ type LLMCallEndData struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
 	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
-	Stream           bool   `json:"stream"`
+
+	// CacheWriteTokens and ReasoningTokens complete the set of Usage
+	// dimensions that sum across calls, so an observer folding these events
+	// arrives at the same accounting Run returns rather than a lossy subset.
+	// ServiceTier is deliberately absent: it describes one call and does not
+	// combine.
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+
+	Stream bool `json:"stream"`
 }
 
 func (LLMCallEndData) eventData() {}

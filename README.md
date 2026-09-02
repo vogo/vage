@@ -78,16 +78,14 @@ whichever governance middlewares you want:
 
 ```go
 // OpenAI Chat Completions (or any OpenAI-compatible endpoint).
-caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
-	Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: "https://api.openai.com/v1"}},
+caller, err := largemodel.NewOpenAIChatCallerFromEndpoint(largemodel.OpenAIEndpoint{
+	APIKey: apiKey, BaseURL: "https://api.openai.com/v1",
 })
 
 // Anthropic Messages. An empty base URL uses https://api.anthropic.com;
 // vendor headers go through the provider's own options.
-caller, err := largemodel.NewAnthropicMessagesCallerFromConfig(
-	largemodel.AnthropicConfig{
-		Endpoints: []largemodel.AnthropicEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: ""}},
-	},
+caller, err := largemodel.NewAnthropicMessagesCallerFromEndpoint(
+	largemodel.AnthropicEndpoint{APIKey: apiKey, BaseURL: ""},
 	largemodel.WithAnthropicClientOptions(anthropic.WithBeta("context-1m-2025-08-07")))
 
 model := largemodel.New(caller,
@@ -127,10 +125,8 @@ failover.
 `WithRetryPolicy` and `WithRecoverTime` tune them:
 
 ```go
-caller, err := largemodel.NewOpenAIChatCallerFromConfig(
-	largemodel.OpenAIConfig{
-		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: apiKey, BaseURL: baseURL}},
-	},
+caller, err := largemodel.NewOpenAIChatCallerFromEndpoint(
+	largemodel.OpenAIEndpoint{APIKey: apiKey, BaseURL: baseURL},
 	largemodel.WithRetryPolicy(time.Second, 2), // 1s then 2s, three attempts
 	largemodel.WithRecoverTime(5*time.Minute),  // how long a dead endpoint stays out
 )
@@ -159,7 +155,8 @@ silently converted. Runnable versions of these snippets live in
 ### Several endpoints behind one model
 
 A single-endpoint caller is a pool of one, so spreading a model over several
-backends of the same protocol only changes how the pool is built:
+backends of the same protocol only changes how the pool is built — swap
+`*CallerFromEndpoint` for `*CallerFromConfig` and list them:
 
 ```go
 caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
@@ -381,6 +378,68 @@ from parallel tools, but concurrent writes to one key have no defined winner
 and there is no compare-and-swap or ordering guarantee. Nothing here is
 persisted or checkpointed — use `memory` or `workspace` for state that must
 outlive the run.
+
+## Consuming a Stream
+
+`RunStream` is pull-based. `ForEach` drains it to the end and closes it,
+turning the normal end of the stream into a nil error so only real failures
+need handling:
+
+```go
+rs, err := a.RunStream(ctx, req)
+if err != nil {
+	return err
+}
+
+err = rs.ForEach(func(e schema.Event) error {
+	switch d := e.Data.(type) {
+	case schema.TextDeltaData:
+		fmt.Print(d.Delta)
+	case schema.ToolCallStartData:
+		fmt.Printf("\n[tool] %s(%s)\n", d.ToolName, d.Arguments)
+	case schema.ToolResultData:
+		fmt.Printf("[result] %s\n", d.Result.Text())
+	}
+	return nil
+})
+```
+
+Returning an error from the callback stops the drain and comes back unchanged,
+so it doubles as early exit. Relaying one stream onto another needs no callback
+of its own — `send` already has the right shape: `rs.ForEach(send)`.
+
+To end up with what a non-streaming `Run` would have returned, fold the events
+with an `EventAccumulator`:
+
+```go
+var acc schema.EventAccumulator
+
+if err := rs.ForEach(func(e schema.Event) error {
+	acc.Add(e)
+	return nil
+}); err != nil {
+	return err
+}
+
+resp := acc.Response(a.Protocol()) // text, usage, duration, stop reason
+```
+
+The answer comes from `AgentEnd`, not from concatenated deltas. Output guards
+and Run middleware rewrite the terminal message after the deltas are already on
+the wire, and an agent that is not a `StreamAgent` emits no deltas at all — so
+`AgentEnd.Message` is the run's answer whenever it arrives, including when it
+is empty. Only a stream that never reached `AgentEnd` (errored, cancelled,
+abandoned) falls back to the deltas. `Text()` still reports what the stream
+showed live; `Message()` reports the answer and whether the run ever finished.
+
+The accumulator folds every event it is given and does not filter on agent
+identity, so filter before `Add` if the stream carries more than one agent.
+`Usage()` is nil rather than zero when the run emitted no `LLMCallEnd` events
+(no metrics middleware installed) — "unknown" and "spent nothing" are different
+answers. `Response` is a presentation-level reconstruction, not a byte-exact
+replay of `Run`: the event stream carries no provider-native message payloads
+and no interrupt descriptor, so read `ToolCalls()` / `ToolResults()` for the
+tool activity.
 
 ## Reporting Progress From Inside a Tool
 

@@ -239,6 +239,9 @@ func statusOfConfidence(rank int) string {
 	}
 }
 
-// defaultEndpointAlias names the single endpoint of a one-endpoint pool, so
-// its health snapshots and error attribution read the same as a pool's.
-const defaultEndpointAlias = "default"
+// DefaultEndpointAlias names the single endpoint of a one-endpoint pool, so
+// its health snapshots and error attribution read the same as a pool's. The
+// single-endpoint constructors assign it when the caller left Alias empty; it
+// is exported so an operator reading a health snapshot or a routing error can
+// recognise the name nobody chose.
+const DefaultEndpointAlias = "default"

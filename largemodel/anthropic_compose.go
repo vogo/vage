@@ -153,6 +153,21 @@ func NewAnthropicMessagesCallerFromConfig(
 	}, composeCfg)
 }
 
+// NewAnthropicMessagesCallerFromEndpoint builds a Caller over a single
+// Anthropic endpoint. It is the Anthropic counterpart of
+// [NewOpenAIChatCallerFromEndpoint], including the empty-Alias default.
+func NewAnthropicMessagesCallerFromEndpoint(
+	endpoint AnthropicEndpoint, opts ...CallerOption,
+) (*AnthropicMessagesComposeCaller, error) {
+	if endpoint.Alias == "" {
+		endpoint.Alias = DefaultEndpointAlias
+	}
+
+	return NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+		Endpoints: []AnthropicEndpoint{endpoint},
+	}, opts...)
+}
+
 // buildAnthropicComposeClient turns the neutral endpoint configuration into a
 // provider pool, constructing clients here only when caller-supplied client
 // options leave the declarative path unable to express the endpoint.

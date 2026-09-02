@@ -161,3 +161,36 @@ func MergeStreams(ctx context.Context, bufSize int, streams ...*RunStream) *RunS
 		return nil
 	})
 }
+
+// ForEach drains rs to completion, calling fn for every event in arrival
+// order, and closes rs before returning. It is the shared form of the
+// "loop until io.EOF, dispatch on Event.Data" block every stream consumer
+// would otherwise hand-roll.
+//
+// The normal end of a stream (io.EOF) is consumed and reported as a nil
+// error — reaching the end is success, not a failure the caller must
+// classify. Any other Recv error is returned as-is, so producer errors keep
+// their type and stay inspectable with errors.Is/errors.As.
+//
+// A non-nil error from fn stops the drain immediately and is returned
+// unchanged. The stream is still closed, but the events after the stopping
+// one are never delivered: fn's error means "I am done reading", so use it
+// for early exit as well as for failure.
+func (rs *RunStream) ForEach(fn func(Event) error) error {
+	defer func() { _ = rs.Close() }()
+
+	for {
+		e, err := rs.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+
+			return err
+		}
+
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+}
