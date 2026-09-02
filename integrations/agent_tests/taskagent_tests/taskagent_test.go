@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math/rand/v2"
 	"testing"
@@ -208,12 +207,7 @@ func TestTaskAgentIntegration(t *testing.T) {
 }
 
 func drainStream(rs *schema.RunStream) {
-	for {
-		_, recvErr := rs.Recv()
-		if errors.Is(recvErr, io.EOF) || recvErr != nil {
-			break
-		}
-	}
+	_ = rs.ForEach(func(schema.Event) error { return nil })
 }
 
 func runStreaming(a *taskagent.Agent, question string) {
@@ -222,15 +216,7 @@ func runStreaming(a *taskagent.Agent, question string) {
 		log.Fatal(err)
 	}
 
-	for {
-		e, recvErr := rs.Recv()
-		if errors.Is(recvErr, io.EOF) {
-			break
-		}
-		if recvErr != nil {
-			log.Fatal(recvErr)
-		}
-
+	err = rs.ForEach(func(e schema.Event) error {
 		switch data := e.Data.(type) {
 		case schema.AgentStartData:
 			fmt.Println("[stream] Agent started")
@@ -243,20 +229,16 @@ func runStreaming(a *taskagent.Agent, question string) {
 		case schema.ToolCallEndData:
 			fmt.Printf("\n[stream] Tool call %s completed in %dms\n", data.ToolName, data.Duration)
 		case schema.ToolResultData:
-			fmt.Printf("\n[stream] Tool result: %s\n", toolResultText(data.Result))
+			fmt.Printf("\n[stream] Tool result: %s\n", data.Result.Text())
 		case schema.AgentEndData:
 			fmt.Printf("\n[stream] Agent finished in %dms\n", data.Duration)
 		}
-	}
-}
 
-func toolResultText(r schema.ToolResult) string {
-	for _, p := range r.Content {
-		if p.Type == "text" {
-			return p.Text
-		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
-	return ""
 }
 
 // handleGetWeather is a mock weather tool handler.

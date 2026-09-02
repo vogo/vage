@@ -53,7 +53,9 @@ stats := caller.EndpointStats() // []router.EndpointStat
 
 单端点 = `Endpoints` 长度为 1 的同一构造函数。`vv` 的 `configs.NewLLMClient` 即此路径。
 
-**根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`。
+`*CallerFromEndpoint` 是这条路径的便捷入口:它只把一个 endpoint 包成单元素配置再委托 `*FromConfig`,不构成第二套构造实现 —— 默认值、协议推导与选项演进仍只有 `*FromConfig` 一个事实来源(与 taskagent `Quick` 同样的薄包装取舍)。它唯一新增的行为是 **Alias 留空时填 `DefaultEndpointAlias`**:alias 是健康快照与路由错误里的运维身份,provider 层强制要求,但只有一个端点时它没有需要被区分的对象,所以命名是调用方的选项而非义务。有第二个端点或要声明非默认 `Strategy` 时回到 `*FromConfig` —— 便捷入口刻意不承接这些。
+
+**根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`、`DefaultEndpointAlias`。
 
 **router 包(观测与扩展):** `EndpointStat`、`AttemptResult`、`StatusAvailable` / `StatusDead` / `StatusProbation`、`WithAttemptObserver` 回调参数类型等 —— 由 `largemodel/router` 直接 import,根包不再再导出以免与 router 演进漂移。
 

@@ -532,7 +532,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 	caller, err := NewOpenAIChatCallerFromConfig(
 		OpenAIConfig{
 			Endpoints: []OpenAIEndpoint{{
-				Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+				Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
 			}},
 		},
 		WithRetryPolicy(time.Millisecond, 2),
@@ -556,8 +556,8 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 		t.Fatalf("len(Stats()) = %d, want 1", len(stats))
 	}
 
-	if stats[0].Alias != defaultEndpointAlias || stats[0].Status != router.StatusDead {
-		t.Errorf("stat = %+v, want alias=%q status=dead", stats[0], defaultEndpointAlias)
+	if stats[0].Alias != DefaultEndpointAlias || stats[0].Status != router.StatusDead {
+		t.Errorf("stat = %+v, want alias=%q status=dead", stats[0], DefaultEndpointAlias)
 	}
 
 	// With the endpoint dead and nothing to replace it, the next call fails
@@ -587,7 +587,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 	caller, err := NewOpenAIChatCallerFromConfig(
 		OpenAIConfig{
 			Endpoints: []OpenAIEndpoint{{
-				Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
+				Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
 			}},
 		},
 		WithRetryPolicy(time.Millisecond, 2),
@@ -648,7 +648,7 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 	caller, err := NewAnthropicMessagesCallerFromConfig(
 		AnthropicConfig{
 			Endpoints: []AnthropicEndpoint{{
-				Alias:   defaultEndpointAlias,
+				Alias:   DefaultEndpointAlias,
 				APIKey:  "test-key",
 				BaseURL: srv.URL,
 			}},
@@ -772,5 +772,84 @@ func TestMergeEndpointStats(t *testing.T) {
 	// has not given up on it.
 	if merged[1].Status != router.StatusAvailable || !merged[1].Active {
 		t.Errorf("merged[1] = %+v, want status=available active", merged[1])
+	}
+}
+
+// TestCallerFromEndpoint_DefaultsAlias pins the one behaviour the
+// single-endpoint constructors add over their config forms: a caller who did
+// not name their lone endpoint still gets a valid pool, since the alias is
+// required deeper down.
+func TestCallerFromEndpoint_DefaultsAlias(t *testing.T) {
+	openAI, err := NewOpenAIChatCallerFromEndpoint(OpenAIEndpoint{
+		APIKey: "test-key", BaseURL: "https://example.invalid", Model: "test-model",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+	}
+
+	stats := openAI.Stats()
+	if len(stats) != 1 || stats[0].Alias != DefaultEndpointAlias {
+		t.Errorf("openai Stats() = %+v, want one endpoint aliased %q", stats, DefaultEndpointAlias)
+	}
+
+	if got := openAI.Protocol(); got != schema.ProtocolOpenAIChat {
+		t.Errorf("openai Protocol() = %q, want %q", got, schema.ProtocolOpenAIChat)
+	}
+
+	anthropic, err := NewAnthropicMessagesCallerFromEndpoint(AnthropicEndpoint{
+		APIKey: "test-key", BaseURL: "https://example.invalid", Model: "test-model",
+	})
+	if err != nil {
+		t.Fatalf("NewAnthropicMessagesCallerFromEndpoint: %v", err)
+	}
+
+	stats = anthropic.Stats()
+	if len(stats) != 1 || stats[0].Alias != DefaultEndpointAlias {
+		t.Errorf("anthropic Stats() = %+v, want one endpoint aliased %q", stats, DefaultEndpointAlias)
+	}
+
+	if got := anthropic.Protocol(); got != schema.ProtocolAnthropicMessages {
+		t.Errorf("anthropic Protocol() = %q, want %q", got, schema.ProtocolAnthropicMessages)
+	}
+}
+
+func TestCallerFromEndpoint_KeepsExplicitAlias(t *testing.T) {
+	caller, err := NewOpenAIChatCallerFromEndpoint(OpenAIEndpoint{
+		Alias: "primary", APIKey: "test-key", BaseURL: "https://example.invalid",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+	}
+
+	if stats := caller.Stats(); len(stats) != 1 || stats[0].Alias != "primary" {
+		t.Errorf("Stats() = %+v, want the caller's own alias preserved", stats)
+	}
+}
+
+// TestCallerFromEndpoint_IsAPoolOfOne pins that the shorthand routes through
+// the router exactly as the config form does — same retries, same death.
+func TestCallerFromEndpoint_IsAPoolOfOne(t *testing.T) {
+	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
+
+	caller, err := NewOpenAIChatCallerFromEndpoint(
+		OpenAIEndpoint{APIKey: "test-key", BaseURL: srv.URL},
+		WithRetryPolicy(time.Millisecond, 2),
+		WithRecoverTime(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+	}
+
+	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
+		t.Fatal("Call succeeded, want failure")
+	}
+
+	if got := srv.hits.Load(); got != 3 {
+		t.Errorf("server hits = %d, want 3 (one attempt plus two retries)", got)
+	}
+
+	stats := caller.Stats()
+	if len(stats) != 1 || stats[0].Status != router.StatusDead {
+		t.Errorf("Stats() = %+v, want the single endpoint judged dead", stats)
 	}
 }

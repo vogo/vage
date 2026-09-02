@@ -222,3 +222,100 @@ func TestMergeStreams(t *testing.T) {
 		t.Errorf("expected events from both a1 and a2, got agents: %v", agents)
 	}
 }
+
+func TestRunStream_ForEachDrainsAndConsumesEOF(t *testing.T) {
+	rs := NewRunStream(context.Background(), 4, func(_ context.Context, send func(Event) error) error {
+		for _, typ := range []string{EventAgentStart, EventTextDelta, EventAgentEnd} {
+			if err := send(NewEvent(typ, "a", "s", nil)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	var got []string
+	if err := rs.ForEach(func(e Event) error {
+		got = append(got, e.Type)
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEach error = %v, want nil", err)
+	}
+
+	want := []string{EventAgentStart, EventTextDelta, EventAgentEnd}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// ForEach closed the stream on the way out.
+	if _, err := rs.Recv(); !errors.Is(err, ErrRunStreamClosed) {
+		t.Errorf("Recv after ForEach = %v, want ErrRunStreamClosed", err)
+	}
+}
+
+func TestRunStream_ForEachReturnsProducerError(t *testing.T) {
+	producerErr := errors.New("producer broke")
+	rs := NewRunStream(context.Background(), 4, func(_ context.Context, send func(Event) error) error {
+		_ = send(NewEvent(EventAgentStart, "", "", nil))
+		return producerErr
+	})
+
+	seen := 0
+	err := rs.ForEach(func(Event) error {
+		seen++
+		return nil
+	})
+
+	if !errors.Is(err, producerErr) {
+		t.Errorf("ForEach error = %v, want %v", err, producerErr)
+	}
+	if seen != 1 {
+		t.Errorf("delivered %d events before the error, want 1", seen)
+	}
+}
+
+func TestRunStream_ForEachStopsOnCallbackError(t *testing.T) {
+	stop := errors.New("caller is done")
+	rs := NewRunStream(context.Background(), 8, func(_ context.Context, send func(Event) error) error {
+		for range 5 {
+			if err := send(NewEvent(EventTextDelta, "", "", nil)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	seen := 0
+	err := rs.ForEach(func(Event) error {
+		seen++
+		return stop
+	})
+
+	if !errors.Is(err, stop) {
+		t.Errorf("ForEach error = %v, want %v", err, stop)
+	}
+	if seen != 1 {
+		t.Errorf("delivered %d events, want 1 (drain must stop on the first callback error)", seen)
+	}
+}
+
+func TestRunStream_ForEachEmptyStream(t *testing.T) {
+	rs := NewRunStream(context.Background(), 1, func(context.Context, func(Event) error) error {
+		return nil
+	})
+
+	called := false
+	if err := rs.ForEach(func(Event) error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEach error = %v, want nil", err)
+	}
+	if called {
+		t.Error("callback ran on an empty stream")
+	}
+}

@@ -65,7 +65,7 @@ func newOpenAICaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
 	c, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
-		Endpoints: []OpenAIEndpoint{{Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
+		Endpoints: []OpenAIEndpoint{{Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
 	}, fastRouting())
 	if err != nil {
 		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
@@ -78,7 +78,7 @@ func newAnthropicCaller(t *testing.T, baseURL string) Caller {
 	t.Helper()
 
 	c, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
-		Endpoints: []AnthropicEndpoint{{Alias: defaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
+		Endpoints: []AnthropicEndpoint{{Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: baseURL}},
 	}, fastRouting())
 	if err != nil {
 		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)

@@ -75,6 +75,8 @@ func (m *MetricsMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 				CompletionTokens: resp.Usage.CompletionTokens,
 				TotalTokens:      resp.Usage.TotalTokens,
 				CacheReadTokens:  resp.Usage.CacheReadTokens,
+				CacheWriteTokens: resp.Usage.CacheWriteTokens,
+				ReasoningTokens:  resp.Usage.ReasoningTokens,
 			}))
 
 			return resp, nil
@@ -116,6 +118,8 @@ func (m *MetricsMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 					data.CompletionTokens = usage.CompletionTokens
 					data.TotalTokens = usage.TotalTokens
 					data.CacheReadTokens = usage.CacheReadTokens
+					data.CacheWriteTokens = usage.CacheWriteTokens
+					data.ReasoningTokens = usage.ReasoningTokens
 				}
 
 				m.dispatch(ctx, schema.NewEvent(schema.EventLLMCallEnd, "", "", data))
