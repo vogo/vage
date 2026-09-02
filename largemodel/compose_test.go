@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/aimodel/openai"
 	"github.com/vogo/vage/largemodel/provider/anthropics"
 	"github.com/vogo/vage/largemodel/provider/openais"
 	"github.com/vogo/vage/largemodel/router"
@@ -66,14 +67,19 @@ func openAIEndpointsFromSpecs(specs []openais.EndpointSpec) []OpenAIEndpoint {
 func mustOpenAIComposeCaller(t *testing.T, strategy Strategy, specs []openais.EndpointSpec, opts ...ComposeOption) *OpenAIChatComposeCaller {
 	t.Helper()
 
-	caller, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{
+	caller, err := BuildCaller(OpenAIConfig{
 		Strategy: strategy, Endpoints: openAIEndpointsFromSpecs(specs),
 	}, opts...)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
-	return caller
+	composeCaller, ok := caller.(*OpenAIChatComposeCaller)
+	if !ok {
+		t.Fatalf("BuildCaller returned %T, want *OpenAIChatComposeCaller", caller)
+	}
+
+	return composeCaller
 }
 
 func mustAnthropicComposeCaller(t *testing.T, strategy Strategy, specs []anthropics.EndpointSpec, opts ...ComposeOption) *AnthropicMessagesComposeCaller {
@@ -88,14 +94,19 @@ func mustAnthropicComposeCaller(t *testing.T, strategy Strategy, specs []anthrop
 		}
 	}
 
-	caller, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{
+	caller, err := BuildCaller(AnthropicConfig{
 		Strategy: strategy, Endpoints: endpoints,
 	}, opts...)
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
-	return caller
+	composeCaller, ok := caller.(*AnthropicMessagesComposeCaller)
+	if !ok {
+		t.Fatalf("BuildCaller returned %T, want *AnthropicMessagesComposeCaller", caller)
+	}
+
+	return composeCaller
 }
 
 // countingServer replies with status and body, counting the requests it saw
@@ -529,7 +540,7 @@ func TestAnthropicComposeCaller_Failover(t *testing.T) {
 func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCallerFromConfig(
+	caller, err := BuildCaller(
 		OpenAIConfig{
 			Endpoints: []OpenAIEndpoint{{
 				Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
@@ -539,7 +550,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 		WithRecoverTime(time.Minute),
 	)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
@@ -551,7 +562,7 @@ func TestSingleEndpointCaller_IsAPoolOfOne(t *testing.T) {
 		t.Errorf("server hits = %d, want 3", got)
 	}
 
-	stats := caller.Stats()
+	stats := caller.EndpointStats()
 	if len(stats) != 1 {
 		t.Fatalf("len(Stats()) = %d, want 1", len(stats))
 	}
@@ -584,7 +595,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCallerFromConfig(
+	caller, err := BuildCaller(
 		OpenAIConfig{
 			Endpoints: []OpenAIEndpoint{{
 				Alias: DefaultEndpointAlias, APIKey: "test-key", BaseURL: srv.URL,
@@ -594,7 +605,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 		WithRecoverTime(recoverTime),
 	)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
@@ -608,7 +619,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 	// Once the window elapses the endpoint reads as on probation rather than
 	// as plain available: nothing has confirmed it, only time has passed.
 	waitFor(t, func() bool {
-		stats := caller.Stats()
+		stats := caller.EndpointStats()
 
 		return len(stats) == 1 && stats[0].Status == router.StatusProbation
 	})
@@ -625,7 +636,7 @@ func TestComposeCaller_ProbationCostsOneAttempt(t *testing.T) {
 
 	// A failed probation attempt restarts the window, so the endpoint is dead
 	// again rather than staying selectable.
-	if stats := caller.Stats(); stats[0].Status != router.StatusDead {
+	if stats := caller.EndpointStats(); stats[0].Status != router.StatusDead {
 		t.Errorf("status after failed probation = %q, want %q", stats[0].Status, router.StatusDead)
 	}
 }
@@ -645,7 +656,7 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	caller, err := NewAnthropicMessagesCallerFromConfig(
+	caller, err := BuildCaller(
 		AnthropicConfig{
 			Endpoints: []AnthropicEndpoint{{
 				Alias:   DefaultEndpointAlias,
@@ -657,7 +668,7 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 		fastRouting(),
 	)
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolAnthropicMessages)); err != nil {
@@ -672,24 +683,90 @@ func TestSingleEndpointCaller_ClientOptions(t *testing.T) {
 // TestComposeCaller_RejectsEmptyEndpoints checks that a misconfiguration
 // surfaces at construction rather than on the first call.
 func TestComposeCaller_RejectsEmptyEndpoints(t *testing.T) {
-	if _, err := NewOpenAIChatCallerFromConfig(OpenAIConfig{}); err == nil {
-		t.Error("NewOpenAIChatCallerFromConfig with no endpoints succeeded, want error")
+	if _, err := BuildCaller(OpenAIConfig{}); err == nil {
+		t.Error("BuildCaller with no endpoints succeeded, want error")
 	}
 
-	if _, err := NewAnthropicMessagesCallerFromConfig(AnthropicConfig{}); err == nil {
-		t.Error("NewAnthropicMessagesCallerFromConfig with no endpoints succeeded, want error")
+	if _, err := BuildCaller(AnthropicConfig{}); err == nil {
+		t.Error("BuildCaller with no endpoints succeeded, want error")
 	}
 }
 
-// TestComposeCallerFromClient_RejectsNil checks the hand-assembled entry
-// point's one precondition.
-func TestComposeCallerFromClient_RejectsNil(t *testing.T) {
-	if _, err := NewOpenAIChatCallerFromBackend(nil); !errors.Is(err, ErrNoBackend) {
+// openAIOnlyBackend implements OpenAIChatBackend and nothing else.
+type openAIOnlyBackend struct{}
+
+func (openAIOnlyBackend) ChatCompletions(
+	context.Context, *openai.ChatCompletionRequest,
+) (*openai.ChatCompletionResponse, error) {
+	return nil, errors.New("not called")
+}
+
+func (openAIOnlyBackend) ChatCompletionsStream(
+	context.Context, *openai.ChatCompletionRequest,
+) (*openai.ChatCompletionStream, error) {
+	return nil, errors.New("not called")
+}
+
+// anthropicOnlyBackend implements AnthropicMessagesBackend and nothing else.
+type anthropicOnlyBackend struct{}
+
+func (anthropicOnlyBackend) Messages(
+	context.Context, *anthropic.MessagesRequest,
+) (*anthropic.MessagesResponse, error) {
+	return nil, errors.New("not called")
+}
+
+func (anthropicOnlyBackend) MessagesStream(
+	context.Context, *anthropic.MessagesRequest,
+) (*anthropic.MessageStream, error) {
+	return nil, errors.New("not called")
+}
+
+// bothProtocolsBackend speaks both wire protocols, which is what makes it
+// undecidable rather than versatile.
+type bothProtocolsBackend struct {
+	openAIOnlyBackend
+	anthropicOnlyBackend
+}
+
+// TestWrapCaller_RejectsNil checks the hand-assembled entry point's one
+// precondition.
+func TestWrapCaller_RejectsNil(t *testing.T) {
+	if _, err := WrapCaller(nil); !errors.Is(err, ErrNoBackend) {
 		t.Errorf("error = %v, want ErrNoBackend", err)
 	}
+}
 
-	if _, err := NewAnthropicMessagesCallerFromBackend(nil); !errors.Is(err, ErrNoBackend) {
-		t.Errorf("error = %v, want ErrNoBackend", err)
+// TestWrapCaller_DispatchesOnMethodSet pins the run-time dispatch WrapCaller
+// has to use: the backend interfaces carry methods, so no type union could
+// make this a compile-time choice. The two method sets do not overlap, so a
+// backend that implements one is decided — and one that implements both or
+// neither is refused rather than guessed at.
+func TestWrapCaller_DispatchesOnMethodSet(t *testing.T) {
+	openAI, err := WrapCaller(openAIOnlyBackend{})
+	if err != nil {
+		t.Fatalf("WrapCaller(openai backend): %v", err)
+	}
+
+	if got := openAI.Protocol(); got != schema.ProtocolOpenAIChat {
+		t.Errorf("Protocol() = %q, want %q", got, schema.ProtocolOpenAIChat)
+	}
+
+	anthropicCaller, err := WrapCaller(anthropicOnlyBackend{})
+	if err != nil {
+		t.Fatalf("WrapCaller(anthropic backend): %v", err)
+	}
+
+	if got := anthropicCaller.Protocol(); got != schema.ProtocolAnthropicMessages {
+		t.Errorf("Protocol() = %q, want %q", got, schema.ProtocolAnthropicMessages)
+	}
+
+	if _, err := WrapCaller(struct{}{}); !errors.Is(err, ErrUnsupportedBackend) {
+		t.Errorf("error = %v, want ErrUnsupportedBackend", err)
+	}
+
+	if _, err := WrapCaller(bothProtocolsBackend{}); !errors.Is(err, ErrAmbiguousBackend) {
+		t.Errorf("error = %v, want ErrAmbiguousBackend", err)
 	}
 }
 
@@ -775,19 +852,19 @@ func TestMergeEndpointStats(t *testing.T) {
 	}
 }
 
-// TestCallerFromEndpoint_DefaultsAlias pins the one behaviour the
+// TestNewCaller_DefaultsAlias pins the one behaviour the
 // single-endpoint constructors add over their config forms: a caller who did
 // not name their lone endpoint still gets a valid pool, since the alias is
 // required deeper down.
-func TestCallerFromEndpoint_DefaultsAlias(t *testing.T) {
-	openAI, err := NewOpenAIChatCallerFromEndpoint(OpenAIEndpoint{
+func TestNewCaller_DefaultsAlias(t *testing.T) {
+	openAI, err := NewCaller(OpenAIEndpoint{
 		APIKey: "test-key", BaseURL: "https://example.invalid", Model: "test-model",
 	})
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+		t.Fatalf("NewCaller: %v", err)
 	}
 
-	stats := openAI.Stats()
+	stats := openAI.EndpointStats()
 	if len(stats) != 1 || stats[0].Alias != DefaultEndpointAlias {
 		t.Errorf("openai Stats() = %+v, want one endpoint aliased %q", stats, DefaultEndpointAlias)
 	}
@@ -796,14 +873,14 @@ func TestCallerFromEndpoint_DefaultsAlias(t *testing.T) {
 		t.Errorf("openai Protocol() = %q, want %q", got, schema.ProtocolOpenAIChat)
 	}
 
-	anthropic, err := NewAnthropicMessagesCallerFromEndpoint(AnthropicEndpoint{
+	anthropic, err := NewCaller(AnthropicEndpoint{
 		APIKey: "test-key", BaseURL: "https://example.invalid", Model: "test-model",
 	})
 	if err != nil {
-		t.Fatalf("NewAnthropicMessagesCallerFromEndpoint: %v", err)
+		t.Fatalf("NewCaller: %v", err)
 	}
 
-	stats = anthropic.Stats()
+	stats = anthropic.EndpointStats()
 	if len(stats) != 1 || stats[0].Alias != DefaultEndpointAlias {
 		t.Errorf("anthropic Stats() = %+v, want one endpoint aliased %q", stats, DefaultEndpointAlias)
 	}
@@ -813,31 +890,31 @@ func TestCallerFromEndpoint_DefaultsAlias(t *testing.T) {
 	}
 }
 
-func TestCallerFromEndpoint_KeepsExplicitAlias(t *testing.T) {
-	caller, err := NewOpenAIChatCallerFromEndpoint(OpenAIEndpoint{
+func TestNewCaller_KeepsExplicitAlias(t *testing.T) {
+	caller, err := NewCaller(OpenAIEndpoint{
 		Alias: "primary", APIKey: "test-key", BaseURL: "https://example.invalid",
 	})
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+		t.Fatalf("NewCaller: %v", err)
 	}
 
-	if stats := caller.Stats(); len(stats) != 1 || stats[0].Alias != "primary" {
+	if stats := caller.EndpointStats(); len(stats) != 1 || stats[0].Alias != "primary" {
 		t.Errorf("Stats() = %+v, want the caller's own alias preserved", stats)
 	}
 }
 
-// TestCallerFromEndpoint_IsAPoolOfOne pins that the shorthand routes through
+// TestNewCaller_IsAPoolOfOne pins that the shorthand routes through
 // the router exactly as the config form does — same retries, same death.
-func TestCallerFromEndpoint_IsAPoolOfOne(t *testing.T) {
+func TestNewCaller_IsAPoolOfOne(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`, 0)
 
-	caller, err := NewOpenAIChatCallerFromEndpoint(
+	caller, err := NewCaller(
 		OpenAIEndpoint{APIKey: "test-key", BaseURL: srv.URL},
 		WithRetryPolicy(time.Millisecond, 2),
 		WithRecoverTime(time.Minute),
 	)
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromEndpoint: %v", err)
+		t.Fatalf("NewCaller: %v", err)
 	}
 
 	if _, err := caller.Call(context.Background(), simpleRequest(schema.ProtocolOpenAIChat)); err == nil {
@@ -848,7 +925,7 @@ func TestCallerFromEndpoint_IsAPoolOfOne(t *testing.T) {
 		t.Errorf("server hits = %d, want 3 (one attempt plus two retries)", got)
 	}
 
-	stats := caller.Stats()
+	stats := caller.EndpointStats()
 	if len(stats) != 1 || stats[0].Status != router.StatusDead {
 		t.Errorf("Stats() = %+v, want the single endpoint judged dead", stats)
 	}

@@ -643,7 +643,7 @@ func TestBashToolWithLLMAgent(t *testing.T) {
 		t.Skip("Skipping LLM integration test: no API key in environment")
 	}
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{
 			Alias:   "default",
 			APIKey:  apiKey,

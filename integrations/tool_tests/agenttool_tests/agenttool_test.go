@@ -53,7 +53,7 @@ func TestAgentAsToolIntegration(t *testing.T) {
 		return
 	}
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{
 			Alias:   "default",
 			APIKey:  apiKey,

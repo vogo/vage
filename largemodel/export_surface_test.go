@@ -38,6 +38,27 @@ func TestExportSurface_ResponseSchemaPromptNotExported(t *testing.T) {
 	}
 }
 
+// TestExportSurface_VendorPrefixedConstructorsStayUnexported pins the public
+// construction surface to NewCaller, BuildCaller and WrapCaller. A
+// vendor-prefixed constructor added as a convenience would put a second naming
+// beside them, which is the thing the generic entry points exist to avoid.
+func TestExportSurface_VendorPrefixedConstructorsStayUnexported(t *testing.T) {
+	unexported := map[string]bool{
+		"NewOpenAIChatCallerFromConfig":          true,
+		"NewOpenAIChatCallerFromEndpoint":        true,
+		"NewOpenAIChatCallerFromBackend":         true,
+		"NewAnthropicMessagesCallerFromConfig":   true,
+		"NewAnthropicMessagesCallerFromEndpoint": true,
+		"NewAnthropicMessagesCallerFromBackend":  true,
+	}
+
+	for _, name := range exportedDeclNames(t) {
+		if unexported[name] {
+			t.Errorf("%s must not be exported: the entry points are NewCaller, BuildCaller and WrapCaller", name)
+		}
+	}
+}
+
 func TestExportSurface_ProtocolOpenAIResponsesStillRejected(t *testing.T) {
 	if schema.ProtocolOpenAIResponses.Valid() {
 		t.Fatal("ProtocolOpenAIResponses must remain invalid until a public Caller exists")

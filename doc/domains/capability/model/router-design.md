@@ -25,6 +25,7 @@ largemodel/endpoint_config.go  公开 API: OpenAIConfig / WithRetryPolicy / …
 | provider 绑定 | `largemodel/provider/openais`、`provider/anthropics` | wire 类型复制、canonical message codec、model 覆盖、capability 谓词 |
 | 并发池 | `largemodel/compose_pool.go` | 一 router 池同时只服务一次调用;Caller 按需建池、读时合并健康 |
 | Caller adapter | `largemodel/openai_compose.go`、`anthropic_compose.go` | 把 provider router 池适配到根包 Backend 接口与公开 `Caller` facade |
+| 构造入口 | `largemodel/compose_caller.go` | `NewCaller` / `BuildCaller` / `WrapCaller` 与 `ComposeCaller` 契约 |
 
 底层 HTTP 仍由 `github.com/vogo/aimodel/openai`、`anthropic` 发出;aimodel **不含** retry 与路由。
 
@@ -37,7 +38,7 @@ import (
     "github.com/vogo/vage/largemodel"
     "github.com/vogo/vage/largemodel/router"
 )
-caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
     Strategy: largemodel.StrategyFailover,
     Endpoints: []largemodel.OpenAIEndpoint{
         {Alias: "primary", APIKey: k1, BaseURL: u1, Model: "gpt-4o"},
@@ -51,11 +52,25 @@ caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
 stats := caller.EndpointStats() // []router.EndpointStat
 ```
 
-单端点 = `Endpoints` 长度为 1 的同一构造函数。`vv` 的 `configs.NewLLMClient` 即此路径。
+单端点 = `Endpoints` 长度为 1 的同一条路径。
 
-`*CallerFromEndpoint` 是这条路径的便捷入口:它只把一个 endpoint 包成单元素配置再委托 `*FromConfig`,不构成第二套构造实现 —— 默认值、协议推导与选项演进仍只有 `*FromConfig` 一个事实来源(与 taskagent `Quick` 同样的薄包装取舍)。它唯一新增的行为是 **Alias 留空时填 `DefaultEndpointAlias`**:alias 是健康快照与路由错误里的运维身份,provider 层强制要求,但只有一个端点时它没有需要被区分的对象,所以命名是调用方的选项而非义务。有第二个端点或要声明非默认 `Strategy` 时回到 `*FromConfig` —— 便捷入口刻意不承接这些。
+### 三个构造入口
 
-**根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`、`DefaultEndpointAlias`。
+| 入口 | 输入 | 返回 | 协议如何选定 |
+|---|---|---|---|
+| `NewCaller(ep, opts...)` | 单 endpoint | `ComposeCaller` | 类型参数,编译期 |
+| `BuildCaller(cfg, opts...)` | 多 endpoint / 自定 `Strategy` | `ComposeCaller` | 类型参数,编译期 |
+| `WrapCaller(backend)` | 自建 client | `Caller` | backend 方法集,运行时 |
+
+**协议由参数类型选定,不由入口名选定**:输入类型本身已经决定了协议(`OpenAIEndpoint` 只可能是 OpenAI Chat),入口不再要求调用方把同一个信息声明第二遍。`OpenAIEndpoint` / `OpenAIConfig` 是 struct,可进入类型 union,故 `NewCaller` / `BuildCaller` 把这个选择做成编译期约束:传入不受支持的类型无法通过编译,`switch` 的 `default` 分支不可达。**协议不做运行时推断** —— 不从 BaseURL、不从 API key 前缀猜。
+
+`NewCaller` 是 `BuildCaller` 的便捷入口:把一个 endpoint 包成单元素配置再委托同一条构造路径,不构成第二套实现 —— 默认值、协议推导与选项演进仍只有一个事实来源(与 taskagent `Quick` 同样的薄包装取舍)。它唯一新增的行为是 **Alias 留空时填 `DefaultEndpointAlias`**:alias 是健康快照与路由错误里的运维身份,provider 层强制要求,但只有一个端点时它没有需要被区分的对象,所以命名是调用方的选项而非义务。有第二个端点或要声明非默认 `Strategy` 时回到 `BuildCaller` —— 便捷入口刻意不承接这些。`vv` 的 `configs.NewLLMClient` 即 `NewCaller` 这条路径。
+
+`WrapCaller` 是唯一的运行时分派:`OpenAIChatBackend` / `AnthropicMessagesBackend` 是**带方法的接口**,Go 不允许它们出现在类型 union(`cannot use A in union (A contains methods)`),没有能表达这一选择的约束。代价被限制在可判定的范围内 —— 两个方法集不相交,所以分派是确定的,只有边界情形需要报错:`nil` → `ErrNoBackend`,两个协议都不实现 → `ErrUnsupportedBackend`,两个都实现 → `ErrAmbiguousBackend`(此时 wire 形态是调用方的决策,静默挑一个比报错更糟)。被包的 backend 原样使用:不路由、不重试、不做健康跟踪,所以返回 `Caller` 而非 `ComposeCaller`。
+
+**`ComposeCaller` 是泛型入口的统一返回类型**:`Caller` 加 `EndpointStats() []router.EndpointStat`。泛型函数只能有一个返回类型,而 endpoint 健康是两个具体 caller 中值得保留在这个宽度上的能力。具体类型 `*OpenAIChatComposeCaller` / `*AnthropicMessagesComposeCaller` 仍导出,需要 `Stats()` 或更多时由调用方类型断言。
+
+**根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`、`DefaultEndpointAlias`、`ComposeCaller`。
 
 **router 包(观测与扩展):** `EndpointStat`、`AttemptResult`、`StatusAvailable` / `StatusDead` / `StatusProbation`、`WithAttemptObserver` 回调参数类型等 —— 由 `largemodel/router` 直接 import,根包不再再导出以免与 router 演进漂移。
 

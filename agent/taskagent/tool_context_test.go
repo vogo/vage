@@ -97,11 +97,11 @@ func TestToolCtxInjection_StreamPath(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	a := New(
@@ -157,11 +157,11 @@ func TestTodoWrite_EndToEndStream(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	a := New(agent.Config{ID: "todo-e2e"}, WithCaller(client), WithToolRegistry(reg))
@@ -244,11 +244,11 @@ func TestEmitCustomData_EndToEndStream(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{firstTurn, secondTurn})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("largemodel.NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("largemodel.BuildCaller: %v", err)
 	}
 
 	a := New(agent.Config{ID: "custom-e2e"}, WithCaller(client), WithToolRegistry(reg))

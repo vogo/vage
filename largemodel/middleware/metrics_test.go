@@ -228,7 +228,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	c, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -321,7 +321,7 @@ func TestMetricsMiddleware_Stream_CloseEmitsEndWithoutUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	c, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "sk-test", BaseURL: srv.URL}},
 	})
 	if err != nil {

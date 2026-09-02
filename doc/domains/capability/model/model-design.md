@@ -16,7 +16,7 @@
 | `largemodel/provider/anthropics/` | Anthropic 全部 wire 知识:`messages_codec.go`(请求组装、system 提升与 prompt-cache block、必填 max_tokens、usage/stop_reason 归一、SSE 有状态解码、流内 error 事件与状态映射)、`message_codec.go`、`capability.go`、路由池 |
 | `largemodel/compose_options.go` | 池化 Caller 的中立选项(并发、重试、恢复时间);厂商 client option 只以各 provider 胶水自有的结构体字段出现 |
 | `largemodel/compose_pool.go` | provider-neutral 池集合与端点健康视图合并 |
-| `largemodel/openai_compose.go`、`anthropic_compose.go` | **唯一允许 import aimodel 的根包文件**:池 backend 绑定、`With*ClientOptions`、native client 构造、endpoint→provider spec 转换与 `*FromConfig` 入口 |
+| `largemodel/openai_compose.go`、`anthropic_compose.go` | **唯一允许 import aimodel 的根包文件**:池 backend 绑定、`With*ClientOptions`、native client 构造、endpoint→provider spec 转换与按协议私有的 config 构造路径(公开入口在 `compose_caller.go`) |
 | `largemodel/endpoint_config.go` | 中立端点配置与 Caller 契约类型(`OpenAIConfig`、`WithRetryPolicy`、`Strategy`、`EndpointCost`);路由观测类型(`EndpointStat`、`AttemptResult`、状态常量)在 `largemodel/router` |
 | `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
 | `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |

@@ -395,11 +395,11 @@ func TestAgent_Run_EmptyResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	caller, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
-		t.Fatalf("NewOpenAIChatCallerFromConfig: %v", err)
+		t.Fatalf("BuildCaller: %v", err)
 	}
 
 	a := New(agent.Config{}, WithCaller(caller))
@@ -611,7 +611,7 @@ func TestAgent_RunStream_SimpleText(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -695,7 +695,7 @@ func TestAgent_RunStream_ToolCallLoop(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{tcChunks, textChunks})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -765,7 +765,7 @@ func TestAgent_RunStream_CloseEarly(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{manyChunks})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -805,7 +805,7 @@ func TestAgent_RunStream_MaxIterations(t *testing.T) {
 	srv := sseStreamServer(t, [][]string{tcChunks1, tcChunks2})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -882,7 +882,7 @@ func TestRunStreamText(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
@@ -928,7 +928,7 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 	})
 	defer srv.Close()
 
-	client, err := largemodel.NewOpenAIChatCallerFromConfig(largemodel.OpenAIConfig{
+	client, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
 		Endpoints: []largemodel.OpenAIEndpoint{{Alias: "default", APIKey: "test", BaseURL: srv.URL}},
 	})
 	if err != nil {
