@@ -42,7 +42,7 @@
 | MEM-5 | **压缩可组合**:多个压缩器可串成链,按序施加,每个只负责单一维度。 |
 | MEM-6 | **选择性提升/归档不丢源**:`PromoteWhen`/`ArchiveWhen` 只过滤不删除——不匹配谓词的条目留在原层,归档不触碰 session 源数据;谓词元数据由 `Value` 自行携带(`Importance() float64` / `Tags() []string`),未携带者在选择性谓词下不匹配。 |
 | MEM-7 | **会话记忆按声明的二元组隔离**:不同 `(agentID, sessionID)` 的 session 记忆在读、写、提升和清理上互不可见。scope 是调用方传入的身份声明,不是 TenantID/UserID 授权。空 SessionID 跳过 session 记忆(Run 照常执行)。同一二元组下并发 Run 仍可能用相同 `msg:%06d` 偏移互相覆盖——该限制本阶段不修。 |
-| MEM-8 | **装配预算由调用方传入**:`vctx.BuildInput.Budget` 非零时,Builder 只裁剪 optional Source;system/request 等 must-include 来源仍完整保留。`0` 表示无限。TaskAgent 把解析后的 `RunTokenBudget` 接到该字段(旧字段 `0` 仍是 Agent 默认/无限,只有 `Limits.RunTokenBudget = ptr(0)` 才是新契约下的显式无限)。 |
+| MEM-8 | **窗口预算与 Run 累计用量分离**:结构化 `BuildInput.ContextBudget` 优先;否则旧 `Budget > 0` 仅作总窗口简写、`Budget == 0` 仍为不限。TaskAgent 的模型窗口来自 `WithContextBudget`,不把 `WithRunTokenBudget`/`Limits.RunTokenBudget`(跨轮累计用量)接到窗口字段。 |
 
 ## 状态与转换
 
@@ -59,6 +59,6 @@
 - **session**:会话事件与结构化状态是 Source 的主要事实来源。
 - **model**:摘要类压缩器调用模型能力生成摘要。
 - **vector**:向量召回 Source 通过 `vector` 领域拉取相关历史片段。
-- **agent-core**:任务型 Agent 通过 memory.Manager 读写会话记忆,通过 Builder 装配每轮提示,并把本次 Run 的有效 token 预算传入 `BuildInput.Budget`。
+- **agent-core**:任务型 Agent 通过 memory.Manager 读写会话记忆,通过 Builder 装配每轮提示;`WithContextBudget` 是窗口预算,`WithRunTokenBudget` 是 Run 累计用量,二者独立。
 
 技术实现(压缩器组合、Source 目录、token 估算)见 [memory-design](memory-design.md)。
