@@ -92,7 +92,7 @@ func (b *memoryBase) batchSet(ctx context.Context, entries map[string]any, ttl i
 
 // syncMemory wraps memoryBase with a mutex for concurrent use.
 // It implements the Memory interface and is embedded by SessionMemory
-// and PersistentMemory.
+// and LongTermMemory.
 type syncMemory struct {
 	mu sync.Mutex
 	memoryBase

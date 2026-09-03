@@ -24,8 +24,8 @@ import (
 	"time"
 )
 
-func TestPersistentMemory_SetGet(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_SetGet(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	if err := m.Set(ctx, "key1", "value1", 0); err != nil {
@@ -41,8 +41,8 @@ func TestPersistentMemory_SetGet(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_GetMissing(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_GetMissing(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	val, err := m.Get(ctx, "nonexistent")
@@ -54,8 +54,8 @@ func TestPersistentMemory_GetMissing(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_Delete(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_Delete(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "key1", "value1", 0)
@@ -67,8 +67,8 @@ func TestPersistentMemory_Delete(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_List(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_List(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "msg:1", "hello", 0)
@@ -90,8 +90,8 @@ func TestPersistentMemory_List(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_Clear(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_Clear(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "key1", "value1", 0)
@@ -103,8 +103,8 @@ func TestPersistentMemory_Clear(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_BatchSetGet(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_BatchSetGet(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	batch := map[string]any{"a": 1, "b": 2, "c": 3}
@@ -121,9 +121,9 @@ func TestPersistentMemory_BatchSetGet(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_TTLExpiry(t *testing.T) {
+func TestLongTermMemory_TTLExpiry(t *testing.T) {
 	ms := NewMapStore()
-	m := NewPersistentMemoryWithStore(ms)
+	m := NewLongTermMemory(ms)
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "expiring", "value", 1)
@@ -135,9 +135,9 @@ func TestPersistentMemory_TTLExpiry(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_TTLExpiryList(t *testing.T) {
+func TestLongTermMemory_TTLExpiryList(t *testing.T) {
 	ms := NewMapStore()
-	m := NewPersistentMemoryWithStore(ms)
+	m := NewLongTermMemory(ms)
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "alive", "yes", 0)
@@ -150,8 +150,8 @@ func TestPersistentMemory_TTLExpiryList(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_NoAgentSessionID(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_NoAgentSessionID(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "key1", "value1", 0)
@@ -170,8 +170,8 @@ func TestPersistentMemory_NoAgentSessionID(t *testing.T) {
 	}
 }
 
-func TestPersistentMemory_ConcurrentAccess(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_ConcurrentAccess(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
@@ -192,8 +192,8 @@ func TestPersistentMemory_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func TestPersistentMemory_ContextCanceled(t *testing.T) {
-	m := NewPersistentMemory()
+func TestLongTermMemory_ContextCanceled(t *testing.T) {
+	m := NewInMemoryLongTermMemory()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
