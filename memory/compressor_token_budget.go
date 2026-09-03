@@ -77,3 +77,10 @@ func (c *TokenBudgetCompressor) Compress(ctx context.Context, messages []schema.
 
 	return messages[startIdx:], nil
 }
+
+// CompressWithBudget keeps the most recent messages that fit AvailableHistory.
+// Bounded zero remaining returns empty history instead of the legacy
+// "always keep one" behaviour of Compress(..., maxTokens>0).
+func (c *TokenBudgetCompressor) CompressWithBudget(ctx context.Context, in CompressionInput) ([]schema.Message, error) {
+	return budgetAwareCompress(ctx, in, c.Compress)
+}

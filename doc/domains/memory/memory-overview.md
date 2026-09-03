@@ -13,4 +13,4 @@
 
 - **记忆三层**:working(请求)→ session(对话)→ store(持久),层级只能向上提升。
 - **"事实"与"提示"分离**:`session`/`memory` 存"存在哪些事实",`context` 的 Builder 决定"发什么消息给 LLM"。二者解耦、可审计。
-- 上下文膨胀由两条互补路径治理:`memory` 的历史压缩 + `model` 组 largemodel 的上下文编辑(折叠旧工具结果)。
+- 上下文膨胀由两条互补路径治理:`memory` 的历史压缩 + `model` 组 largemodel 的上下文编辑(折叠旧工具结果)。一次 context build 共用 `memory.Budget`;Builder 是唯一模型窗口裁决点,可选 Source 共享 `AvailableHistory`。

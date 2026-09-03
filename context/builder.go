@@ -19,6 +19,8 @@ package vctx
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -31,9 +33,19 @@ import (
 // unless overridden by WithName.
 const DefaultBuilderName = "default"
 
+// ErrFixedContentExceedsBudget is returned when must-include messages plus
+// reserved output/tools/system already overflow the model window.
+var ErrFixedContentExceedsBudget = errors.New("vctx: fixed context content exceeds model window")
+
+type sourceSlot struct {
+	idx  int
+	src  Source
+	must bool
+}
+
 // DefaultBuilder is the standard Builder implementation. It runs sources in
-// declared order, charging must-include sources first and then handing the
-// remaining budget to optional sources via greedy assignment.
+// declared order, charges must-include sources first, then shares the
+// remaining history budget across optional sources and trims globally.
 type DefaultBuilder struct {
 	name      string
 	sources   []Source
@@ -122,14 +134,15 @@ func NewDefaultBuilder(opts ...Option) *DefaultBuilder {
 // Name returns the builder's configured name.
 func (b *DefaultBuilder) Name() string { return b.name }
 
-// Build runs each source in declaration order, applies the must-include /
-// optional budget split, dispatches EventContextBuilt, and returns the
-// assembled message list with the audit report.
+// Build runs each source in declaration order, applies the unified budget,
+// dispatches EventContextBuilt, and returns the assembled message list
+// with the audit report.
 //
 // Source errors are fail-open: a slog.Warn is emitted, the source is
 // recorded with Status="error", and execution continues. The exception is
 // SystemPromptSource, which returns a fatal error if its template fails to
-// render — that bubbles up as Build's error.
+// render — that bubbles up as Build's error. Fixed content that overflows
+// a bounded window is also fail-closed.
 func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult, error) {
 	if err := ctx.Err(); err != nil {
 		return BuildResult{}, err
@@ -137,29 +150,23 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 
 	start := time.Now()
 
-	// Pre-classify sources so we run them in two passes (must-include then
-	// optional) while still honouring declaration order within each group.
-	type slot struct {
-		idx  int
-		src  Source
-		must bool
+	budget, err := b.resolveBudget(in)
+	if err != nil {
+		return BuildResult{}, err
 	}
+	est := budget.EstimatorOrDefault()
 
-	slots := make([]slot, len(b.sources))
+	slots := make([]sourceSlot, len(b.sources))
 	for i, s := range b.sources {
-		slots[i] = slot{idx: i, src: s, must: isMustInclude(s)}
+		slots[i] = sourceSlot{idx: i, src: s, must: isMustInclude(s)}
 	}
 
-	// Per-source emitted messages and reports, slotted by declaration index
-	// so the final output is always in declaration order regardless of when
-	// each source executed.
 	emitted := make([][]schema.Message, len(b.sources))
 	reports := make([]schema.ContextSourceReport, len(b.sources))
 
 	mustTokens := 0
-	droppedTotal := 0
+	systemTokens := 0
 
-	// Pass 1: must-include sources, unbounded budget.
 	for _, sl := range slots {
 		if !sl.must {
 			continue
@@ -167,23 +174,32 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 
 		fin := fromBuildInput(in)
 		fin.Budget = 0
+		fin.ContextBudget = budget
 
-		msgs, rep, err := b.runSource(ctx, sl.src, fin)
-		if err != nil {
-			// Must-include sources can choose to be fail-closed (e.g. system
-			// prompt render failures); propagate up.
-			return BuildResult{}, err
+		msgs, rep, fetchErr := b.runSourceWith(ctx, sl.src, fin, est)
+		if fetchErr != nil {
+			return BuildResult{}, fetchErr
 		}
 
 		emitted[sl.idx] = msgs
 		reports[sl.idx] = rep
 		mustTokens += rep.Tokens
+		if sl.src.Name() == SourceNameSystemPrompt {
+			systemTokens = rep.Tokens
+		}
 	}
 
-	// Pass 2: optional sources, greedy on remaining budget.
-	remaining := 0
-	if in.Budget > 0 {
-		remaining = max(in.Budget-mustTokens, 0)
+	reservedSystem := max(systemTokens, budget.ReservedSystem)
+	otherMust := max(mustTokens-systemTokens, 0)
+	fixed := reservedSystem + budget.ReservedTools + budget.ReservedOutput + otherMust
+
+	if !budget.Unlimited() && fixed > budget.ModelContextTokens {
+		return BuildResult{}, fmt.Errorf("%w: fixed=%d window=%d",
+			ErrFixedContentExceedsBudget, fixed, budget.ModelContextTokens)
+	}
+
+	if !budget.Unlimited() {
+		budget.AvailableHistory = max(budget.ModelContextTokens-fixed, 0)
 	}
 
 	for _, sl := range slots {
@@ -191,75 +207,65 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 			continue
 		}
 
-		// Respect context cancellation between optional sources so a
-		// cancelled run does not keep iterating fetches.
 		if err := ctx.Err(); err != nil {
 			return BuildResult{}, err
 		}
 
 		fin := fromBuildInput(in)
-		fin.Budget = remaining // 0 means unlimited when in.Budget is 0
+		fin.ContextBudget = budget
+		if budget.Unlimited() {
+			fin.Budget = 0
+		} else {
+			fin.Budget = budget.AvailableHistory
+		}
 
-		msgs, rep, err := b.runSource(ctx, sl.src, fin)
-		if err != nil {
-			// Context errors are not fail-open: surface cancellation /
-			// deadline so the caller can react instead of silently
-			// continuing to the next source.
+		msgs, rep, fetchErr := b.runSourceWith(ctx, sl.src, fin, est)
+		if fetchErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return BuildResult{}, ctxErr
 			}
 
-			// Fail-open: log and mark report; never propagate.
 			slog.Warn("vctx: source error",
-				"builder", b.name, "source", sl.src.Name(), "error", err)
+				"builder", b.name, "source", sl.src.Name(), "error", fetchErr)
 			rep.Source = sl.src.Name()
 			rep.Status = StatusError
-			rep.Error = err.Error()
+			rep.Error = fetchErr.Error()
 			emitted[sl.idx] = nil
 			reports[sl.idx] = rep
 			continue
 		}
 
-		// Builder-side trim fallback: only when a positive budget is in
-		// effect AND the source overspent.
-		if in.Budget > 0 && rep.Tokens > fin.Budget {
-			msgs, rep = b.trimByTokens(msgs, rep, fin.Budget)
-		}
-
 		emitted[sl.idx] = msgs
 		reports[sl.idx] = rep
-		droppedTotal += rep.DroppedN
-
-		if in.Budget > 0 {
-			remaining -= rep.Tokens
-			if remaining < 0 {
-				remaining = 0
-			}
-		}
 	}
 
-	// Stitch the final message list in declaration order.
-	totalCount := 0
-	totalTokens := 0
-	for i := range emitted {
-		totalCount += len(emitted[i])
-		totalTokens += reports[i].Tokens
+	if !budget.Unlimited() {
+		emitted, reports = b.trimOptionalToHistory(emitted, reports, slots, budget.AvailableHistory, est)
 	}
 
-	out := make([]schema.Message, 0, totalCount)
+	out := make([]schema.Message, 0)
 	for _, slc := range emitted {
 		out = append(out, slc...)
 	}
 
+	droppedTotal := 0
+	for i := range reports {
+		droppedTotal += reports[i].DroppedN
+	}
+
 	report := BuildReport{
-		BuilderName:  b.name,
-		Strategy:     StrategyOrderedGreedy,
-		InputBudget:  in.Budget,
-		OutputCount:  totalCount,
-		OutputTokens: totalTokens,
-		DroppedCount: droppedTotal,
-		Sources:      reports,
-		Duration:     time.Since(start).Milliseconds(),
+		BuilderName:      b.name,
+		Strategy:         StrategyOrderedGreedy,
+		InputBudget:      budget.ModelContextTokens,
+		ReservedOutput:   budget.ReservedOutput,
+		ReservedTools:    budget.ReservedTools,
+		ReservedSystem:   reservedSystem,
+		AvailableHistory: budget.AvailableHistory,
+		OutputCount:      len(out),
+		OutputTokens:     memory.EstimateMessages(est, out),
+		DroppedCount:     droppedTotal,
+		Sources:          reports,
+		Duration:         time.Since(start).Milliseconds(),
 	}
 
 	if b.hooks != nil {
@@ -283,11 +289,30 @@ func (b *DefaultBuilder) Build(ctx context.Context, in BuildInput) (BuildResult,
 	return BuildResult{Messages: out, Report: report}, nil
 }
 
-// runSource calls a single Source.Fetch with light defensive normalisation:
-// it backfills Source name and Status="ok" on the report when the source
-// left them empty, and recomputes Tokens via the configured estimator when
-// the source did not provide one.
-func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput) ([]schema.Message, schema.ContextSourceReport, error) {
+func (b *DefaultBuilder) resolveBudget(in BuildInput) (memory.Budget, error) {
+	var budget memory.Budget
+	switch {
+	case in.ContextBudget != nil:
+		budget = *in.ContextBudget
+	case in.Budget > 0:
+		budget = memory.Budget{ModelContextTokens: in.Budget}
+	case in.Budget < 0:
+		return memory.Budget{}, fmt.Errorf("vctx: budget must not be negative")
+	}
+	if err := budget.Validate(); err != nil {
+		return memory.Budget{}, err
+	}
+	if budget.Estimator == nil {
+		budget.Estimator = b.estimator
+		if budget.Estimator == nil {
+			budget.Estimator = memory.DefaultTokenEstimator
+		}
+	}
+	return budget, nil
+}
+
+// runSourceWith calls a single Source.Fetch with defensive normalisation.
+func (b *DefaultBuilder) runSourceWith(ctx context.Context, s Source, in FetchInput, est memory.TokenEstimator) ([]schema.Message, schema.ContextSourceReport, error) {
 	res, err := s.Fetch(ctx, in)
 	rep := res.Report
 
@@ -299,7 +324,6 @@ func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput)
 		return nil, rep, err
 	}
 
-	// Backfill Status: "skipped" when there is no output; "ok" otherwise.
 	if rep.Status == "" {
 		if len(res.Messages) == 0 {
 			rep.Status = StatusSkipped
@@ -308,70 +332,87 @@ func (b *DefaultBuilder) runSource(ctx context.Context, s Source, in FetchInput)
 		}
 	}
 
-	// Backfill OutputN.
 	if rep.OutputN == 0 {
 		rep.OutputN = len(res.Messages)
 	}
 
-	// Backfill Tokens via the builder's estimator when the source did not
-	// account for them. Sources that compute tokens themselves keep their
-	// own number (they may know better than the heuristic).
 	if rep.Tokens == 0 && len(res.Messages) > 0 {
-		rep.Tokens = b.sumTokens(res.Messages)
+		rep.Tokens = memory.EstimateMessages(est, res.Messages)
 	}
 
 	return res.Messages, rep, nil
 }
 
-// sumTokens estimates the total tokens of a message slice using the
-// builder's configured estimator. nil-safe.
-func (b *DefaultBuilder) sumTokens(ms []schema.Message) int {
-	est := b.estimator
-	if est == nil {
-		est = memory.DefaultTokenEstimator
+// trimOptionalToHistory drops optional-source messages from the head of the
+// merged declaration order until they fit AvailableHistory. Must-include
+// messages are never dropped. Source notes such as workspace_tail_keep are
+// preserved when a later global drop removes the remainder.
+func (b *DefaultBuilder) trimOptionalToHistory(
+	emitted [][]schema.Message,
+	reports []schema.ContextSourceReport,
+	slots []sourceSlot,
+	available int,
+	est memory.TokenEstimator,
+) ([][]schema.Message, []schema.ContextSourceReport) {
+	type ref struct {
+		slot int
+		msg  schema.Message
+		tok  int
 	}
 
+	var droppable []ref
 	total := 0
-	for _, m := range ms {
-		// memory.TokenEstimator works on schema.Message, so wrap.
-		total += est(m)
-	}
-	return total
-}
-
-// trimByTokens drops messages from the front of the slice (oldest first)
-// until the running token total fits within budget. The report is updated
-// with the new OutputN / Tokens / DroppedN and Status="truncated". budget
-// is assumed to be > 0 (callers must guard).
-func (b *DefaultBuilder) trimByTokens(ms []schema.Message, rep schema.ContextSourceReport, budget int) ([]schema.Message, schema.ContextSourceReport) {
-	if budget <= 0 || len(ms) == 0 {
-		return ms, rep
+	for _, sl := range slots {
+		if sl.must {
+			continue
+		}
+		for _, m := range emitted[sl.idx] {
+			tok := est(m)
+			droppable = append(droppable, ref{slot: sl.idx, msg: m, tok: tok})
+			total += tok
+		}
 	}
 
-	// Compute per-message tokens once; keep Tokens consistent with the
-	// estimator the builder uses.
-	tokens := make([]int, len(ms))
-	total := 0
-	for i, m := range ms {
-		tokens[i] = b.sumTokens([]schema.Message{m})
-		total += tokens[i]
-	}
-
-	// Drop from the head until total <= budget.
 	drop := 0
-	for drop < len(ms) && total > budget {
-		total -= tokens[drop]
+	for drop < len(droppable) && total > available {
+		total -= droppable[drop].tok
 		drop++
 	}
-
 	if drop == 0 {
-		return ms, rep
+		return emitted, reports
 	}
 
-	out := ms[drop:]
-	rep.OutputN = len(out)
-	rep.Tokens = total
-	rep.DroppedN = rep.DroppedN + drop
-	rep.Status = StatusTruncated
-	return out, rep
+	keptPerSlot := make([][]schema.Message, len(emitted))
+	tokensPerSlot := make([]int, len(emitted))
+	origLen := make([]int, len(emitted))
+	for i, msgs := range emitted {
+		origLen[i] = len(msgs)
+	}
+	for i := drop; i < len(droppable); i++ {
+		r := droppable[i]
+		keptPerSlot[r.slot] = append(keptPerSlot[r.slot], r.msg)
+		tokensPerSlot[r.slot] += r.tok
+	}
+
+	for _, sl := range slots {
+		if sl.must {
+			continue
+		}
+		kept := keptPerSlot[sl.idx]
+		droppedN := origLen[sl.idx] - len(kept)
+		if droppedN <= 0 {
+			continue
+		}
+		emitted[sl.idx] = kept
+		rep := reports[sl.idx]
+		rep.DroppedN += droppedN
+		rep.OutputN = len(kept)
+		rep.Tokens = tokensPerSlot[sl.idx]
+		if rep.Status != StatusError {
+			rep.Status = StatusTruncated
+		}
+		reports[sl.idx] = rep
+	}
+
+	return emitted, reports
 }

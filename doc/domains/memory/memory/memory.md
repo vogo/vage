@@ -27,16 +27,16 @@
   - **Store(长期记忆)** —— 跨对话的长期事实;「长期」指跨会话,是否跨进程重启存活由后端决定。
 - **Memory / Store 接口**:记忆读写的统一抽象,带批量变体。
 - **Promoter(提升器)**:把低层记忆提升到高层(working→session→store)。
-- **ContextCompressor(压缩器)**:在 token 约束下压缩历史。内置多种策略:滑动窗口、重要度排序、摘要+截断、token 预算、以及可组合的压缩链。
+- **ContextCompressor(压缩器)**:在 token 约束下压缩历史。内置多种策略:滑动窗口、重要度排序、摘要+截断、token 预算、按需摘要(`SummarizeWhenOverBudget`)、以及可组合的压缩链。预算感知入口接收完整 `Budget`,旧 `Compress(..., maxTokens)` 仍可用。
 - **ConversationCompactor(会话压紧)/ Archiver(归档器)**:压紧多轮对话、把旧内容归档(可配合向量存储)。
-- **Builder / Source(上下文装配)**:Builder 产出最终消息序列;每个 Source 贡献一段(系统提示、会话记忆、额外来源、请求消息、向量召回……)。
+- **Builder / Source(上下文装配)**:Builder 产出最终消息序列;每个 Source 贡献一段(系统提示、会话记忆、额外来源、请求消息、向量召回……)。**唯一窗口裁决点是 Builder**:Source 可做摘要、TopK、单文档/plan 字节上限,但不得把模型总窗口当作独占额度。
 
 ## 业务规则与不变式
 
 | ID | 规则 |
 |----|------|
 | MEM-1 | **层级单向提升**:记忆只能 working→session→store 向上提升,不可逆向流动。 |
-| MEM-2 | **token 预算不可超**:压缩在预算约束下进行;预算耗尽触发压缩而非静默截断丢失。 |
+| MEM-2 | **统一窗口预算**:一次 context build 共用 `memory.Budget`。固定内容(system / request / tools / 输出预留)先计费且不可淘汰;可选 Source 共享 `AvailableHistory`。超额时 Builder 按声明顺序从可丢候选头部删除(对按时间排序的 session history 即最旧优先),丢弃写入 `BuildReport` 与 `EventContextBuilt`。固定内容本身超窗则 fail-closed,不得静默超窗调用模型。 |
 | MEM-3 | **装配顺序确定**:默认 Builder 按 系统提示 → 会话记忆 → 额外来源 → 请求消息 的稳定顺序拼装。 |
 | MEM-4 | **事实与提示分离**:Source 只读取事实来源,不改写它们;装配结果不回写记忆。 |
 | MEM-5 | **压缩可组合**:多个压缩器可串成链,按序施加,每个只负责单一维度。 |
@@ -46,7 +46,13 @@
 
 ## 状态与转换
 
-记忆条目生命周期:产生(working)→ 对话内累积(session)→ 满足提升条件时上升(store)→ 超预算时被压缩/归档。压缩不改变事实层级,只改变"发给模型的表示"。
+记忆条目生命周期:产生(working)→ 对话内累积(session)→ 满足提升条件时上升(store)→ 超预算时被压缩/归档。压缩与 Builder 裁剪只改变"发给模型的表示",不删除 session/workspace 中的事实。
+
+## 非目标(本领域)
+
+- 不跨 Run 持久化 `Budget` 或上次 `AvailableHistory`;每次 build 从当前窗口、输出限制、tools 和 Source 内容重算。
+- 不自动切换更大窗口模型,不引入 provider 专属 tokenizer,估算不是账单 usage。
+- token 估算是集中式启发(默认 `len/4`);应保留安全余量,`TargetUtilization(0.8)` 是推荐默认而非精确保证。
 
 ## 与其他领域的交互
 

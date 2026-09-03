@@ -657,8 +657,11 @@ func TestAgent_RunStream_SimpleText(t *testing.T) {
 		t.Errorf("events[0].SessionID = %q, want %q", events[0].SessionID, "sess-1")
 	}
 
-	if events[1].Type != schema.EventIterationStart {
-		t.Errorf("events[1].Type = %q, want %q", events[1].Type, schema.EventIterationStart)
+	if events[1].Type != schema.EventContextBuilt {
+		t.Errorf("events[1].Type = %q, want %q", events[1].Type, schema.EventContextBuilt)
+	}
+	if events[2].Type != schema.EventIterationStart {
+		t.Errorf("events[2].Type = %q, want %q", events[2].Type, schema.EventIterationStart)
 	}
 
 	var text strings.Builder
@@ -737,6 +740,7 @@ func TestAgent_RunStream_ToolCallLoop(t *testing.T) {
 
 	wantTypes := []string{
 		schema.EventAgentStart,
+		schema.EventContextBuilt,
 		schema.EventIterationStart,
 		schema.EventRouteSelected,
 		schema.EventToolCallStart,
@@ -909,10 +913,17 @@ func TestRunStreamText(t *testing.T) {
 		types = append(types, e.Type)
 	}
 
-	if len(types) != 5 {
-		t.Fatalf("got %d events, want 5: %v", len(types), types)
+	wantTypes := []string{
+		schema.EventAgentStart,
+		schema.EventContextBuilt,
+		schema.EventIterationStart,
+		schema.EventRouteSelected,
+		schema.EventTextDelta,
+		schema.EventAgentEnd,
 	}
-	wantTypes := []string{schema.EventAgentStart, schema.EventIterationStart, schema.EventRouteSelected, schema.EventTextDelta, schema.EventAgentEnd}
+	if len(types) != len(wantTypes) {
+		t.Fatalf("got %d events, want %d: %v", len(types), len(wantTypes), types)
+	}
 	for i, want := range wantTypes {
 		if types[i] != want {
 			t.Errorf("types[%d] = %q, want %q", i, types[i], want)
@@ -969,8 +980,8 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 		}
 	}
 
-	if count.Load() != 5 {
-		t.Errorf("middleware called %d times, want 5", count.Load())
+	if count.Load() != 6 {
+		t.Errorf("middleware called %d times, want 6", count.Load())
 	}
 }
 

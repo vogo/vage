@@ -70,6 +70,10 @@ type Agent struct {
 	outputGuards     []guard.Guard
 	toolResultGuards []guard.Guard
 	skillManager     skill.Manager
+	// contextBudget, when non-nil, is the per-build model-window budget
+	// forwarded to vctx.Builder. Distinct from runTokenBudget, which caps
+	// cumulative usage across a Run.
+	contextBudget *memory.Budget
 	// maxParallelToolCalls caps the concurrency of within-assistant-message
 	// tool dispatch. 0 uses defaultMaxParallelToolCalls; values <= 1 force
 	// serial execution (byte-identical to the pre-P1-7 behaviour).
@@ -158,6 +162,17 @@ func WithMaxIterations(n int) Option { return func(a *Agent) { a.maxIterations =
 // WithRunTokenBudget sets the total token budget for a single run.
 // A value of 0 means unlimited (default).
 func WithRunTokenBudget(n int) Option { return func(a *Agent) { a.runTokenBudget = n } }
+
+// WithContextBudget sets the per-build model-window budget used by the
+// context Builder. It is independent of WithRunTokenBudget, which caps
+// cumulative token usage across a Run. A zero-value Budget remains
+// unlimited.
+func WithContextBudget(b memory.Budget) Option {
+	return func(a *Agent) {
+		cp := b
+		a.contextBudget = &cp
+	}
+}
 
 // WithMaxTokens sets the max tokens for LLM responses.
 func WithMaxTokens(n int) Option { return func(a *Agent) { a.maxTokens = &n } }
@@ -514,6 +529,7 @@ type runParams struct {
 type buildResult struct {
 	messages        []schema.Message
 	sessionMsgCount int // original session message count (pre-compression), used as key offset
+	report          vctx.BuildReport
 }
 
 // runContext holds shared state for a single Run/RunStream invocation,
@@ -543,47 +559,44 @@ type runContext struct {
 	interruptDesc *schema.InterruptDescriptor
 }
 
+type contextBuildParams struct {
+	skillText string
+	tools     []schema.ToolDef
+	maxTokens *int
+	emitHooks bool
+}
+
 // buildInitialMessages assembles the message list sent to the LLM via a
-// vctx.DefaultBuilder configured with the built-in sources
-// SystemPromptSource → SessionMemorySource → ...extras → RequestMessagesSource.
-// When no extras are configured the message order matches the previous
-// hand-rolled assembly ([system, session history, request]) byte-for-byte;
-// extras (configured via WithExtraSources, e.g. a Plan Workspace) slot in
-// just before the current-turn request so cross-cutting context lands as
-// late context rather than as part of recallable memory.
-//
-// sessionMsgCount in the returned buildResult is read from the
-// SessionMemorySource report so storeAndPromoteMessages can offset its
-// indices past existing entries.
-func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest, budget int) (buildResult, error) {
-	// Source order: [system, session_memory, ...extras, request].
-	// Extras (like WorkspaceSource) sit between session history and the
-	// current-turn request so the LLM reads "what we had before" → "what we
-	// know about this task across runs" → "what the user is asking now".
+// vctx.DefaultBuilder. Tests call this with default (hook-emitting) params.
+func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest) (buildResult, error) {
+	return a.buildContext(ctx, req, contextBuildParams{emitHooks: true})
+}
+
+func (a *Agent) buildContext(ctx context.Context, req *schema.RunRequest, p contextBuildParams) (buildResult, error) {
 	builderOpts := []vctx.Option{
-		vctx.WithSource(&vctx.SystemPromptSource{Template: a.systemPrompt}),
+		vctx.WithSource(&vctx.SystemPromptSource{Template: a.systemPrompt, Suffix: p.skillText}),
 		vctx.WithSource(&vctx.SessionMemorySource{Manager: a.memoryManager}),
 	}
 	for _, s := range a.extraSources {
 		builderOpts = append(builderOpts, vctx.WithSource(s))
 	}
-	builderOpts = append(
-		builderOpts,
-		vctx.WithSource(&vctx.RequestMessagesSource{}),
-		vctx.WithHookManager(a.hookManager),
-	)
+	builderOpts = append(builderOpts, vctx.WithSource(&vctx.RequestMessagesSource{}))
+	if p.emitHooks {
+		builderOpts = append(builderOpts, vctx.WithHookManager(a.hookManager))
+	}
 	if a.buildReportSink != nil {
 		builderOpts = append(builderOpts, vctx.WithBuildReportSink(a.buildReportSink))
 	}
 	builder := vctx.NewDefaultBuilder(builderOpts...)
 
+	budget := a.resolveContextBudget(p.tools, p.maxTokens)
 	res, err := builder.Build(ctx, vctx.BuildInput{
-		SessionID: req.SessionID,
-		AgentID:   a.ID(),
-		Intent:    "react-iter",
-		Request:   req,
-		Protocol:  a.Protocol(),
-		Budget:    budget,
+		SessionID:     req.SessionID,
+		AgentID:       a.ID(),
+		Intent:        "react-iter",
+		Request:       req,
+		Protocol:      a.Protocol(),
+		ContextBudget: &budget,
 	})
 	if err != nil {
 		return buildResult{}, fmt.Errorf("vage: build context: %w", err)
@@ -592,7 +605,20 @@ func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest
 	return buildResult{
 		messages:        res.Messages,
 		sessionMsgCount: sessionMsgCountFromReport(res.Report),
+		report:          res.Report,
 	}, nil
+}
+
+func (a *Agent) resolveContextBudget(tools []schema.ToolDef, maxTokens *int) memory.Budget {
+	var b memory.Budget
+	if a.contextBudget != nil {
+		b = *a.contextBudget
+	}
+	if b.ReservedOutput == 0 && maxTokens != nil && *maxTokens > 0 {
+		b.ReservedOutput = *maxTokens
+	}
+	b.ReservedTools = memory.EstimateToolDefs(tools, b.EstimatorOrDefault())
+	return b
 }
 
 // sessionMsgCountFromReport extracts the pre-compression message count
@@ -646,7 +672,7 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 
 	a.dispatch(ctx, schema.NewEvent(schema.EventAgentStart, a.ID(), rc.sessionID, schema.AgentStartData{}))
 
-	br, aiTools, err := a.prepareContext(ctx, req, p)
+	br, aiTools, err := a.prepareContext(ctx, req, p, true)
 	if err != nil {
 		return nil, err
 	}
@@ -724,7 +750,7 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 		return nil, err
 	}
 
-	br, aiTools, err := a.prepareContext(ctx, req, p)
+	br, aiTools, err := a.prepareContext(ctx, req, p, false)
 	if err != nil {
 		return nil, err
 	}
@@ -744,6 +770,10 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 		}
 
 		if err := send(schema.NewEvent(schema.EventAgentStart, a.ID(), rc.sessionID, schema.AgentStartData{})); err != nil {
+			return err
+		}
+
+		if err := send(schema.NewEvent(schema.EventContextBuilt, a.ID(), rc.sessionID, br.report.ToEventData())); err != nil {
 			return err
 		}
 
