@@ -21,16 +21,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
+	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/interrupt"
 	"github.com/vogo/vage/largemodel"
+	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
+	"github.com/vogo/vage/workspace"
 )
 
 // exampleCaller stands in for a real model endpoint so the examples below run
@@ -214,4 +220,90 @@ func Example_compileToolsForAgent() {
 	// Output:
 	// skipped illegal tool: true
 	// 1 echo
+}
+
+// ExampleWithContextBudget_deepAgent wires workspace, unified window budget,
+// on-demand summarization and EventContextBuilt observation — the Deep Agent
+// composition without a separate recipe package.
+func ExampleWithContextBudget_deepAgent() {
+	dir, err := os.MkdirTemp("", "vage-ws")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	ws, err := workspace.NewFileWorkspace(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	plan := strings.Repeat("H", 90) + strings.Repeat("T", 10)
+	if err := ws.WritePlan(context.Background(), "deep-session", plan); err != nil {
+		log.Fatal(err)
+	}
+
+	sess := memory.NewSessionMemory("deep", "deep-session")
+	summarizer := func(_ context.Context, older []schema.Message) (string, error) {
+		return fmt.Sprintf("summarized %d messages", len(older)), nil
+	}
+	mgr := memory.NewManager(
+		memory.WithSession(sess),
+		memory.WithCompressor(memory.SummarizeWhenOverBudget(
+			summarizer,
+			memory.KeepRecentTurns(2),
+			memory.TargetUtilization(0.8),
+		)),
+	)
+
+	caller := &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
+			largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, "done", schema.Usage{}),
+		},
+		Chunks: []*largemodel.Chunk{
+			{TextDelta: "done", FinishReason: largemodel.FinishReasonStop},
+		},
+	}
+
+	a := taskagent.New(
+		agent.Config{ID: "deep", Name: "Deep"},
+		taskagent.WithCaller(caller),
+		taskagent.WithSystemPrompt(prompt.StringPrompt("You are a deep agent.")),
+		taskagent.WithMemory(mgr),
+		taskagent.WithContextBudget(memory.Budget{ModelContextTokens: 8_000, ReservedOutput: 512}),
+		taskagent.WithExtraSources(&vctx.WorkspaceSource{Workspace: ws, MaxBytes: 10}),
+	)
+
+	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
+		SessionID: "deep-session",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "continue the plan")},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var types []string
+	for {
+		ev, recvErr := rs.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			log.Fatal(recvErr)
+		}
+		types = append(types, ev.Type)
+		if ev.Type != schema.EventContextBuilt {
+			continue
+		}
+		data := ev.Data.(schema.ContextBuiltData)
+		fmt.Println("available_history", data.AvailableHistory > 0)
+		for _, src := range data.Sources {
+			if src.Source == vctx.SourceNameWorkspace {
+				fmt.Println("workspace", src.Status, strings.Contains(src.Note, vctx.NoteWorkspaceTailKeep))
+			}
+		}
+	}
+	fmt.Println(types[0], types[1])
+	// Output:
+	// available_history true
+	// workspace truncated true
+	// agent_start context_built
 }

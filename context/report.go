@@ -25,14 +25,18 @@ import (
 // per-source list reuses schema.ContextSourceReport so the same value can
 // serve both the in-process API and the EventContextBuilt wire format.
 type BuildReport struct {
-	BuilderName  string                       `json:"builder"`
-	Strategy     string                       `json:"strategy"`
-	InputBudget  int                          `json:"input_budget"`
-	OutputCount  int                          `json:"output_count"`
-	OutputTokens int                          `json:"output_tokens"`
-	DroppedCount int                          `json:"dropped_count"`
-	Sources      []schema.ContextSourceReport `json:"sources"`
-	Duration     int64                        `json:"duration_ms"`
+	BuilderName      string                       `json:"builder"`
+	Strategy         string                       `json:"strategy"`
+	InputBudget      int                          `json:"input_budget"`
+	ReservedOutput   int                          `json:"reserved_output"`
+	ReservedTools    int                          `json:"reserved_tools"`
+	ReservedSystem   int                          `json:"reserved_system"`
+	AvailableHistory int                          `json:"available_history"`
+	OutputCount      int                          `json:"output_count"`
+	OutputTokens     int                          `json:"output_tokens"`
+	DroppedCount     int                          `json:"dropped_count"`
+	Sources          []schema.ContextSourceReport `json:"sources"`
+	Duration         int64                        `json:"duration_ms"`
 }
 
 // ToEventData converts a BuildReport into the EventContextBuilt payload.
@@ -40,13 +44,17 @@ type BuildReport struct {
 // is reused without copying.
 func (r BuildReport) ToEventData() schema.ContextBuiltData {
 	return schema.ContextBuiltData{
-		Builder:      r.BuilderName,
-		Strategy:     r.Strategy,
-		BudgetTotal:  r.InputBudget,
-		OutputCount:  r.OutputCount,
-		OutputTokens: r.OutputTokens,
-		DroppedCount: r.DroppedCount,
-		Sources:      r.Sources,
-		Duration:     r.Duration,
+		Builder:          r.BuilderName,
+		Strategy:         r.Strategy,
+		BudgetTotal:      r.InputBudget,
+		ReservedOutput:   r.ReservedOutput,
+		ReservedTools:    r.ReservedTools,
+		ReservedSystem:   r.ReservedSystem,
+		AvailableHistory: r.AvailableHistory,
+		OutputCount:      r.OutputCount,
+		OutputTokens:     r.OutputTokens,
+		DroppedCount:     r.DroppedCount,
+		Sources:          r.Sources,
+		Duration:         r.Duration,
 	}
 }

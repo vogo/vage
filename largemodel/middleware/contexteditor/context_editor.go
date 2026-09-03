@@ -218,17 +218,17 @@ func NewContextEditorMiddleware(opts ...ContextEditorOption) *ContextEditorMiddl
 
 // Wrap implements Middleware.
 func (m *ContextEditorMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.BindCaller(
+		next,
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			edReq := m.edit(ctx, req)
 			return next.Call(ctx, edReq)
 		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			edReq := m.edit(ctx, req)
 			return next.CallStream(ctx, edReq)
 		},
-	}
+	)
 }
 
 // edit returns either the original req (no editing needed) or a

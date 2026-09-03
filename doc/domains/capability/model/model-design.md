@@ -6,8 +6,11 @@
 
 | 文件 | 职责 |
 |------|------|
-| `largemodel/call.go` | `Caller` 接口与 `Request`/`Response`/`Chunk` 信封;中间件只看见这一层 |
-| `largemodel/codec_caller.go` | 唯一的协议中立 adapter:信封字段机械投影 + `APIError` 包装 + 交给 `Stream` 管生命周期,不读任何厂商字段 |
+| `largemodel/call.go` | `Caller` 接口与 `Request`/`Response`/`Chunk` 信封;中间件只看见这一层;`BindCaller`/`DelegateCaller` 透传能力接缝 |
+| `largemodel/capability.go` | Caller 层 `Capabilities`/`Requirements`/`CapabilityProvider`/`EndpointCapabilityProvider` |
+| `largemodel/capability_policy.go` | `RequireNativeCapabilities` / `AllowPromptFallback`;严格模式在 backend 前筛选合格 alias |
+| `largemodel/structured/` | 类型化 `Call[T]`、schema 推导/校验、内容修复 |
+| `largemodel/codec_caller.go` | 唯一的协议中立 adapter:信封字段机械投影 + `APIError` 包装 + 交给 `Stream` 管生命周期,不读任何厂商字段;无原生 SO 映射时默认 fail-closed |
 | `largemodel/internal/modelcore/` | 根包与 provider codec 之间的窄桥接契约(canonical Request/Result/Chunk/Stream、`Codec` 接口、归一错误分类);非公开 API,不解释任何 wire |
 | `largemodel/openai_chat.go` | 只剩 `OpenAIChatBackend`(= `openais.ChatCompleter` 别名)与 caller 接线;无 aimodel import |
 | `largemodel/anthropic_messages.go` | 只剩 `AnthropicMessagesBackend`(= `anthropics.Messenger` 别名)与 caller 接线;无 aimodel import |
@@ -21,7 +24,8 @@
 | `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
 | `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
 | `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
-| `largemodel/response_schema.go` | 包内 ResponseSchema 提示降级:无原生结构化输出映射的 codec 的 fallback 路径 |
+| `largemodel/response_schema.go` | 包内 ResponseSchema 提示降级:仅当 `AllowPromptFallback` 显式开启时,无原生映射的 codec 才走这条路径 |
+| `largemodel/provider/openais/extra_body.go` | `openais.WithExtraBody` 与 `openais` namespace 扩展 |
 
 ## 多模态消息编码(image/file)
 
@@ -41,6 +45,27 @@
 - **失败前置到编码期**:结构错误(canonical 校验)与不可表示的组合(上表两处"编码前明确报错")都在任何网络 I/O 之前返回,`Call`/`CallStream` 共享同一请求组装函数(`openais.buildChatRequest` / `anthropics.buildMessagesRequest`),两条路径得到相同结果。
 - **vision capability 复用现有检测**:`openais.chatRequiresVision`/`anthropics.messagesRequireVision` 读的是已编码的 wire content(`image_url`/`image` block),对 schema 层无感知,因此本变更不需要新增判定逻辑。文件不新增 capability 标签——模型是否接受某类文档、多大、哪些 MIME,由 provider 在调用时报错,vage 不做本地猜测或限流。
 - **vage 不做的事**:不下载 URL、不读取本地路径、不上传文件、不管理 FileID 生命周期,也不提供统一文件存储服务——URL、字节、外部 ID 均由调用方提供并对其正确性负责。
+- **安全构造函数**:`schema.ImageFromURL` / `ImageFromBytes` / `FileFromID` / `FileFromBytes` 只构造能通过 `Message.Validate` 的 canonical part,并复制 bytes;它们不绑定 provider。`FileFromBytes` 允许空文件名(Anthropic 可省略);OpenAI codec 仍在 backend 前拒绝无名内联文件。直接 struct literal 仍然合法。
+
+## 能力协商
+
+能力是 endpoint/model 的声明,不是探测结果。`OpenAIEndpoint.Capabilities` / `AnthropicEndpoint.Capabilities` 为零值即 unknown。compose Caller 实现 `CapabilityProvider` 与 `EndpointCapabilityProvider`;内置中间件经 `BindCaller`/`DelegateCaller` 透传,避免包装后丢失声明。
+
+`RequireNativeCapabilities` 从请求推导最低需求(image/file part、非空 Tools 或非 none 的 ToolChoice、非空 ResponseSchema),再与调用方额外 `Requirements` 取更强者。多 endpoint 时每个候选必须单独满足全部要求,合格 alias 写入调用 context,compose 把它映射为 `router.Call.Eligible`。筛选后仍由现有 router 选路、重试和维护健康——能力合格但端点全死,得到的是既有 `ErrNoActiveEndpoints`,与 `CapabilityError` 可区分。
+
+`AllowPromptFallback` 只把结构化输出的最低级别降为 prompt,并在 codec 层打开既有 `degradeResponseSchemaPrompt`。它与显式 extra `StructuredOutput: native` 冲突。包装顺序可交换,策略会折叠到同一个 wrapper。
+
+旧 provider 包的 `Capability` bool 仍由适配层映射:unknown 必须保持 `nil`,以免旧 router 的 tools/vision 过滤把「未声明」当成「明确不能」。
+
+## 正式参数与 provider 扩展
+
+`TopP` 与 `ToolChoice` 映射到 OpenAI Chat 与 Anthropic Messages;`Seed` / `FrequencyPenalty` / `PresencePenalty` 只映射到 OpenAI Chat。Anthropic 收到后三个已设置字段时返回 typed `UnsupportedParameterError`,不静默丢弃。显式 `Request.ToolChoice` 优先于 `ToolDef.ForceUse`;named 指向未声明工具在联网前失败。
+
+`ProviderExtensions` 按 namespace 隔离。OpenAI codec 读取 `openais`,`WithExtraBody` 拒绝与信封/正式字段冲突的键。Anthropic 本项不实现 ExtraBody wire:不匹配的 namespace 与 `anthropics` 载荷都在 backend 前失败,避免把私有字段悄悄丢掉。未知 namespace、不可 JSON 的载荷同样前置失败。Clone 与缓存键包含这些字段。
+
+## 类型化结构化输出
+
+`structured.Call[T]` 只覆盖非流式最终文本。有效 schema 优先用 `req.ResponseSchema`;为空则用 `jsonschema-go` 从 `T` 推导并写进请求副本。不配置远程 `$ref` loader。helper 在边界上始终套 `RequireNativeCapabilities`;fallback 只能 `structured.AllowPromptFallback()`。修复基于原请求副本追加诊断,不累积失败轮次,不捕获 transport/API error 另起修复。`github.com/google/jsonschema-go` 是直接依赖,其未执行的 `format`/`content` 语义不伪装成已校验。
 
 ## 中间件清单
 
@@ -75,7 +100,7 @@
 - **ResponseSchema:按 codec 静态选择、只选一种表达**:`Request.ResponseSchema` 是 `any`,与 `schema.ToolDef.Parameters` 同形,公共层不引入厂商专属包装类型,也不改写或裁剪 schema。是否走原生映射由 provider codec 静态决定(不按模型名猜测,不发探测请求):
   - **OpenAI Chat**(`provider/openais/chat_codec.go`):`response_format = {"type":"json_schema","json_schema":{"name":"vage_response_schema","schema":<原样>,"strict":true}}`,固定名称保证同一 schema 产生同一 wire 形状。
   - **Anthropic Messages**(`provider/anthropics/messages_codec.go`):`output_config.format = {"type":"json_schema","schema":<原样>}`,复用/保留 `OutputConfig` 上已有的其他配置(如 `Effort`),不使用已废弃的顶层 `output_format`。
-  - **无原生映射的 codec**:走包内提示降级(`response_schema.go` 的 `degradeResponseSchemaPrompt`;该降级不依赖任何厂商 wire,因此留在协议中立层),在请求副本的消息列表里插入一条确定性 framework system 指令(要求裸 JSON、内嵌 schema),插入点在已有的连续前导 system 消息之后,不改变它们的相对顺序,也不修改调用方原始 `Request`/`Messages`;返回的副本上 `ResponseSchema` 被清空,因为约束已完全表达为消息。schema 编不出 JSON 时在网络调用前返回错误。
+  - **无原生映射的 codec**:默认返回 typed `CapabilityError`,backend 不被调用。只有调用方显式 `AllowPromptFallback(...)`(或 `structured.AllowPromptFallback()`)时才走包内提示降级(`response_schema.go` 的 `degradeResponseSchemaPrompt`;该降级不依赖任何厂商 wire,因此留在协议中立层),在请求副本的消息列表里插入一条确定性 framework system 指令(要求裸 JSON、内嵌 schema),插入点在已有的连续前导 system 消息之后,不改变它们的相对顺序,也不修改调用方原始 `Request`/`Messages`;返回的副本上 `ResponseSchema` 被清空,因为约束已完全表达为消息。schema 编不出 JSON 时在网络调用前返回错误。
   - 该字段只约束最终助手文本,与 `Tools` 互不干扰,可同时设置;两种表达都会被缓存键(`cache.go` 的 `cacheKeyData.ResponseSchema`)纳入,防止不同输出约束命中同一响应。
   - 当前无第三个已接入的 provider codec,该降级路径的契约由测试内合成的不支持 codec 场景固定(`response_schema_test.go`),留给未来新增 codec 直接复用。
 

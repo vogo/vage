@@ -69,4 +69,16 @@ func (m *Model) CallStream(ctx context.Context, req *Request) (*Stream, error) {
 	return m.caller.CallStream(ctx, req)
 }
 
-var _ Caller = (*Model)(nil)
+func (m *Model) Capabilities(ctx context.Context, req *Request) (Capabilities, error) {
+	return capabilitiesOf(m.caller, ctx, req)
+}
+
+func (m *Model) EndpointCapabilities() []EndpointCapability {
+	return endpointCapabilitiesOf(m.caller)
+}
+
+var (
+	_ Caller                     = (*Model)(nil)
+	_ CapabilityProvider         = (*Model)(nil)
+	_ EndpointCapabilityProvider = (*Model)(nil)
+)

@@ -18,6 +18,9 @@
 package memory
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/vogo/vage/schema"
 )
 
@@ -61,4 +64,47 @@ func DefaultTokenEstimator(msg schema.Message) int {
 	}
 
 	return tokens
+}
+
+// EstimateMessages sums estimator over messages. nil estimator falls back to
+// DefaultTokenEstimator.
+func EstimateMessages(est TokenEstimator, msgs []schema.Message) int {
+	if est == nil {
+		est = DefaultTokenEstimator
+	}
+
+	total := 0
+	for _, m := range msgs {
+		total += est(m)
+	}
+	return total
+}
+
+// EstimateToolDefs estimates tool-definition tokens from a deterministic
+// serialization of name, description, and parameters. The result is a
+// heuristic, not a provider billing figure.
+func EstimateToolDefs(defs []schema.ToolDef, est TokenEstimator) int {
+	if len(defs) == 0 {
+		return 0
+	}
+	if est == nil {
+		est = DefaultTokenEstimator
+	}
+
+	var b strings.Builder
+	for _, d := range defs {
+		b.WriteString(d.Name)
+		b.WriteByte('\n')
+		b.WriteString(d.Description)
+		b.WriteByte('\n')
+		if d.Parameters != nil {
+			enc, err := json.Marshal(d.Parameters)
+			if err == nil {
+				b.Write(enc)
+				b.WriteByte('\n')
+			}
+		}
+	}
+
+	return est(schema.NewUserMessage(schema.ProtocolOpenAIChat, b.String()))
 }

@@ -183,6 +183,50 @@ func TestEncodeMixedContentParts(t *testing.T) {
 // TestEncodeRejectsFileURL pins the documented gap: OpenAI Chat Completions
 // has no file-by-URL wire shape, so encoding must fail before any backend
 // call rather than silently drop the source.
+func TestEncodeConstructorBuiltParts(t *testing.T) {
+	imgURL, err := schema.ImageFromURL("https://example.com/cat.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imgBytes, err := schema.ImageFromBytes([]byte{0x89, 0x50, 0x4e, 0x47}, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileBytes, err := schema.FileFromBytes([]byte("%PDF"), "application/pdf", "report.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileID, err := schema.FileFromID("file-abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := schema.NewUserMessageWithParts(schema.ProtocolOpenAIChat, []schema.MessagePart{
+		{Type: schema.MessagePartText, Text: "see"},
+		imgURL, imgBytes, fileBytes, fileID,
+	})
+	encoded, err := EncodeOpenAIMessage(msg)
+	if err != nil {
+		t.Fatalf("EncodeOpenAIMessage: %v", err)
+	}
+
+	if got := len(encoded.Content.Parts()); got != 5 {
+		t.Fatalf("parts = %d, want 5", got)
+	}
+
+	unnamed, err := schema.FileFromBytes([]byte("data"), "application/pdf", "")
+	if err != nil {
+		t.Fatalf("canonical unnamed file must be allowed: %v", err)
+	}
+
+	if _, err := EncodeOpenAIMessage(schema.NewUserMessageWithParts(schema.ProtocolOpenAIChat, []schema.MessagePart{unnamed})); err == nil {
+		t.Fatal("OpenAI must still reject unnamed inline files")
+	}
+}
+
 func TestEncodeRejectsFileURL(t *testing.T) {
 	msg := schema.NewUserMessageWithParts(schema.ProtocolOpenAIChat, []schema.MessagePart{
 		{Type: schema.MessagePartFile, URL: "https://example.com/report.pdf"},

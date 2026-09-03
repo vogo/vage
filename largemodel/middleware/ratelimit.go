@@ -74,9 +74,9 @@ func NewRateLimitMiddleware(opts ...RateLimitOption) *RateLimitMiddleware {
 
 // Wrap implements Middleware.
 func (m *RateLimitMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.BindCaller(
+		next,
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}
@@ -90,14 +90,14 @@ func (m *RateLimitMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			if err := m.allowRequest(); err != nil {
 				return nil, err
 			}
 
 			return next.CallStream(ctx, req)
 		},
-	}
+	)
 }
 
 // allowRequest checks whether the current request is within rate limits.

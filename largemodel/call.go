@@ -19,6 +19,7 @@ package largemodel
 
 import (
 	"context"
+	"maps"
 
 	"github.com/vogo/vage/schema"
 )
@@ -48,6 +49,28 @@ type Request struct {
 	// max_completion_tokens and to Anthropic's required max_tokens.
 	MaxTokens *int
 
+	// TopP, when set, is nucleus sampling. It maps to OpenAI and Anthropic
+	// top_p. An explicit zero is sent; unset leaves the vendor default.
+	TopP *float64
+
+	// Seed, when set, requests deterministic sampling. It maps to OpenAI
+	// Chat seed. Anthropic rejects it before the backend.
+	Seed *int64
+
+	// FrequencyPenalty, when set, maps to OpenAI Chat frequency_penalty.
+	// Anthropic rejects it before the backend.
+	FrequencyPenalty *float64
+
+	// PresencePenalty, when set, maps to OpenAI Chat presence_penalty.
+	// Anthropic rejects it before the backend.
+	PresencePenalty *float64
+
+	// ToolChoice, when set, is the cross-provider tool-selection policy and
+	// wins over ToolDef.ForceUse. Unset keeps ForceUse's compatibility
+	// behaviour. A named choice pointing at a tool not in Tools fails before
+	// the backend.
+	ToolChoice *ToolChoice
+
 	// Stop are stop sequences that end generation.
 	Stop []string
 
@@ -67,10 +90,18 @@ type Request struct {
 	//
 	// A protocol caller with a native structured-output mapping (OpenAI Chat,
 	// Anthropic Messages) sends it as that vendor's own constraint field.
-	// Codecs with no native mapping degrade it into a deterministic system
-	// instruction instead (see degradeResponseSchemaPrompt); either way vage
-	// does not parse, validate, or strip code fences from the resulting text.
+	// Codecs with no native mapping return a capability error unless
+	// AllowPromptFallback has opted into a deterministic system instruction
+	// (see degradeResponseSchemaPrompt). Either way this field itself does
+	// not parse, validate, or strip code fences from the resulting text.
 	ResponseSchema any
+
+	// ProviderExtensions holds namespaced provider-private payloads. A codec
+	// reads only its own namespace. Unknown namespaces, payloads that cannot
+	// be JSON, and keys that collide with envelope or formal fields fail
+	// before the backend. This is not a credential channel: API keys, base
+	// URLs and headers still come only from Caller construction.
+	ProviderExtensions map[string]any
 }
 
 // Clone returns a copy of the request with its slices duplicated, so a
@@ -96,7 +127,32 @@ func (r *Request) Clone() *Request {
 		copy(c.Stop, r.Stop)
 	}
 
+	c.ToolChoice = r.ToolChoice.clone()
+	c.ProviderExtensions = cloneProviderExtensions(r.ProviderExtensions)
+
 	return &c
+}
+
+func cloneProviderExtensions(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		switch typed := value.(type) {
+		case []byte:
+			out[key] = append([]byte(nil), typed...)
+		case map[string]any:
+			inner := make(map[string]any, len(typed))
+			maps.Copy(inner, typed)
+			out[key] = inner
+		default:
+			out[key] = value
+		}
+	}
+
+	return out
 }
 
 // Response is one completed non-streaming model call, normalized off the
@@ -212,6 +268,38 @@ type CallerFunc struct {
 
 	// ChatStream handles streaming calls.
 	ChatStream func(ctx context.Context, req *Request) (*Stream, error)
+
+	capabilities         func(context.Context, *Request) (Capabilities, error)
+	endpointCapabilities func() []EndpointCapability
+}
+
+// DelegateCaller copies protocol and capability seams from next so a
+// middleware wrapper stays a CapabilityProvider when the inner caller is.
+func DelegateCaller(next Caller) *CallerFunc {
+	cf := &CallerFunc{Proto: next.Protocol()}
+	if p, ok := next.(CapabilityProvider); ok {
+		cf.capabilities = p.Capabilities
+	}
+
+	if p, ok := next.(EndpointCapabilityProvider); ok {
+		cf.endpointCapabilities = p.EndpointCapabilities
+	}
+
+	return cf
+}
+
+// BindCaller is DelegateCaller plus the Chat/ChatStream functions a middleware
+// supplies.
+func BindCaller(
+	next Caller,
+	chat func(context.Context, *Request) (*Response, error),
+	stream func(context.Context, *Request) (*Stream, error),
+) *CallerFunc {
+	cf := DelegateCaller(next)
+	cf.Chat = chat
+	cf.ChatStream = stream
+
+	return cf
 }
 
 // Protocol implements Caller.
@@ -227,4 +315,28 @@ func (c *CallerFunc) CallStream(ctx context.Context, req *Request) (*Stream, err
 	return c.ChatStream(ctx, req)
 }
 
-var _ Caller = (*CallerFunc)(nil)
+// Capabilities implements CapabilityProvider when the wrapper was built with
+// DelegateCaller around a provider; otherwise the result is unknown.
+func (c *CallerFunc) Capabilities(ctx context.Context, req *Request) (Capabilities, error) {
+	if c.capabilities != nil {
+		return c.capabilities(ctx, req)
+	}
+
+	return Capabilities{}, nil
+}
+
+// EndpointCapabilities implements EndpointCapabilityProvider when the inner
+// caller does.
+func (c *CallerFunc) EndpointCapabilities() []EndpointCapability {
+	if c.endpointCapabilities != nil {
+		return c.endpointCapabilities()
+	}
+
+	return nil
+}
+
+var (
+	_ Caller                     = (*CallerFunc)(nil)
+	_ CapabilityProvider         = (*CallerFunc)(nil)
+	_ EndpointCapabilityProvider = (*CallerFunc)(nil)
+)

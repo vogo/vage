@@ -65,32 +65,31 @@ func NewCacheMiddleware(c Cache, opts ...CacheOption) *CacheMiddleware {
 
 // Wrap implements Middleware.
 func (m *CacheMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-			key, err := cacheKey(next.Protocol(), req)
-			if err != nil {
-				// Skip cache on marshal failure; call downstream directly.
-				return next.Call(ctx, req)
-			}
+	wrapped := largemodel.DelegateCaller(next)
+	wrapped.Chat = func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+		key, err := cacheKey(next.Protocol(), req)
+		if err != nil {
+			return next.Call(ctx, req)
+		}
 
-			if resp, ok := m.cache.Get(ctx, key); ok {
-				return resp, nil
-			}
-
-			resp, err := next.Call(ctx, req)
-			if err != nil {
-				return nil, err
-			}
-
-			m.cache.Set(ctx, key, resp, m.ttl)
-
+		if resp, ok := m.cache.Get(ctx, key); ok {
 			return resp, nil
-		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
-			return next.CallStream(ctx, req)
-		},
+		}
+
+		resp, err := next.Call(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		m.cache.Set(ctx, key, resp, m.ttl)
+
+		return resp, nil
 	}
+	wrapped.ChatStream = func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		return next.CallStream(ctx, req)
+	}
+
+	return wrapped
 }
 
 // cacheKeyData is the deterministic subset of a largemodel.Request used for cache keys.
@@ -100,29 +99,41 @@ func (m *CacheMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 // wire form: the same conversation addressed to two protocols is two distinct
 // calls with two distinct responses.
 type cacheKeyData struct {
-	Protocol       schema.Protocol  `json:"protocol"`
-	Model          string           `json:"model"`
-	Messages       []schema.Message `json:"messages"`
-	Tools          []schema.ToolDef `json:"tools,omitempty"`
-	Temperature    *float64         `json:"temperature,omitempty"`
-	MaxTokens      *int             `json:"max_tokens,omitempty"`
-	Stop           []string         `json:"stop,omitempty"`
-	PromptCaching  bool             `json:"prompt_caching,omitempty"`
-	ResponseSchema any              `json:"response_schema,omitempty"`
+	Protocol           schema.Protocol        `json:"protocol"`
+	Model              string                 `json:"model"`
+	Messages           []schema.Message       `json:"messages"`
+	Tools              []schema.ToolDef       `json:"tools,omitempty"`
+	Temperature        *float64               `json:"temperature,omitempty"`
+	MaxTokens          *int                   `json:"max_tokens,omitempty"`
+	TopP               *float64               `json:"top_p,omitempty"`
+	Seed               *int64                 `json:"seed,omitempty"`
+	FrequencyPenalty   *float64               `json:"frequency_penalty,omitempty"`
+	PresencePenalty    *float64               `json:"presence_penalty,omitempty"`
+	ToolChoice         *largemodel.ToolChoice `json:"tool_choice,omitempty"`
+	Stop               []string               `json:"stop,omitempty"`
+	PromptCaching      bool                   `json:"prompt_caching,omitempty"`
+	ResponseSchema     any                    `json:"response_schema,omitempty"`
+	ProviderExtensions map[string]any         `json:"provider_extensions,omitempty"`
 }
 
 // cacheKey produces a SHA-256 hex digest from the deterministic request fields.
 func cacheKey(proto schema.Protocol, req *largemodel.Request) (string, error) {
 	data := cacheKeyData{
-		Protocol:       proto,
-		Model:          req.Model,
-		Messages:       req.Messages,
-		Tools:          req.Tools,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
-		Stop:           req.Stop,
-		PromptCaching:  req.PromptCaching,
-		ResponseSchema: req.ResponseSchema,
+		Protocol:           proto,
+		Model:              req.Model,
+		Messages:           req.Messages,
+		Tools:              req.Tools,
+		Temperature:        req.Temperature,
+		MaxTokens:          req.MaxTokens,
+		TopP:               req.TopP,
+		Seed:               req.Seed,
+		FrequencyPenalty:   req.FrequencyPenalty,
+		PresencePenalty:    req.PresencePenalty,
+		ToolChoice:         req.ToolChoice,
+		Stop:               req.Stop,
+		PromptCaching:      req.PromptCaching,
+		ResponseSchema:     req.ResponseSchema,
+		ProviderExtensions: req.ProviderExtensions,
 	}
 
 	b, err := json.Marshal(data)

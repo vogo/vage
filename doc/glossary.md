@@ -19,7 +19,8 @@
 | **会话(Session)** | 一等的对话实体:身份 + 追加型事件流 + 结构化状态 KV + 可插拔存储后端。事件只追加,结构化状态可覆盖。 |
 | **检查点(Checkpoint)** | 某次迭代的完整可恢复快照,用于崩溃/重启后断点续跑。注意:`checkpoint` 包(ReAct 迭代级)与 `orchestrate` 的 DAG 级检查点是两套不同机制。 |
 | **Interrupt** | Third durable execution state from the `interrupt` package: when a policy flags one or more tool calls before the batch runs, the framework freezes the whole batch, persists an `interrupt.Record`, and ends this call with `StopReasonInterrupted` (the logical Run is not finished). `TaskAgent.ResumeInterrupt(ctx, req)` injects external decisions by `interrupt_id + tool_call_id` and continues from that batch. Distinct from `ask_user` (handler already running, in-process blocking wait, no framework suspend record) and from checkpoint (crash-replay snapshot of a completed turn or finished Run, resumed via `Resume(sessionID)` from the latest complete turn). The three do not substitute; see [agent-core](domains/agent/agent-core/agent-core.md) and [orchestration](domains/agent/orchestration/orchestration.md). |
-| **DAG 编排** | 以有向无环图组织多个 Runner(Agent 满足此接口),支持并行、条件、循环、补偿、背压、优先级调度。 |
+| **DAG 编排** | 以有向无环图组织多个 Runner(Agent 满足此接口),支持并行、条件、循环、补偿、背压、优先级调度。承载包是 `orchestrate`;工作流型 Agent(`agent/workflowagent`)是它的调用方。 |
+| **Typed workflow** | Process-local generic graph over application state `S` (`workflow` package): nodes read `Snapshot[S]` and return `Patch[S]`; a parallel batch that writes the same Field fails at merge. Distinct from WorkflowAgent. Not a durable/distributed workflow platform. |
 | **补偿(Compensation / Saga)** | 编排失败时对已提交步骤执行的回滚动作,保证长流程的最终一致。 |
 | **背压(Backpressure)** | 根据运行时负载自适应调节 DAG 并发度的机制。 |
 | **技能(Skill)** | 兼容 [Agent Skills](https://agentskills.io) 开放标准的能力包,可向 Agent 注入提示与过滤工具。 |
@@ -27,6 +28,8 @@
 | **ParamResolver** | TaskAgent 构造期单槽:在输入护栏之后、上下文与工具冻结之前,收紧本次新 Run 的模型、限额与工具范围。后写覆盖先写,不可链;`Resume` 不调用。见 [agent-core](domains/agent/agent-core/agent-core.md) AC-19 与 [ADR 0003](architecture/adr/0003-run-param-resolver.md)。 |
 | **ToolMode** | `schema.RunOptions` 的工具披露模式:`""`(兼容)、`none`(显式无工具)、`allow`(请求白名单,空即空)、`all`(显式不限制)。与冻结后的最终工具名一起写入 interrupt v2 快照。 |
 | **ComposeCaller** | 带 `EndpointStats` 的 `largemodel.Caller`。`BuildCaller` 把同协议多 endpoint 收成一个可共享池;宿主在 Agent 构造期按租户/凭证域绑定,不在 ReAct 循环内换 Caller。 |
+| **CapabilityProvider** | Caller 可选的本地能力查询:按请求返回 endpoint/model 对结构化输出、tool calling 与输入 modality 的声明支持级别。严格策略下 unknown ≠ 满足。见 [model](domains/capability/model/model.md)。 |
+| **ProviderExtensions** | `largemodel.Request` 上按 provider namespace 隔离的私有参数。不是凭证通道;正式跨 provider 字段(`TopP`/`Seed`/…/`ToolChoice`)不经此覆盖。 |
 | **hook / 事件** | Agent 生命周期通过 `schema.Event` 发出的结构化可观测事件;hook 管理器负责分发。 |
 | **Emitter** | 通过 `context.Context` 传递的流式事件发射器,让深层工具无需显式参数即可向流写事件。 |
 | **子代理(Subagent)/ agent-as-tool** | 把一个 Agent 包装成工具供另一个 Agent 调用;分发时通过 `sessionview` 交给子代理一份父会话只读快照。 |

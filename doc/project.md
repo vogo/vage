@@ -23,7 +23,7 @@
 
 - 不自研大模型推理或托管,通过 `github.com/vogo/aimodel` 的各 provider native 客户端接入外部模型 API;多端点路由与故障转移由 `vage/largemodel/router` 承担,不另起一套。
 - 不做前端 UI、不做可视化编排器。
-- 不做通用工作流引擎;编排能力聚焦于"驱动 Agent 与工具"这一场景。
+- 不做持久化/分布式工作流平台(无跨进程状态格式、无可视化编排器、无自动冲突消解);进程内 DAG 与强类型 `workflow` 只驱动 Agent 与工具协作。
 - 不内置向量数据库,只定义可插拔的向量召回接口(自带内存实现与可选的 `vector/qdrant` 适配器;真实 Qdrant 服务由使用方部署)。
 - 不做多租户账户体系、计费、配额中心(留给使用方)。session 记忆按调用方声明的 `(agentID, sessionID)` 分区,这是防误配置串扰的正确性边界,不是 TenantID/UserID 身份或授权体系,框架不通过 Metadata 复核租户身份。
 

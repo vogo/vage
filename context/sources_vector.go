@@ -42,11 +42,9 @@ type HitsRenderer func(in FetchInput, hits []vector.SearchHit) string
 // VectorRecallSource is an optional Source. It does NOT implement
 // MustIncludeSource — recall is an enhancement, not a precondition.
 //
-// The source self-controls budget: when in.Budget > 0 it drops
-// lowest-score hits, then character-truncates the last surviving hit so
-// the emitted message is guaranteed to fit. This avoids a footgun where
-// Builder's trim-by-token would otherwise drop the single aggregated
-// message entirely.
+// Local safety caps are TopK and MaxBytesPerHit. The model window is not
+// an exclusive quota for this source; Builder applies the unified history
+// remainder after all sources emit.
 //
 // All failure modes are fail-open per Builder convention: nil Store /
 // Embedder, empty query, embed/search errors, and zero-hit results all
@@ -78,8 +76,8 @@ type VectorRecallSource struct {
 	// rendering. 0 = unlimited. Catches a single oversized Document
 	// before it hogs the whole budget.
 	MaxBytesPerHit int
-	// TokenEstimator overrides the default estimator used for self-trim.
-	// nil -> memory.DefaultTokenEstimator.
+	// TokenEstimator overrides the default estimator used for report
+	// token accounting. nil -> memory.DefaultTokenEstimator.
 	TokenEstimator memory.TokenEstimator
 }
 
@@ -90,8 +88,7 @@ var _ Source = (*VectorRecallSource)(nil)
 func (s *VectorRecallSource) Name() string { return SourceNameVectorRecall }
 
 // Fetch performs the recall pipeline: query selection -> embed -> search
-// -> render -> self-trim. Errors short-circuit to fail-open and never
-// bubble up.
+// -> render. Errors short-circuit to fail-open and never bubble up.
 func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchResult, error) {
 	rep := schema.ContextSourceReport{Source: SourceNameVectorRecall}
 
@@ -142,12 +139,9 @@ func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 	if render == nil {
 		render = defaultHitsRender
 	}
-	// Wrap a user-supplied renderer so a panic does not violate the
-	// fail-open contract. defaultHitsRender is internal and safe; wrapping
-	// uniformly keeps the call site simple.
 	render = recoveringRenderer(render)
 
-	text, hits, truncatedToFit := s.fitToBudget(in.Budget, hits, render, in)
+	text := render(in, hits)
 	if text == "" {
 		rep.Status = StatusSkipped
 		rep.Note = "empty render"
@@ -156,15 +150,9 @@ func (s *VectorRecallSource) Fetch(ctx context.Context, in FetchInput) (FetchRes
 	}
 
 	rep.OutputN = 1
-	rep.DroppedN = rep.InputN - len(hits)
 	rep.Tokens = s.estimateTokens(in.Protocol, text)
-	if truncatedToFit {
-		rep.Status = StatusTruncated
-		rep.Note = noteWithRange("truncated to fit budget", hits)
-	} else {
-		rep.Status = StatusOK
-		rep.Note = noteWithRange("", hits)
-	}
+	rep.Status = StatusOK
+	rep.Note = noteWithRange("", hits)
 
 	msg := schema.NewSystemMessage(in.Protocol, text)
 	return FetchResult{Messages: []schema.Message{msg}, Report: rep}, nil
@@ -189,57 +177,6 @@ func (s *VectorRecallSource) applyMaxBytesPerHit(hits []vector.SearchHit) []vect
 		hits[i].Document.Text = clampText(hits[i].Document.Text, s.MaxBytesPerHit)
 	}
 	return hits
-}
-
-// fitToBudget renders the hits into a single body and self-trims so the
-// estimated token count is ≤ budget. It first drops the lowest-score
-// hits one by one; if even a single hit overflows, it byte-truncates
-// that hit's text. budget == 0 means unlimited and skips trimming.
-func (s *VectorRecallSource) fitToBudget(budget int, hits []vector.SearchHit, render HitsRenderer, in FetchInput) (string, []vector.SearchHit, bool) {
-	text := render(in, hits)
-	if budget <= 0 {
-		return text, hits, false
-	}
-
-	tokens := s.estimateTokens(in.Protocol, text)
-	if tokens <= budget {
-		return text, hits, false
-	}
-
-	// Drop lowest-score hits (last in the slice — Search returns sorted
-	// descending) until we fit or only one remains.
-	for len(hits) > 1 && tokens > budget {
-		hits = hits[:len(hits)-1]
-		text = render(in, hits)
-		tokens = s.estimateTokens(in.Protocol, text)
-	}
-
-	if tokens <= budget {
-		return text, hits, true
-	}
-
-	// Single remaining hit still overflows. Character-truncate its text
-	// and re-render. We approximate "bytes per token" via the default
-	// heuristic of 4 bytes/token; refine in one shrinking loop to
-	// guarantee correctness even with a custom estimator.
-	if len(hits) == 0 {
-		return "", hits, true
-	}
-	original := hits[0].Document.Text
-	maxBytes := budget * 4
-	for maxBytes > 0 {
-		hits[0].Document.Text = clampText(original, maxBytes)
-		text = render(in, hits)
-		if s.estimateTokens(in.Protocol, text) <= budget {
-			break
-		}
-		maxBytes /= 2
-	}
-	if maxBytes <= 0 {
-		// Pathological case: even one byte exceeds budget. Yield empty.
-		return "", hits, true
-	}
-	return text, hits, true
 }
 
 // estimateTokens routes through the configured estimator, defaulting to

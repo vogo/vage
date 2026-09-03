@@ -38,20 +38,16 @@ func NewTimeoutMiddleware(d time.Duration) *TimeoutMiddleware {
 
 // Wrap implements Middleware.
 func (m *TimeoutMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
-			ctx, cancel := context.WithTimeout(ctx, m.timeout)
-			defer cancel()
+	wrapped := largemodel.DelegateCaller(next)
+	wrapped.Chat = func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+		ctx, cancel := context.WithTimeout(ctx, m.timeout)
+		defer cancel()
 
-			return next.Call(ctx, req)
-		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
-			// Pass the caller's context directly. Applying a timeout here would
-			// cancel the derived context via defer cancel() as soon as
-			// CallStream returns, killing the stream before the caller
-			// has consumed any chunks.
-			return next.CallStream(ctx, req)
-		},
+		return next.Call(ctx, req)
 	}
+	wrapped.ChatStream = func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		return next.CallStream(ctx, req)
+	}
+
+	return wrapped
 }

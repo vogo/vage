@@ -215,28 +215,22 @@ func TestDefaultBuilder_BudgetTrim(t *testing.T) {
 	}
 }
 
-// TestDefaultBuilder_MustIncludeNotTrimmed verifies a tight Budget never
-// drops must-include source output even when must-include alone exceeds
-// the budget.
-func TestDefaultBuilder_MustIncludeNotTrimmed(t *testing.T) {
+// TestDefaultBuilder_MustIncludeExceedsWindowFailClosed verifies a bounded
+// window that cannot hold must-include content fails closed instead of
+// silently overflowing.
+func TestDefaultBuilder_MustIncludeExceedsWindowFailClosed(t *testing.T) {
 	bigMsg := userMsg(strings.Repeat("x", 64)) // 16 tokens
 	must := &stubSource{name: "must", must: true, messages: []schema.Message{bigMsg}}
 	opt := &stubSource{name: "opt", messages: []schema.Message{userMsg("yyy")}}
 
 	builder := NewDefaultBuilder(WithSources(must, opt))
 
-	// Budget 8 < 16 must-include tokens → must-include still emits its
-	// message, optional source gets 0 budget.
-	res, err := builder.Build(context.Background(), BuildInput{SessionID: "s1", Budget: 8})
-	if err != nil {
-		t.Fatalf("Build returned error: %v", err)
+	_, err := builder.Build(context.Background(), BuildInput{SessionID: "s1", Budget: 8})
+	if err == nil {
+		t.Fatal("expected fail-closed budget error")
 	}
-
-	if len(res.Messages) < 1 {
-		t.Fatalf("must-include message dropped; got %d messages", len(res.Messages))
-	}
-	if res.Messages[0].Text() != bigMsg.Text() {
-		t.Errorf("first message != must-include output")
+	if !errors.Is(err, ErrFixedContentExceedsBudget) {
+		t.Errorf("error = %v, want ErrFixedContentExceedsBudget", err)
 	}
 }
 
@@ -259,8 +253,11 @@ func TestDefaultBuilder_MustIncludeAccountedFirst(t *testing.T) {
 	if opt.seenInput == nil {
 		t.Fatal("optional source was never invoked")
 	}
+	if got := opt.seenInput.ContextBudget.AvailableHistory; got != 6 {
+		t.Errorf("optional AvailableHistory = %d, want 6 (10 - 4 must-include)", got)
+	}
 	if got := opt.seenInput.Budget; got != 6 {
-		t.Errorf("optional Budget = %d, want 6 (10 - 4 must-include)", got)
+		t.Errorf("optional Budget hint = %d, want 6", got)
 	}
 }
 
@@ -352,4 +349,55 @@ func (c *cbSource) Fetch(_ context.Context, _ FetchInput) (FetchResult, error) {
 		c.onFetch()
 	}
 	return FetchResult{}, nil
+}
+
+func TestDefaultBuilder_SharedBudgetDropsOldestOptionalFirst(t *testing.T) {
+	older := &stubSource{name: "older", messages: []schema.Message{
+		userMsg(strings.Repeat("a", 16)),
+		userMsg(strings.Repeat("b", 16)),
+	}}
+	newer := &stubSource{name: "newer", messages: []schema.Message{
+		userMsg(strings.Repeat("c", 16)),
+		userMsg(strings.Repeat("d", 16)),
+	}}
+	builder := NewDefaultBuilder(WithSources(older, newer))
+
+	res, err := builder.Build(context.Background(), BuildInput{SessionID: "s1", Budget: 8})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if older.seenInput.ContextBudget.AvailableHistory != 8 || newer.seenInput.ContextBudget.AvailableHistory != 8 {
+		t.Errorf("sources should share AvailableHistory=8, older=%d newer=%d",
+			older.seenInput.ContextBudget.AvailableHistory, newer.seenInput.ContextBudget.AvailableHistory)
+	}
+	if len(res.Messages) != 2 {
+		t.Fatalf("len=%d, want 2 (newest pair)", len(res.Messages))
+	}
+	if res.Messages[0].Text() != strings.Repeat("c", 16) || res.Messages[1].Text() != strings.Repeat("d", 16) {
+		t.Errorf("kept %q / %q, want newer source", res.Messages[0].Text(), res.Messages[1].Text())
+	}
+	if res.Report.DroppedCount != 2 {
+		t.Errorf("DroppedCount=%d, want 2", res.Report.DroppedCount)
+	}
+	if res.Report.Sources[0].DroppedN != 2 || res.Report.Sources[0].Status != StatusTruncated {
+		t.Errorf("older report = %+v", res.Report.Sources[0])
+	}
+	if res.Report.OutputTokens > 8 {
+		t.Errorf("OutputTokens=%d exceeds budget 8", res.Report.OutputTokens)
+	}
+}
+
+func TestDefaultBuilder_UnlimitedBudgetZeroWindow(t *testing.T) {
+	src := &stubSource{name: "h", messages: []schema.Message{
+		userMsg(strings.Repeat("x", 64)),
+		userMsg(strings.Repeat("y", 64)),
+	}}
+	builder := NewDefaultBuilder(WithSource(src))
+	res, err := builder.Build(context.Background(), BuildInput{SessionID: "s1", Budget: 0})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(res.Messages) != 2 || res.Report.DroppedCount != 0 {
+		t.Errorf("unlimited should keep all: msgs=%d dropped=%d", len(res.Messages), res.Report.DroppedCount)
+	}
 }

@@ -655,3 +655,49 @@ func TestMessagesCodec_EncodeFailureSkipsBackend(t *testing.T) {
 		t.Error("the backend was called despite a request-build failure")
 	}
 }
+
+func TestBuildMessagesRequest_TopPAndToolChoice(t *testing.T) {
+	topP := 0.7
+	req := codecRequest(t)
+	req.TopP = &topP
+	req.Tools = []schema.ToolDef{{Name: "a"}, {Name: "b", ForceUse: true}}
+	req.ToolChoice = &modelcore.ToolChoice{Mode: "none"}
+
+	wire, err := buildMessagesRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if wire.TopP == nil || *wire.TopP != topP {
+		t.Fatalf("top_p = %v", wire.TopP)
+	}
+
+	if wire.ToolChoice == nil || wire.ToolChoice.Type != anthropic.ToolChoiceTypeNone {
+		t.Fatalf("explicit none must win over ForceUse, got %#v", wire.ToolChoice)
+	}
+}
+
+func TestBuildMessagesRequest_UnsupportedParameters(t *testing.T) {
+	seed := int64(1)
+	req := codecRequest(t)
+	req.Seed = &seed
+	_, err := buildMessagesRequest(req)
+	var unsupported *modelcore.UnsupportedParameterError
+	if !errors.As(err, &unsupported) || unsupported.Parameter != "seed" {
+		t.Fatalf("err = %v", err)
+	}
+
+	req = codecRequest(t)
+	freq := 0.1
+	req.FrequencyPenalty = &freq
+	if _, err := buildMessagesRequest(req); err == nil {
+		t.Fatal("frequency_penalty must fail")
+	}
+
+	req = codecRequest(t)
+	pres := 0.1
+	req.PresencePenalty = &pres
+	if _, err := buildMessagesRequest(req); err == nil {
+		t.Fatal("presence_penalty must fail")
+	}
+}

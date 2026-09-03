@@ -37,13 +37,20 @@ import (
 
 // mediaRequest is a one-turn request whose user message mixes text and an
 // image URL, in the given protocol.
-func mediaRequest(proto schema.Protocol) *Request {
+func mediaRequest(t *testing.T, proto schema.Protocol) *Request {
+	t.Helper()
+
+	img, err := schema.ImageFromURL("https://example.com/cat.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	return &Request{
 		Model: "test-model",
 		Messages: []schema.Message{
 			schema.NewUserMessageWithParts(proto, []schema.MessagePart{
 				{Type: schema.MessagePartText, Text: "describe this"},
-				{Type: schema.MessagePartImage, URL: "https://example.com/cat.png"},
+				img,
 			}),
 		},
 	}
@@ -57,7 +64,7 @@ func TestProviderCall_MediaEncodesInWireRequest(t *testing.T) {
 			url, body := captureWireBody(t, pc.textBody, "application/json")
 			caller := pc.newCall(t, url)
 
-			if _, err := caller.Call(context.Background(), mediaRequest(pc.protocol)); err != nil {
+			if _, err := caller.Call(context.Background(), mediaRequest(t, pc.protocol)); err != nil {
 				t.Fatalf("Call: %v", err)
 			}
 
@@ -75,7 +82,7 @@ func TestProviderStream_Media_MatchesCall(t *testing.T) {
 			url, body := captureWireBody(t, pc.streamBody, "text/event-stream")
 			caller := pc.newCall(t, url)
 
-			stream, err := caller.CallStream(context.Background(), mediaRequest(pc.protocol))
+			stream, err := caller.CallStream(context.Background(), mediaRequest(t, pc.protocol))
 			if err != nil {
 				t.Fatalf("CallStream: %v", err)
 			}

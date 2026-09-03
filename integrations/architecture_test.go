@@ -54,6 +54,7 @@ var componentRules = []struct {
 	{modulePath + "/agent", component{"agent", 3}},
 	{modulePath + "/checkpoint", component{"checkpoint", 1}},
 	{modulePath + "/orchestrate", component{"orchestrate", 1}},
+	{modulePath + "/workflow", component{"workflow", 1}},
 	{modulePath + "/interrupt", component{"interrupt", 1}},
 	{modulePath + "/memory", component{"memory", 1}},
 	{modulePath + "/context", component{"context", 1}},
@@ -448,6 +449,7 @@ func TestArchitectureSyntheticAllowances(t *testing.T) {
 		{name: "context reaches vector", fromPkg: modulePath + "/context", toPkg: modulePath + "/vector"},
 		{name: "same component subpackage", fromPkg: modulePath + "/tool/read", toPkg: modulePath + "/tool"},
 		{name: "L2 descends to schema", fromPkg: modulePath + "/largemodel", toPkg: modulePath + "/schema"},
+		{name: "typed workflow descends to schema", fromPkg: modulePath + "/workflow", toPkg: modulePath + "/schema"},
 	}
 
 	for _, tc := range cases {

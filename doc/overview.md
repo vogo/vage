@@ -29,10 +29,10 @@
 | 组 | 领域 | 覆盖的包 | 一句话职责 |
 |----|------|----------|-----------|
 | `agent` | `agent-core` | `agent`、`schema`、`prompt` | Agent 统一抽象与四种形态、provider-neutral 数据契约、提示词模板 |
-| `agent` | `orchestration` | `orchestrate`、`checkpoint` | DAG 编排引擎与断点续跑快照 |
+| `agent` | `orchestration` | `orchestrate`、`checkpoint`、`interrupt`、`workflow` | DAG 编排、断点/挂起、强类型工作流状态 |
 | `memory` | `memory` | `memory`、`context` | 三层记忆、上下文装配与压缩 |
 | `memory` | `session` | `session`、`workspace`、`sessionview` | 会话实体、持久工作区、子代理视图 |
-| `capability` | `model` | `largemodel` | LLM 中间件装饰链与上下文编辑 |
+| `capability` | `model` | `largemodel`、`largemodel/structured` | LLM 中间件装饰链、能力协商与上下文编辑 |
 | `capability` | `tooling` | `tool`、`mcp`、`skill` | 工具系统、MCP 协议、Agent Skills |
 | `platform` | `guard` | `guard`、`security` | 安全护栏与凭证脱敏 |
 | `platform` | `service` | `service`、`hook`、`eval`、`vector` | HTTP 服务、事件 hook、评测、向量召回 |

@@ -960,6 +960,7 @@ func TestMiddleware_AbsentChainKeepsBaselineBehaviour(t *testing.T) {
 
 	wantTypes := []string{
 		schema.EventAgentStart,
+		schema.EventContextBuilt,
 		schema.EventIterationStart,
 		schema.EventTextDelta,
 		schema.EventTextDelta,

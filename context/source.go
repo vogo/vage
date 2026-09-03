@@ -28,6 +28,7 @@ package vctx
 import (
 	"context"
 
+	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 )
 
@@ -52,6 +53,10 @@ const (
 	StatusError     = "error"
 	StatusTruncated = "truncated"
 )
+
+// NoteWorkspaceTailKeep is the stable BuildReport/EventContextBuilt note
+// reason WorkspaceSource writes when plan.md is tail-truncated.
+const NoteWorkspaceTailKeep = "workspace_tail_keep"
 
 // Strategy constants for BuildReport.Strategy.
 const (
@@ -100,11 +105,14 @@ type FetchInput struct {
 	// wire form, since vage stores messages natively rather than converting
 	// between vendors.
 	Protocol schema.Protocol
-	// Budget is the token allowance for this source's output. 0 means
-	// unlimited; > 0 is a soft hint — the source may emit more, in which
-	// case the Builder applies its fallback trim.
+	// Budget is a legacy per-source token hint. 0 means unlimited; > 0 is a
+	// soft hint. The model window is not a per-source exclusive quota —
+	// Builder applies the unified history remainder after all sources emit.
 	Budget int
-	Vars   map[string]any
+	// ContextBudget is the Builder-normalized budget for this fetch.
+	// Session compressors read AvailableHistory from here.
+	ContextBudget memory.Budget
+	Vars          map[string]any
 }
 
 // FetchResult is the value Source.Fetch returns.
@@ -136,8 +144,14 @@ type BuildInput struct {
 	// It is forwarded to every Source so synthesized messages are built in
 	// the matching vendor wire form.
 	Protocol schema.Protocol
-	Budget   int
-	Vars     map[string]any
+	// Budget is the legacy integer window. 0 means unlimited. When
+	// ContextBudget is non-nil it takes precedence; otherwise Budget > 0
+	// is interpreted as ModelContextTokens with no explicit reservations.
+	Budget int
+	// ContextBudget, when non-nil, is the structured window for this build.
+	// A non-nil value with ModelContextTokens==0 is explicit unlimited.
+	ContextBudget *memory.Budget
+	Vars          map[string]any
 }
 
 // BuildResult is the value Builder.Build returns.
@@ -149,7 +163,7 @@ type BuildResult struct {
 // fromBuildInput projects a BuildInput onto a FetchInput. Budget is left at
 // zero so the caller can fill it per-source.
 func fromBuildInput(in BuildInput) FetchInput {
-	return FetchInput{
+	fin := FetchInput{
 		SessionID: in.SessionID,
 		AgentID:   in.AgentID,
 		Intent:    in.Intent,
@@ -157,6 +171,10 @@ func fromBuildInput(in BuildInput) FetchInput {
 		Protocol:  in.Protocol,
 		Vars:      in.Vars,
 	}
+	if in.ContextBudget != nil {
+		fin.ContextBudget = *in.ContextBudget
+	}
+	return fin
 }
 
 // isMustInclude reports whether s is a MustIncludeSource that returns true.

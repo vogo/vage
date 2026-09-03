@@ -151,3 +151,9 @@ func (c *SummarizeAndTruncCompressor) Compress(ctx context.Context, messages []s
 
 	return result, nil
 }
+
+// CompressWithBudget summarizes older messages within AvailableHistory.
+// Bounded zero remaining returns empty history without calling the summarizer.
+func (c *SummarizeAndTruncCompressor) CompressWithBudget(ctx context.Context, in CompressionInput) ([]schema.Message, error) {
+	return budgetAwareCompress(ctx, in, c.Compress)
+}
