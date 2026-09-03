@@ -53,3 +53,23 @@ func (c *ChainCompressor) Compress(ctx context.Context, messages []schema.Messag
 
 	return result, nil
 }
+
+// CompressWithBudget applies each compressor in sequence, preferring a
+// budget-aware entry when the child implements BudgetCompressor.
+func (c *ChainCompressor) CompressWithBudget(ctx context.Context, in CompressionInput) ([]schema.Message, error) {
+	result := in.Messages
+
+	for _, comp := range c.compressors {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		var err error
+		result, err = CompressWithBudget(ctx, comp, CompressionInput{Messages: result, Budget: in.Budget})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}

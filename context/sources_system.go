@@ -33,6 +33,10 @@ import (
 // configuration bug and surface to the Builder caller.
 type SystemPromptSource struct {
 	Template prompt.PromptTemplate
+	// Suffix is appended to the rendered template (skill instructions).
+	// When the template is nil or renders empty, a non-empty Suffix still
+	// produces a system message so the cost is charged as ReservedSystem.
+	Suffix string
 }
 
 // Compile-time interface conformance.
@@ -54,21 +58,24 @@ func (s *SystemPromptSource) MustInclude() bool { return true }
 func (s *SystemPromptSource) Fetch(ctx context.Context, in FetchInput) (FetchResult, error) {
 	rep := schema.ContextSourceReport{Source: SourceNameSystemPrompt}
 
-	if s.Template == nil {
-		rep.Status = StatusSkipped
-		rep.Note = "no template"
-		return FetchResult{Report: rep}, nil
+	text := ""
+	if s.Template != nil {
+		rendered, err := s.Template.Render(ctx, in.Vars)
+		if err != nil {
+			// Fail-closed: surface configuration bugs immediately.
+			return FetchResult{Report: rep}, fmt.Errorf("vctx: render system prompt: %w", err)
+		}
+		text = rendered
 	}
 
-	text, err := s.Template.Render(ctx, in.Vars)
-	if err != nil {
-		// Fail-closed: surface configuration bugs immediately.
-		return FetchResult{Report: rep}, fmt.Errorf("vctx: render system prompt: %w", err)
-	}
-
+	text += s.Suffix
 	if text == "" {
 		rep.Status = StatusSkipped
-		rep.Note = "empty render"
+		if s.Template == nil {
+			rep.Note = "no template"
+		} else {
+			rep.Note = "empty render"
+		}
 		return FetchResult{Report: rep}, nil
 	}
 

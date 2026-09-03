@@ -335,46 +335,31 @@ func TestVectorRecallSource_MaxBytesPerHit(t *testing.T) {
 	}
 }
 
-func TestVectorRecallSource_SelfTrim_DropsLowestScore(t *testing.T) {
+func TestVectorRecallSource_DoesNotOwnModelWindow(t *testing.T) {
 	store, emb := vectorTestSetup(t)
-	// Budget chosen to require at least one hit drop while leaving
-	// enough room for the preamble + 1-2 surviving hits.
 	src := &VectorRecallSource{Store: store, Embedder: emb, TopK: 3}
 	const budget = 50
 	res, _ := src.Fetch(context.Background(), FetchInput{Intent: "brown fox", Budget: budget})
-	if res.Report.Status != StatusTruncated {
-		t.Fatalf("Status = %q, want truncated (note=%q)", res.Report.Status, res.Report.Note)
+	if res.Report.Status != StatusOK {
+		t.Fatalf("Status = %q, want ok (window trim is Builder's job; note=%q)", res.Report.Status, res.Report.Note)
 	}
-	if res.Report.DroppedN == 0 {
-		t.Fatalf("expected DroppedN > 0; report = %+v", res.Report)
-	}
-	if res.Report.Tokens > budget {
-		t.Fatalf("Tokens=%d should be <= budget=%d", res.Report.Tokens, budget)
+	if res.Report.DroppedN != 0 {
+		t.Fatalf("source must not exclusive-trim to Budget; DroppedN=%d", res.Report.DroppedN)
 	}
 }
 
-func TestVectorRecallSource_SelfTrim_FinalCharTruncate(t *testing.T) {
+func TestVectorRecallSource_LongHitUsesMaxBytesPerHit(t *testing.T) {
 	store := vector.NewMapVectorStore()
 	emb := vector.NewHashEmbedder(32)
 	long := strings.Repeat("alpha ", 500)
 	v, _ := emb.Embed(context.Background(), long)
 	_ = store.Add(context.Background(), vector.Document{ID: "x", Text: long, Embedding: v})
 
-	src := &VectorRecallSource{Store: store, Embedder: emb}
-	// Budget too small for the full doc; 50 leaves room for preamble +
-	// a clamped tail of the long text.
-	const budget = 50
-	res, _ := src.Fetch(context.Background(), FetchInput{Intent: "alpha", Budget: budget})
-	if res.Report.Status != StatusTruncated {
-		t.Fatalf("Status = %q, want truncated; note=%q", res.Report.Status, res.Report.Note)
-	}
-	if res.Report.Tokens > budget {
-		t.Fatalf("Tokens=%d should be <= budget=%d", res.Report.Tokens, budget)
-	}
-	// A truncated body should still contain the truncation marker.
+	src := &VectorRecallSource{Store: store, Embedder: emb, MaxBytesPerHit: 64}
+	res, _ := src.Fetch(context.Background(), FetchInput{Intent: "alpha", Budget: 50})
 	body := res.Messages[0].Text()
 	if !strings.Contains(body, "[truncated]") {
-		t.Fatalf("expected truncation marker; got %q", body)
+		t.Fatalf("expected per-hit truncation marker; got %q", body)
 	}
 }
 

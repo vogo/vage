@@ -73,20 +73,32 @@ func (a *Agent) preflightEntry(ctx context.Context, policy entryPolicy, req *sch
 }
 
 // prepareContext performs the context-building preparation shared by Run and
-// RunStream: it builds the initial messages, injects active skill
-// instructions, resolves the AI tool set (merging skill and request filters),
-// and marks prompt-cache breakpoints when caching is enabled. The returned
-// buildResult and tool slice feed directly into runReactLoop.
-func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p runParams) (buildResult, []schema.ToolDef, error) {
-	br, err := a.buildInitialMessages(ctx, req, p.runTokenBudget)
+// RunStream: it freezes active skills once, builds the initial messages
+// (skill instructions included in SystemPromptSource), and resolves the AI
+// tool set from the same snapshot — or from a frozen name list on resume.
+// emitBuilderHooks is true for sync Run (Builder dispatches EventContextBuilt
+// to hooks) and false for RunStream (the stream path sends the same event
+// after AgentStart).
+func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p runParams, emitBuilderHooks bool) (buildResult, []schema.ToolDef, error) {
+	active := a.snapshotActiveSkills(req.SessionID)
+	skillText := formatSkillInstructions(active)
+
+	var aiTools []schema.ToolDef
+	if p.toolsFrozen {
+		aiTools = a.prepareFrozenAITools(p.toolFilter)
+	} else {
+		aiTools = a.prepareAITools(mergeSkillToolFilter(active, p.toolFilter))
+	}
+
+	br, err := a.buildContext(ctx, req, contextBuildParams{
+		skillText: skillText,
+		tools:     aiTools,
+		maxTokens: p.maxTokens,
+		emitHooks: emitBuilderHooks,
+	})
 	if err != nil {
 		return buildResult{}, nil, err
 	}
-
-	// Inject skill instructions into the system prompt.
-	a.injectSkillInstructions(&br, req.SessionID)
-
-	aiTools := a.toolsForRun(p, req.SessionID)
 
 	return br, aiTools, nil
 }

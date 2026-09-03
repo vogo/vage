@@ -157,3 +157,9 @@ func (c *ImportanceRankingCompressor) Compress(ctx context.Context, messages []s
 
 	return result, nil
 }
+
+// CompressWithBudget ranks by importance within AvailableHistory.
+// Bounded zero remaining returns empty history.
+func (c *ImportanceRankingCompressor) CompressWithBudget(ctx context.Context, in CompressionInput) ([]schema.Message, error) {
+	return budgetAwareCompress(ctx, in, c.Compress)
+}

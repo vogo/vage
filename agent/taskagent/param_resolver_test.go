@@ -28,6 +28,7 @@ import (
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
+	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
@@ -295,20 +296,17 @@ func TestBuildInputBudget_NonZeroTrimsOptional(t *testing.T) {
 		agent.Config{},
 		WithCaller(newMock(stopResponse("ok"))),
 		WithExtraSources(src),
+		WithContextBudget(memory.Budget{ModelContextTokens: 8}),
 	)
 
-	budget := 8
 	_, err := a.Run(context.Background(), &schema.RunRequest{
 		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
-		Options: &schema.RunOptions{
-			Limits: &schema.RunLimits{RunTokenBudget: &budget},
-		},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if src.seen == 0 {
-		t.Error("optional source Budget = 0, want remaining positive budget")
+		t.Error("optional source Budget = 0, want remaining positive history allowance")
 	}
 }
 

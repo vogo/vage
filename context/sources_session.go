@@ -95,15 +95,27 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 		return FetchResult{Report: rep}, nil
 	}
 
+	budget := in.ContextBudget
+	if budget.ModelContextTokens == 0 && in.Budget > 0 {
+		budget = memory.Budget{ModelContextTokens: in.Budget, AvailableHistory: in.Budget}
+	}
+
 	if c := view.Compressor(); c != nil {
-		compressed, compErr := c.Compress(ctx, loaded, 0)
-		if compErr != nil {
-			slog.Warn("vctx: compress session messages", "error", compErr)
-			// Fall through with the uncompressed slice; do not flip Status
-			// to error because we still produced output.
-			rep.Note = "compressor failed; uncompressed"
+		if budget.BoundedZeroHistory() {
+			loaded = nil
 		} else {
-			loaded = compressed
+			compressed, compErr := memory.CompressWithBudget(ctx, c, memory.CompressionInput{
+				Messages: loaded,
+				Budget:   budget,
+			})
+			if compErr != nil {
+				slog.Warn("vctx: compress session messages", "error", compErr)
+				// Fall through with the uncompressed slice; do not flip Status
+				// to error because we still produced output.
+				rep.Note = "compressor failed; uncompressed"
+			} else {
+				loaded = compressed
+			}
 		}
 	}
 
@@ -113,10 +125,19 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 		rep.DroppedN = originalCount - len(out)
 	}
 	rep.OutputN = len(out)
-	if len(out) == 0 {
-		rep.Status = StatusSkipped
-		rep.Note = "compressed to empty"
-	} else {
+	switch {
+	case len(out) == 0:
+		rep.Status = StatusTruncated
+		if rep.Note == "" {
+			if budget.BoundedZeroHistory() {
+				rep.Note = "no history budget"
+			} else {
+				rep.Note = "compressed to empty"
+			}
+		}
+	case rep.DroppedN > 0:
+		rep.Status = StatusTruncated
+	default:
 		rep.Status = StatusOK
 	}
 	// Tokens left at zero — Builder fills via estimator.

@@ -14,16 +14,20 @@
 | `memory/manager.go`(`Manager`, `WithDurableStore`/`WithAtomicStore`) | 三层记忆统一编排;声明式能力装配入口 |
 | `memory/promoter.go`/`selector.go` | 层间提升策略与可组合谓词(`PromoteWhen`/`ArchiveWhen` 等) |
 | `memory/archiver.go` | 归档策略 |
-| `memory/compressor*.go`(`ContextCompressor` 及各实现) | 滑动窗口 / 重要度排序 / 摘要+截断 / token 预算 / 压缩链 |
+| `memory/compressor*.go`(`ContextCompressor` 及各实现) | 滑动窗口 / 重要度排序 / 摘要+截断 / token 预算 / 按需摘要 / 压缩链 |
+| `memory/budget.go`(`Budget`, `CompressionInput`) | 一次 build 的窗口、预留、历史余量与共享估算器 |
 | `memory/compactor.go` | 会话压紧 |
-| `memory/token_estimate.go` | token 估算(压缩决策依据) |
+| `memory/token_estimate.go` | token 估算(压缩与 Builder 核算共用) |
 | `context/source.go`(`Builder`/`Source`) | 装配管线契约 |
 | `context/sources_*.go` | 各内置 Source(系统提示、会话记忆、向量召回等) |
 
 ## 关键设计决策
 
-- **Builder/Source 显式化**:把提示装配从"散落在 Agent 里的拼接逻辑"提升为一等、可插拔、可审计的管线。新增上下文来源 = 新增一个 Source,不改 Agent。TaskAgent 把解析后的 `RunTokenBudget` 传入 `BuildInput.Budget`;非零预算只裁剪 optional Source,must-include 来源仍完整保留。
-- **压缩器职责单一 + 可链式组合**:每个压缩器只处理一个维度(窗口、重要度、摘要、预算),用压缩链组合,避免单个巨型压缩器。
+- **Builder/Source 显式化**:把提示装配从"散落在 Agent 里的拼接逻辑"提升为一等、可插拔、可审计的管线。新增上下文来源 = 新增一个 Source,不改 Agent。
+- **Builder 是唯一模型窗口裁决点**:必须包含的 Source 与 tools/输出预留先计费;可选 Source 看到同一份 `AvailableHistory`,由 Builder 在合并后按稳定顺序从头淘汰。workspace `MaxBytes`、RAG TopK/单文档上限仍是局部安全帽,不是窗口配额。上下文窗口预算(`WithContextBudget`)与 Run 累计用量预算(`WithRunTokenBudget`)语义独立。
+- **不限与零余量不可混淆**:`ModelContextTokens==0` 表示不限;有界且 `AvailableHistory==0` 表示历史无额度,必须返回空历史且不得把 `0` 传给旧 `Compress` 入口(旧入口的 `0` 仍是不限)。
+- **按需摘要**:`SummarizeWhenOverBudget` 只在有界正余量且超额时摘要更早轮次,保留最近完整 user 轮次;目标占用率默认 0.8,为 workspace/RAG 留空。摘要失败 fail-open,随后仍由 Builder 硬裁剪。
+- **压缩器职责单一 + 可链式组合**:每个压缩器只处理一个维度(窗口、重要度、摘要、预算),用压缩链组合,避免单个巨型压缩器。预算经 `CompressionInput` 贯通;现有 window/importance 选择语义不变。
 - **`vctx` 命名**:包名避开标准库 `context`,导入路径仍为 `github.com/vogo/vage/context`。
 - **token 估算集中**:压缩决策统一依赖 `token_estimate`,避免各处各估一套。
 - **长期记忆 ≠ 持久化**:`LongTermMemory` 是 store tier 的名字,只承诺跨会话;是否跨进程重启存活由注入的 `Store` 后端决定。默认 `MapStore` 后端进程内即丢,故 `NewInMemoryLongTermMemory()` 的 godoc 明示非 durable;需要 durable 的装配方用 `NewLongTermMemory(store)` + `Require*` 或 `Manager.WithDurableStore` 显式声明。
@@ -51,4 +55,4 @@
 ## 非功能考量
 
 - **性能**:token 估算与压缩在装配路径上,须保持轻量;召回类 Source 应可降级(后端不可用时跳过)。
-- **可审计**:装配结果可追溯到各 Source 的贡献,便于排查"为什么模型看到了/没看到某段上下文"。
+- **可审计**:装配结果可追溯到各 Source 的贡献;`BuildReport` 与 `EventContextBuilt` 共用同一份 Source 计数和预算分解。workspace plan 超字节上限时以稳定 note `workspace_tail_keep` 标明 tail-keep。估算偏低仍可能被 provider 拒绝,调用方应在窗口内保留安全余量。

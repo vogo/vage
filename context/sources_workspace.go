@@ -93,6 +93,7 @@ func (s *WorkspaceSource) Fetch(ctx context.Context, in FetchInput) (FetchResult
 	if maxBytes <= 0 {
 		maxBytes = workspace.MaxPlanBytes
 	}
+	origPlanBytes := len(plan)
 	truncated := false
 	if len(plan) > maxBytes {
 		// Tail-preserving truncation: drop the leading bytes so the most
@@ -105,11 +106,12 @@ func (s *WorkspaceSource) Fetch(ctx context.Context, in FetchInput) (FetchResult
 
 	text := renderWorkspace(plan, notes, truncated)
 
-	rep.OriginalCount = len(plan) + indexBytes(notes)
+	rep.OriginalCount = origPlanBytes + indexBytes(notes)
 	rep.OutputN = 1
 	if truncated {
 		rep.Status = StatusTruncated
 		rep.DroppedN = 1
+		rep.Note = fmt.Sprintf("%s orig_bytes=%d kept_bytes=%d", NoteWorkspaceTailKeep, origPlanBytes, len(plan))
 	} else {
 		rep.Status = StatusOK
 	}

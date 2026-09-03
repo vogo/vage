@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/vogo/vage/schema"
+	"github.com/vogo/vage/skill"
 	"github.com/vogo/vage/tool"
 )
 
@@ -56,30 +57,32 @@ func (a *Agent) toolsForRun(p runParams, sessionID string) []schema.ToolDef {
 	return a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, sessionID))
 }
 
+func (a *Agent) snapshotActiveSkills(sessionID string) []*skill.Activation {
+	if a.skillManager == nil {
+		return nil
+	}
+	return a.skillManager.ActiveSkills(sessionID)
+}
+
 // mergeSkillToolFilter merges skill AllowedTools with the request-level tool filter.
 // If any active skill does not declare AllowedTools (meaning it has no restriction),
 // the result is the requestFilter as-is (no additional filtering).
 // Only when ALL active skills that declare AllowedTools is the union used as a filter.
 func (a *Agent) mergeSkillToolFilter(requestFilter []string, sessionID string) []string {
-	if a.skillManager == nil {
-		return requestFilter
-	}
+	return mergeSkillToolFilter(a.snapshotActiveSkills(sessionID), requestFilter)
+}
 
-	active := a.skillManager.ActiveSkills(sessionID)
+func mergeSkillToolFilter(active []*skill.Activation, requestFilter []string) []string {
 	if len(active) == 0 {
 		return requestFilter
 	}
 
-	// Collect union of all skill allowed tools.
-	// If any active skill does NOT declare AllowedTools, it means "unrestricted",
-	// so we skip skill-level filtering entirely.
 	var skillTools []string
 	seen := make(map[string]bool)
 
 	for _, act := range active {
 		def := act.SkillDef()
 		if len(def.AllowedTools) == 0 {
-			// This skill has no tool restriction — don't filter.
 			return requestFilter
 		}
 		for _, t := range def.AllowedTools {
@@ -90,12 +93,10 @@ func (a *Agent) mergeSkillToolFilter(requestFilter []string, sessionID string) [
 		}
 	}
 
-	// If no request filter, use skill tools only.
 	if len(requestFilter) == 0 {
 		return skillTools
 	}
 
-	// Intersect skill tools with request filter.
 	reqSet := make(map[string]bool, len(requestFilter))
 	for _, t := range requestFilter {
 		reqSet[t] = true
@@ -111,15 +112,9 @@ func (a *Agent) mergeSkillToolFilter(requestFilter []string, sessionID string) [
 	return result
 }
 
-// injectSkillInstructions appends active skill instructions to the system prompt.
-func (a *Agent) injectSkillInstructions(br *buildResult, sessionID string) {
-	if a.skillManager == nil {
-		return
-	}
-
-	active := a.skillManager.ActiveSkills(sessionID)
+func formatSkillInstructions(active []*skill.Activation) string {
 	if len(active) == 0 {
-		return
+		return ""
 	}
 
 	var sb strings.Builder
@@ -134,18 +129,5 @@ func (a *Agent) injectSkillInstructions(br *buildResult, sessionID string) {
 		sb.WriteString(def.Instructions)
 		sb.WriteString("\n</skill>")
 	}
-
-	if sb.Len() == 0 {
-		return
-	}
-
-	skillText := sb.String()
-
-	// If there is a system message, append to it; otherwise prepend a new system message.
-	if len(br.messages) > 0 && br.messages[0].Role() == schema.RoleSystem {
-		br.messages[0].SetText(br.messages[0].Text() + skillText)
-	} else {
-		sysMsg := schema.NewSystemMessage(schema.ProtocolOf(br.messages), skillText)
-		br.messages = append([]schema.Message{sysMsg}, br.messages...)
-	}
+	return sb.String()
 }

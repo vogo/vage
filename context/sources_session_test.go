@@ -207,3 +207,76 @@ func TestSessionMemorySource_ForSession_DoesNotLeak(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionMemorySource_TokenBudgetCompressesWhenHistoryPositive(t *testing.T) {
+	mgr := newSessionMemoryWithMsgs(t, 5)
+	comp := memory.NewTokenBudgetCompressor()
+	mgr = memory.NewManager(memory.WithSession(mgr.Session()), memory.WithCompressor(comp))
+	src := &SessionMemorySource{Manager: mgr}
+
+	in := sessionFetchInput()
+	in.ContextBudget = memory.Budget{
+		ModelContextTokens: 100,
+		AvailableHistory:   4, // each "turn N" is short; ~1-2 tokens
+	}
+	res, err := src.Fetch(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Report.OriginalCount != 5 {
+		t.Errorf("OriginalCount = %d, want 5", res.Report.OriginalCount)
+	}
+	if len(res.Messages) >= 5 {
+		t.Fatalf("expected compression, got %d messages", len(res.Messages))
+	}
+	if res.Report.DroppedN != 5-len(res.Messages) {
+		t.Errorf("DroppedN = %d, want %d", res.Report.DroppedN, 5-len(res.Messages))
+	}
+}
+
+func TestSessionMemorySource_BoundedZeroHistoryEmpty(t *testing.T) {
+	called := false
+	comp := memory.CompressFunc(func(_ context.Context, msgs []schema.Message, maxTokens int) ([]schema.Message, error) {
+		called = true
+		return msgs, nil
+	})
+	mgr := newSessionMemoryWithMsgs(t, 4)
+	mgr = memory.NewManager(memory.WithSession(mgr.Session()), memory.WithCompressor(comp))
+	src := &SessionMemorySource{Manager: mgr}
+
+	in := sessionFetchInput()
+	in.ContextBudget = memory.Budget{
+		ModelContextTokens: 80,
+		AvailableHistory:   0,
+	}
+	res, err := src.Fetch(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if called {
+		t.Fatal("compressor must not be called on bounded zero remaining")
+	}
+	if len(res.Messages) != 0 {
+		t.Fatalf("want empty history, got %d", len(res.Messages))
+	}
+	if res.Report.DroppedN != 4 {
+		t.Errorf("DroppedN = %d, want 4", res.Report.DroppedN)
+	}
+	if res.Report.OriginalCount != 4 {
+		t.Errorf("OriginalCount = %d, want 4", res.Report.OriginalCount)
+	}
+}
+
+func TestSessionMemorySource_UnlimitedKeepsFullHistory(t *testing.T) {
+	mgr := newSessionMemoryWithMsgs(t, 5)
+	mgr = memory.NewManager(memory.WithSession(mgr.Session()), memory.WithCompressor(memory.NewTokenBudgetCompressor()))
+	src := &SessionMemorySource{Manager: mgr}
+
+	res, err := src.Fetch(context.Background(), sessionFetchInput())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(res.Messages) != 5 {
+		t.Fatalf("unlimited should keep all, got %d", len(res.Messages))
+	}
+}

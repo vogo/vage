@@ -20,6 +20,7 @@ package vctx
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vogo/vage/prompt"
@@ -101,5 +102,34 @@ func TestSystemPromptSource_RenderError(t *testing.T) {
 	_, err := src.Fetch(context.Background(), FetchInput{})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestSystemPromptSource_SuffixWithoutTemplate(t *testing.T) {
+	src := &SystemPromptSource{Suffix: "\n<skill name=\"s\">\ninstructions\n</skill>"}
+	res, err := src.Fetch(context.Background(), FetchInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(res.Messages))
+	}
+	if !strings.Contains(res.Messages[0].Text(), `<skill name="s">`) {
+		t.Errorf("text = %q", res.Messages[0].Text())
+	}
+}
+
+func TestSystemPromptSource_SuffixAppendsToTemplate(t *testing.T) {
+	src := &SystemPromptSource{
+		Template: prompt.StringPrompt("base"),
+		Suffix:   "\n<skill name=\"s\">\nx\n</skill>",
+	}
+	res, err := src.Fetch(context.Background(), FetchInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := res.Messages[0].Text()
+	if !strings.HasPrefix(got, "base") || !strings.Contains(got, `<skill name="s">`) {
+		t.Errorf("text = %q", got)
 	}
 }

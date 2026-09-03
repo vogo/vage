@@ -152,6 +152,49 @@ silently converted. Runnable versions of these snippets live in
 `New` constructions above run side by side in
 [`agent/taskagent/example_test.go`](agent/taskagent/example_test.go).
 
+## Context window budget
+
+Each context build shares one `memory.Budget`: the model window minus
+reserved output, tool definitions, and system text. Session history,
+workspace, and RAG then share the remaining `AvailableHistory`. The
+Builder is the only place that may drop messages to fit the model window;
+sources keep local safety caps (workspace `MaxBytes`, RAG TopK) but do not
+treat the window as their private quota.
+
+`taskagent.WithContextBudget` is independent of `WithRunTokenBudget` (the
+latter caps cumulative usage across a Run). Token estimates are a
+heuristic (`len/4` by default), not provider billing — leave headroom;
+`memory.TargetUtilization(0.8)` is the recommended default for
+summarization. A bounded window that cannot hold must-include content
+fails closed before the model call.
+
+```go
+mgr := memory.NewManager(
+    memory.WithSession(session),
+    memory.WithCompressor(memory.SummarizeWhenOverBudget(
+        summarizer,
+        memory.KeepRecentTurns(4),
+        memory.TargetUtilization(0.8),
+    )),
+)
+
+a := taskagent.New(cfg,
+    taskagent.WithMemory(mgr),
+    taskagent.WithContextBudget(memory.Budget{
+        ModelContextTokens: 128_000,
+        ReservedOutput:     4_096,
+    }),
+    taskagent.WithExtraSources(&vctx.WorkspaceSource{Workspace: ws}),
+)
+```
+
+Workspace plan overflow keeps the tail and reports `workspace_tail_keep`
+on both `BuildReport` and `EventContextBuilt`. RunStream emits
+`context_built` immediately after `agent_start`. Runnable summarization
+and Deep Agent composition examples live in
+[`memory/example_test.go`](memory/example_test.go) and
+[`agent/taskagent/example_test.go`](agent/taskagent/example_test.go).
+
 ### Several endpoints behind one model
 
 A single-endpoint caller is a pool of one, so spreading a model over several

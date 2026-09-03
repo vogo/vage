@@ -479,14 +479,18 @@ type ContextSourceReport struct {
 
 // ContextBuiltData is the payload for EventContextBuilt.
 type ContextBuiltData struct {
-	Builder      string                `json:"builder"`
-	Strategy     string                `json:"strategy"`     // currently fixed at "ordered_greedy"
-	BudgetTotal  int                   `json:"budget_total"` // 0 = unlimited
-	OutputCount  int                   `json:"output_count"`
-	OutputTokens int                   `json:"output_tokens"`
-	DroppedCount int                   `json:"dropped_count"`
-	Sources      []ContextSourceReport `json:"sources"`
-	Duration     int64                 `json:"duration_ms"`
+	Builder          string                `json:"builder"`
+	Strategy         string                `json:"strategy"`     // currently fixed at "ordered_greedy"
+	BudgetTotal      int                   `json:"budget_total"` // 0 = unlimited
+	ReservedOutput   int                   `json:"reserved_output"`
+	ReservedTools    int                   `json:"reserved_tools"`
+	ReservedSystem   int                   `json:"reserved_system"`
+	AvailableHistory int                   `json:"available_history"`
+	OutputCount      int                   `json:"output_count"`
+	OutputTokens     int                   `json:"output_tokens"`
+	DroppedCount     int                   `json:"dropped_count"`
+	Sources          []ContextSourceReport `json:"sources"`
+	Duration         int64                 `json:"duration_ms"`
 }
 
 func (ContextBuiltData) eventData() {}

@@ -191,6 +191,12 @@ func TestWorkspaceSource_TruncatesOversizedPlan(t *testing.T) {
 	if !strings.Contains(text, "earlier portion of plan.md elided") {
 		t.Errorf("missing truncation marker\n--- text ---\n%s", text)
 	}
+	if !strings.Contains(got.Report.Note, NoteWorkspaceTailKeep) {
+		t.Errorf("note %q missing %s", got.Report.Note, NoteWorkspaceTailKeep)
+	}
+	if !strings.Contains(got.Report.Note, "orig_bytes=") || !strings.Contains(got.Report.Note, "kept_bytes=") {
+		t.Errorf("note missing orig/kept sizes: %q", got.Report.Note)
+	}
 }
 
 // TestHumanBytes verifies the rendering helper produces stable output across
