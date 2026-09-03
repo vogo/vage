@@ -38,6 +38,7 @@ const entryPolicyProbeKey = "entry-policy/conformance"
 type entryCrossCutObservations struct {
 	middlewareCalls atomic.Int64
 	inputGuardCalls atomic.Int64
+	resolverCalls   atomic.Int64
 	runValuesBound  atomic.Bool
 }
 
@@ -77,12 +78,20 @@ func (o *entryCrossCutObservations) runValuesHook() *hook.Manager {
 	return mgr
 }
 
+func (o *entryCrossCutObservations) resolver() ParamResolver {
+	return func(_ context.Context, _ *schema.RunRequest, cur RunParams) (RunParams, error) {
+		o.resolverCalls.Add(1)
+		return cur, nil
+	}
+}
+
 func newEntryPolicyAgent(o *entryCrossCutObservations, opts ...Option) *Agent {
 	base := []Option{
 		WithCaller(streamingMock()),
 		WithGuards(GuardsConfig{Input: []guard.Guard{o.inputGuardSpy()}}),
 		WithMiddleware(o.middleware()),
 		WithHookManager(o.runValuesHook()),
+		WithParamResolver(o.resolver()),
 	}
 
 	return New(agent.Config{ID: "entry-policy"}, append(base, opts...)...)
@@ -106,8 +115,8 @@ func TestEntryPolicy_ConstantsMatchMatrix(t *testing.T) {
 		policy entryPolicy
 		want   entryPolicy
 	}{
-		{"fresh run", policyFreshRun, entryPolicy{initRunValues: true, inputGuards: true, agentMiddleware: true}},
-		{"resume", policyResume, entryPolicy{initRunValues: true, inputGuards: false, agentMiddleware: false}},
+		{"fresh run", policyFreshRun, entryPolicy{initRunValues: true, inputGuards: true, agentMiddleware: true, paramResolver: true}},
+		{"resume", policyResume, entryPolicy{initRunValues: true, inputGuards: false, agentMiddleware: false, paramResolver: false}},
 	}
 
 	for _, tt := range tests {
@@ -125,6 +134,7 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 	type want struct {
 		middlewareCalls int64
 		inputGuardCalls int64
+		resolverCalls   int64
 		runValuesBound  bool
 	}
 
@@ -143,7 +153,7 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 
 				return err
 			},
-			want: want{middlewareCalls: 1, inputGuardCalls: 1, runValuesBound: true},
+			want: want{middlewareCalls: 1, inputGuardCalls: 1, resolverCalls: 1, runValuesBound: true},
 		},
 		{
 			name: "RunStream",
@@ -166,7 +176,7 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 					}
 				}
 			},
-			want: want{middlewareCalls: 1, inputGuardCalls: 1, runValuesBound: true},
+			want: want{middlewareCalls: 1, inputGuardCalls: 1, resolverCalls: 1, runValuesBound: true},
 		},
 		{
 			name: "Resume",
@@ -194,7 +204,7 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 
 				return err
 			},
-			want: want{middlewareCalls: 0, inputGuardCalls: 0, runValuesBound: true},
+			want: want{middlewareCalls: 0, inputGuardCalls: 0, resolverCalls: 0, runValuesBound: true},
 		},
 		{
 			name: "ResumeInterrupt",
@@ -233,7 +243,7 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 
 				return err
 			},
-			want: want{middlewareCalls: 0, inputGuardCalls: 0, runValuesBound: true},
+			want: want{middlewareCalls: 0, inputGuardCalls: 0, resolverCalls: 0, runValuesBound: true},
 		},
 	}
 
@@ -250,6 +260,9 @@ func TestEntryPolicy_Conformance(t *testing.T) {
 			}
 			if got := obs.inputGuardCalls.Load(); got != tt.want.inputGuardCalls {
 				t.Errorf("input guard calls = %d, want %d", got, tt.want.inputGuardCalls)
+			}
+			if got := obs.resolverCalls.Load(); got != tt.want.resolverCalls {
+				t.Errorf("param resolver calls = %d, want %d", got, tt.want.resolverCalls)
 			}
 			if got := obs.runValuesBound.Load(); got != tt.want.runValuesBound {
 				t.Errorf("run values bound = %v, want %v", got, tt.want.runValuesBound)

@@ -99,6 +99,25 @@ stats := caller.EndpointStats() // []router.EndpointStat
 
 策略决定「谁成为 active」,不是「每个请求抽谁」;连续成功调用落在同一 backend。
 
+## 选路可观测
+
+router 在每次选定或复用 active endpoint 时同步通知只读 `RouteObserver`。`ComposeCaller` 默认安装观察器,把协议无关的 `router.RouteSelection` 转成 `schema.EventRouteSelected`,经 `schema.DispatchEvent` 投递。同步 `Run` 走 ctx 上的 hook dispatcher;流式 `RunStream` 优先走 stream Emitter(避免与 hook 双投),因此 `route_selected` 会出现在用户可见的事件流里、紧随该轮 `iteration_start` 之后。载荷只有公开运维身份:
+
+| 字段 | 含义 |
+|---|---|
+| `alias` | 端点别名;调用方不得把凭证写进 alias |
+| `strategy` | 池策略(failover / random / …) |
+| `reason` | `initial` / `reuse` / `failover` / `probation` |
+| `stream` | 是否流式建流 |
+
+不含 endpoint 配置、标签、Base URL、API key、请求体或原始错误。观察器失败不得改变路由结果、重试或 failover;多池并发调用各自独立发事件。
+
+自定义观察器用 `largemodel.WithRouteObserver` / `router.WithRouteObserver`;默认事件观察器仍会安装,两者并存。
+
+## 宿主绑定 Caller,而不是 per-request 换池
+
+租户识别与凭证读取属于 service 的宿主/集成层,不属于 router。宿主在构造 TaskAgent(或在 Run 入口挑选已构造的 Agent)时,用 `BuildCaller` 把同一协议的多 endpoint 收成一个可共享的 `ComposeCaller`,再 `taskagent.WithCaller`。ReAct 循环内不换 Caller;`RunRequest` 不携带 endpoint 或路由策略。从 `NewCaller` 迁移时,把原单 endpoint 作为 `OpenAIConfig`/`AnthropicConfig` 的第一项,再追加同协议备用项。
+
 ## 健康三态
 
 | 状态 | 含义 |

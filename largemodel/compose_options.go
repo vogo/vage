@@ -18,6 +18,7 @@
 package largemodel
 
 import (
+	"context"
 	"time"
 
 	"github.com/vogo/vage/largemodel/router"
@@ -63,6 +64,13 @@ func WithAttemptObserver(fn func(router.AttemptResult)) ComposeOption {
 	return WithComposeRouterOptions(router.WithAttemptObserver(fn))
 }
 
+// WithRouteObserver registers a callback invoked when a pool selects or
+// reuses an endpoint. Observers may run concurrently when several pools
+// are active and must not change the routing result.
+func WithRouteObserver(fn func(ctx context.Context, sel router.RouteSelection)) ComposeOption {
+	return WithComposeRouterOptions(router.WithRouteObserver(fn))
+}
+
 // WithConcurrency caps how many router pools the caller builds. WithComposeConcurrency
 // is a deprecated alias.
 func WithConcurrency(n int) ComposeOption {
@@ -105,6 +113,8 @@ func newComposeConfig(opts ...ComposeOption) *composeConfig {
 	if cfg.concurrency <= 0 {
 		cfg.concurrency = defaultComposeConcurrency
 	}
+
+	cfg.routerOpts = append(cfg.routerOpts, router.WithRouteObserver(emitRouteSelected))
 
 	return cfg
 }

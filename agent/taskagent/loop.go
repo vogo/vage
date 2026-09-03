@@ -57,8 +57,16 @@ func (a *Agent) preflightEntry(ctx context.Context, policy entryPolicy, req *sch
 		}
 	}
 
+	if policy.paramResolver {
+		return a.resolveFreshRun(ctx, req)
+	}
+
 	if req != nil {
-		return a.resolveRunParams(req.Options), nil
+		p, err := a.mergeRunParams(req.Options)
+		if err != nil {
+			return runParams{}, err
+		}
+		return p, nil
 	}
 
 	return runParams{}, nil
@@ -70,7 +78,7 @@ func (a *Agent) preflightEntry(ctx context.Context, policy entryPolicy, req *sch
 // and marks prompt-cache breakpoints when caching is enabled. The returned
 // buildResult and tool slice feed directly into runReactLoop.
 func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p runParams) (buildResult, []schema.ToolDef, error) {
-	br, err := a.buildInitialMessages(ctx, req)
+	br, err := a.buildInitialMessages(ctx, req, p.runTokenBudget)
 	if err != nil {
 		return buildResult{}, nil, err
 	}
@@ -78,7 +86,7 @@ func (a *Agent) prepareContext(ctx context.Context, req *schema.RunRequest, p ru
 	// Inject skill instructions into the system prompt.
 	a.injectSkillInstructions(&br, req.SessionID)
 
-	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, req.SessionID))
+	aiTools := a.toolsForRun(p, req.SessionID)
 
 	return br, aiTools, nil
 }

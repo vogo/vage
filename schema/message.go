@@ -540,7 +540,28 @@ func ErrorResult(toolCallID, errMsg string) ToolResult {
 	}
 }
 
+// ToolMode values for RunOptions.ToolMode. The empty string is the
+// compatibility mode: an empty Tools list means no request-level restriction.
+const (
+	ToolModeNone  = "none"
+	ToolModeAllow = "allow"
+	ToolModeAll   = "all"
+)
+
+// RunLimits holds pointer-valued per-run caps so a caller can distinguish
+// "unset" (nil, fall back) from "explicitly unlimited / omitted" (pointer to
+// zero). Old int fields on RunOptions stay as they are.
+type RunLimits struct {
+	MaxIterations  *int `json:"max_iterations,omitempty"`
+	MaxTokens      *int `json:"max_tokens,omitempty"`
+	RunTokenBudget *int `json:"run_token_budget,omitempty"`
+}
+
 // RunOptions holds optional overrides for a single Run call.
+//
+// Limits and ToolMode are additive: clients that omit them keep the
+// historical int-field semantics. When a Limits field is non-nil it wins
+// over the corresponding old field.
 type RunOptions struct {
 	Model          string   `json:"model,omitempty"`
 	Temperature    *float64 `json:"temperature,omitempty"`
@@ -549,6 +570,9 @@ type RunOptions struct {
 	RunTokenBudget int      `json:"run_token_budget,omitempty"`
 	Tools          []string `json:"tools,omitempty"`
 	StopSequences  []string `json:"stop_sequences,omitempty"`
+
+	Limits   *RunLimits `json:"limits,omitempty"`
+	ToolMode string     `json:"tool_mode,omitempty"`
 }
 
 // RunRequest is the input to Agent.Run.

@@ -33,6 +33,7 @@
 - **MCP 边界是攻击面**:client/server 两端都内置 `ScanEvent` 凭证扫描,与 `security`(credscrub)协作,防止第三方 I/O 泄露凭证。
 - **通用取值收在框架,策略留在治理层**:"从结果取文本"和"按字节安全截断"是每个调用方都要写一遍的通用逻辑,散落各处就会各自漂移,因此收成两个稳定入口 —— `schema.ToolResult.Text()` 与 `tool.TruncateUTF8()`。而"多大算大、截断后留什么标记、错误结果要不要处理"是策略,仍归 `TruncatingToolRegistry`:它复用 `TruncateUTF8` 做边界裁切,但不把 token 阈值与标记格式下沉进通用助手。
 - **技能四件套**:Loader(从文件加载)/ Registry(索引)/ Manager(激活)/ Validator(名称、大小、结构、组合校验)职责分离,兼容 Agent Skills 开放标准。
+- **FilterTools 空名单仍是「不限制」;TaskAgent 冻结路径不是**:`tool.FilterTools` 对 MCP、自定义装配等其他调用方保持历史语义。TaskAgent 新 Run 把交集后的具体名称写入冻结名单,空切片经 `prepareFrozenAITools` 得到空工具表,避免 resume 或 `ToolMode=none` 时被 FilterTools 回退成全集。
 
 ## 工具结果的取文本与截断
 

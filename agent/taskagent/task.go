@@ -119,6 +119,9 @@ type Agent struct {
 	// the end of New so multi-iteration ReAct loops automatically fold
 	// older tool_result messages into placeholders. See WithContextEditor.
 	contextEditor *contexteditor.ContextEditorMiddleware
+	// paramResolver is the optional single-slot Run parameter hook.
+	// See WithParamResolver; Resume paths never invoke it.
+	paramResolver ParamResolver
 }
 
 var (
@@ -493,49 +496,18 @@ func (a *Agent) Tools() []schema.ToolDef {
 
 // runParams holds resolved parameters for a single run invocation.
 type runParams struct {
-	model          string
-	temperature    *float64
-	maxIter        int
-	runTokenBudget int
-	maxTokens      *int
-	toolFilter     []string
-	stopSeq        []string
-}
-
-// resolveRunParams merges request options with agent defaults.
-func (a *Agent) resolveRunParams(opts *schema.RunOptions) runParams {
-	p := runParams{
-		model:          a.model,
-		temperature:    a.temperature,
-		maxIter:        a.maxIterations,
-		runTokenBudget: a.runTokenBudget,
-		maxTokens:      a.maxTokens,
-	}
-
-	if opts == nil {
-		return p
-	}
-
-	if opts.Model != "" {
-		p.model = opts.Model
-	}
-	if opts.Temperature != nil {
-		p.temperature = opts.Temperature
-	}
-	if opts.MaxIterations > 0 {
-		p.maxIter = opts.MaxIterations
-	}
-	if opts.MaxTokens > 0 {
-		mt := opts.MaxTokens
-		p.maxTokens = &mt
-	}
-	if opts.RunTokenBudget > 0 {
-		p.runTokenBudget = opts.RunTokenBudget
-	}
-	p.toolFilter = opts.Tools
-	p.stopSeq = opts.StopSequences
-
-	return p
+	model           string
+	temperature     *float64
+	maxIter         int
+	runTokenBudget  int
+	maxTokens       *int
+	toolMode        string
+	toolFilter      []string
+	stopSeq         []string
+	subject         string
+	enabledFunc     ToolEnabledFunc
+	toolsFrozen     bool
+	resolverTouched bool
 }
 
 // buildResult holds the output of buildInitialMessages.
@@ -583,7 +555,7 @@ type runContext struct {
 // sessionMsgCount in the returned buildResult is read from the
 // SessionMemorySource report so storeAndPromoteMessages can offset its
 // indices past existing entries.
-func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest) (buildResult, error) {
+func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest, budget int) (buildResult, error) {
 	// Source order: [system, session_memory, ...extras, request].
 	// Extras (like WorkspaceSource) sit between session history and the
 	// current-turn request so the LLM reads "what we had before" → "what we
@@ -611,6 +583,7 @@ func (a *Agent) buildInitialMessages(ctx context.Context, req *schema.RunRequest
 		Intent:    "react-iter",
 		Request:   req,
 		Protocol:  a.Protocol(),
+		Budget:    budget,
 	})
 	if err != nil {
 		return buildResult{}, fmt.Errorf("vage: build context: %w", err)
@@ -655,6 +628,8 @@ func (a *Agent) Run(ctx context.Context, req *schema.RunRequest) (*schema.RunRes
 	policy := policyFreshRun
 
 	ctx = bindRunValues(ctx, policy)
+	ctx = schema.WithEventDispatcher(ctx, a.hookManager.Dispatch)
+	ctx = schema.WithSessionID(ctx, req.SessionID)
 
 	p, err := a.preflightEntry(ctx, policy, req)
 	if err != nil {
@@ -742,6 +717,7 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 	policy := policyFreshRun
 
 	ctx = bindRunValues(ctx, policy)
+	ctx = schema.WithEventDispatcher(ctx, a.hookManager.Dispatch)
 
 	p, err := a.preflightEntry(ctx, policy, req)
 	if err != nil {
@@ -755,6 +731,8 @@ func (a *Agent) RunStream(ctx context.Context, req *schema.RunRequest) (*schema.
 
 	return schema.NewRunStream(ctx, a.streamBufferSize, func(ctx context.Context, rawSend func(schema.Event) error) error {
 		send := a.buildSend(ctx, rawSend)
+		ctx = schema.WithEmitter(ctx, send)
+		ctx = schema.WithSessionID(ctx, req.SessionID)
 
 		rc := &runContext{
 			sessionID: req.SessionID,

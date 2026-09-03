@@ -24,6 +24,9 @@
 | **背压(Backpressure)** | 根据运行时负载自适应调节 DAG 并发度的机制。 |
 | **技能(Skill)** | 兼容 [Agent Skills](https://agentskills.io) 开放标准的能力包,可向 Agent 注入提示与过滤工具。 |
 | **MCP** | Model Context Protocol。vage 既做 client(消费外部工具)也做 server(暴露 Agent 能力)。 |
+| **ParamResolver** | TaskAgent 构造期单槽:在输入护栏之后、上下文与工具冻结之前,收紧本次新 Run 的模型、限额与工具范围。后写覆盖先写,不可链;`Resume` 不调用。见 [agent-core](domains/agent/agent-core/agent-core.md) AC-19 与 [ADR 0003](architecture/adr/0003-run-param-resolver.md)。 |
+| **ToolMode** | `schema.RunOptions` 的工具披露模式:`""`(兼容)、`none`(显式无工具)、`allow`(请求白名单,空即空)、`all`(显式不限制)。与冻结后的最终工具名一起写入 interrupt v2 快照。 |
+| **ComposeCaller** | 带 `EndpointStats` 的 `largemodel.Caller`。`BuildCaller` 把同协议多 endpoint 收成一个可共享池;宿主在 Agent 构造期按租户/凭证域绑定,不在 ReAct 循环内换 Caller。 |
 | **hook / 事件** | Agent 生命周期通过 `schema.Event` 发出的结构化可观测事件;hook 管理器负责分发。 |
 | **Emitter** | 通过 `context.Context` 传递的流式事件发射器,让深层工具无需显式参数即可向流写事件。 |
 | **子代理(Subagent)/ agent-as-tool** | 把一个 Agent 包装成工具供另一个 Agent 调用;分发时通过 `sessionview` 交给子代理一份父会话只读快照。 |

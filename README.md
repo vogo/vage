@@ -179,6 +179,40 @@ Anthropic pool are separate, with no shared request to hand between them.
 Both entry points return a `largemodel.ComposeCaller` — a `Caller` that also
 reports `EndpointStats()` — and both pick the protocol from the type of their
 argument at compile time, never by guessing from a base URL or an API key.
+
+The host binds that caller to a TaskAgent **at construction** (or by choosing
+an already-built Agent at the Run entry). Authenticate the request, map the
+tenant or credential domain to a cached `ComposeCaller`, then
+`taskagent.WithCaller`. Failover stays inside that pool; the ReAct loop does
+not swap callers, and `RunRequest` does not carry endpoints or API keys.
+
+```go
+// Host layer: one ComposeCaller per tenant, reused across Runs.
+callers := map[string]largemodel.Caller{}
+
+c, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
+	Strategy: largemodel.StrategyFailover,
+	Endpoints: []largemodel.OpenAIEndpoint{
+		{Alias: "primary", BaseURL: primaryURL, APIKey: primaryKey, Model: "gpt-4o"},
+		{Alias: "backup", BaseURL: backupURL, APIKey: backupKey, Model: "gpt-4o-mini"},
+	},
+})
+callers["acme"] = c
+
+model := largemodel.New(callers["acme"])
+a := taskagent.New(
+	agent.Config{ID: "assistant", Protocol: model.Protocol()},
+	taskagent.WithCaller(model),
+)
+```
+
+`vv` hosts that today call `configs.NewLLMClient` (`NewCaller`, one endpoint)
+migrate by lifting that endpoint into `OpenAIConfig`/`AnthropicConfig` as the
+first item and appending same-protocol backups. There is no cross-protocol
+failover. The tenant-binding example lives in
+[`largemodel/example_test.go`](largemodel/example_test.go)
+(`ExampleBuildCaller_tenantBinding`).
+
 There is a third entry point for a client you assembled yourself:
 
 ```go
@@ -222,6 +256,36 @@ Anthropic's `document` block also has no filename field — the bytes and MIME
 type still reach the model, but the filename does not. See
 [doc/domains/capability/model/model-design.md](doc/domains/capability/model/model-design.md)
 for the full source-to-wire mapping.
+
+## Run Parameters Before the Model Sees Tools
+
+Input guards inspect the last user message. Agent middleware wraps the ReAct
+loop only after context and tools are already frozen. To narrow **this** Run's
+model, limits, or tool list before those definitions go to the model, install
+one `taskagent.WithParamResolver` at construction. Later calls replace earlier
+ones; it is not a chain. `Resume` and `ResumeInterrupt` never invoke it —
+changing model or authorization mid-logical-Run is a new Run.
+
+```go
+a := taskagent.New(
+	agent.Config{ID: "assistant"},
+	taskagent.WithCaller(model),
+	taskagent.WithParamResolver(func(_ context.Context, _ *schema.RunRequest, cur taskagent.RunParams) (taskagent.RunParams, error) {
+		cur.Subject = "tenant-acme" // opaque audit id; not an auth principal
+		cur.ToolMode = schema.ToolModeNone
+		return cur, nil
+	}),
+)
+```
+
+`schema.RunOptions` grows additively: nested `Limits` (`*int`) and `ToolMode`
+(`""` / `"none"` / `"allow"` / `"all"`). Old int fields stay. A zero on the
+old `RunTokenBudget` still keeps the Agent default; only
+`Limits.RunTokenBudget = ptr(0)` means explicit unlimited. `ToolMode: "none"`
+and `"allow"` with an empty list both yield an empty tool table — they do not
+fall back to the full registry. See
+[`agent/taskagent/example_test.go`](agent/taskagent/example_test.go)
+(`ExampleWithParamResolver`).
 
 ## Run Middleware (One Chain for Sync and Streaming)
 

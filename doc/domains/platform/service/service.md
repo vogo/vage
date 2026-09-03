@@ -19,7 +19,7 @@
 - `eval`:评测器 —— 对 Agent 输出按多种标准打分(精确匹配、包含、LLM 裁判、工具调用、延迟、成本),可组合加权。
 - `vector`:可插拔的向量召回面 —— 定义最小接口,自带内存实现,外部存储后端(qdrant)与嵌入器(OpenAI、Voyage)按厂商分层独立实现。
 
-**边界(不做):** `service` 不做账户/计费/多租户;`vector` 不内置向量数据库,只定义接口;`eval` 不做训练,只做离线/在线评测打分。
+**边界(不做):** `service` 不做账户/计费/多租户;`vector` 不内置向量数据库,只定义接口;`eval` 不做训练,只做离线/在线评测打分。租户识别、凭证读取、以及「租户/凭证域 → `largemodel.BuildCaller` → `ComposeCaller` → TaskAgent」的绑定属于宿主/集成层:在调用 `Run` 之前完成,同一 Caller 按既有并发池语义复用。`service.Service` 不因此新增账户模型、鉴权或请求级 Caller 字段;`RunRequest` 也不携带 endpoint。可复用装配见 [`largemodel/example_test.go`](../../../../largemodel/example_test.go) 的 `ExampleBuildCaller_tenantBinding` 与 [router-design](../../capability/model/router-design.md)。
 
 ## 核心实体(概念层)
 

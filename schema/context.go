@@ -26,6 +26,8 @@ type sessionIDCtxKey struct{}
 
 type emitterCtxKey struct{}
 
+type eventDispatcherCtxKey struct{}
+
 // Emitter sends a single Event into the active stream. Returning an error
 // normally means the stream is shutting down; most callers ignore it because
 // the run is terminating anyway.
@@ -60,6 +62,40 @@ func WithEmitter(ctx context.Context, e Emitter) context.Context {
 func EmitterFromContext(ctx context.Context) Emitter {
 	v, _ := ctx.Value(emitterCtxKey{}).(Emitter)
 	return v
+}
+
+// EventDispatcher is a hook-style observer: it receives events for
+// side-channel delivery (typically hook.Manager.Dispatch) and must not
+// change run outcome. Implementations should be fast and concurrent-safe.
+type EventDispatcher func(ctx context.Context, event Event)
+
+// WithEventDispatcher attaches d to ctx. Nil is a no-op.
+func WithEventDispatcher(ctx context.Context, d EventDispatcher) context.Context {
+	if d == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, eventDispatcherCtxKey{}, d)
+}
+
+// EventDispatcherFromContext returns the dispatcher attached via
+// WithEventDispatcher, or nil when absent.
+func EventDispatcherFromContext(ctx context.Context) EventDispatcher {
+	v, _ := ctx.Value(eventDispatcherCtxKey{}).(EventDispatcher)
+	return v
+}
+
+// DispatchEvent delivers e to the stream emitter and/or the hook dispatcher
+// bound on ctx. Prefer the emitter when both are present so stream
+// middleware can fan the same event into hooks without double delivery.
+// Observer errors are swallowed: this is an observability bypass.
+func DispatchEvent(ctx context.Context, e Event) {
+	if em := EmitterFromContext(ctx); em != nil {
+		_ = em(e)
+		return
+	}
+	if d := EventDispatcherFromContext(ctx); d != nil {
+		d(ctx, e)
+	}
 }
 
 // EmitCustomData publishes an application-defined event onto the stream bound

@@ -17,11 +17,71 @@
 
 package interrupt
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+)
 
 func TestMapStore_Contract(t *testing.T) {
 	runStoreContract(t, "MapStore", func(t *testing.T) Store {
 		t.Helper()
 		return NewMapStore()
 	})
+}
+
+func TestMapStore_V1RejectedByV2Reader(t *testing.T) {
+	s := NewMapStore()
+	ctx := context.Background()
+	rec := newTestRecord("sess-v1", []string{"call-1"})
+	if err := s.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	s.mu.Lock()
+	s.data[rec.ID].Version = 1
+	s.mu.Unlock()
+
+	if _, err := s.Get(ctx, rec.ID); !errors.Is(err, ErrUnknownVersion) {
+		t.Errorf("Get v1 record err = %v, want ErrUnknownVersion", err)
+	}
+}
+
+func TestEffectiveParams_V2EmptyToolFilterRoundTrip(t *testing.T) {
+	p := EffectiveParams{
+		Model:         "m",
+		MaxIterations: 10,
+		ToolMode:      "none",
+		ToolFilter:    []string{},
+		StopSequences: nil,
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !json.Valid(raw) {
+		t.Fatal("invalid JSON")
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("map Unmarshal: %v", err)
+	}
+	if _, ok := decoded["tool_filter"]; !ok {
+		t.Fatal("empty tool_filter must be persisted, not omitted")
+	}
+
+	var got EffectiveParams
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.ToolMode != "none" {
+		t.Errorf("ToolMode = %q, want none", got.ToolMode)
+	}
+	if got.ToolFilter == nil {
+		t.Fatal("ToolFilter is nil after round-trip")
+	}
+	if len(got.ToolFilter) != 0 {
+		t.Errorf("ToolFilter = %v, want empty", got.ToolFilter)
+	}
 }

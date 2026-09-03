@@ -120,6 +120,20 @@ func TestEffectiveParamsRoundTrip(t *testing.T) {
 	if len(back.toolFilter) != 2 || len(back.stopSeq) != 1 {
 		t.Errorf("slice fields not round-tripped: %+v", back)
 	}
+	if !back.toolsFrozen {
+		t.Error("resume params must be frozen from the snapshot")
+	}
+
+	p.toolMode = schema.ToolModeNone
+	p.toolFilter = []string{}
+	ep = runParamsToEffective(p)
+	if ep.ToolMode != schema.ToolModeNone {
+		t.Errorf("ToolMode = %q, want none", ep.ToolMode)
+	}
+	back = effectiveParamsToRunParams(ep)
+	if back.toolMode != schema.ToolModeNone || len(back.toolFilter) != 0 || !back.toolsFrozen {
+		t.Errorf("none-mode snapshot not restored: %+v", back)
+	}
 }
 
 func TestInterruptPolicyByToolName(t *testing.T) {

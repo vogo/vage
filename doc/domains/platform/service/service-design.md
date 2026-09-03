@@ -24,6 +24,7 @@
 ## 关键设计决策
 
 - **执行三语义一等**:sync/streaming/async 在服务层平级支持,async 经 TaskStore 记录状态、可查询,满足章程"三语义齐全"。
+- **多 endpoint Caller 在宿主装配,不在 Service 内换池**:`largemodel.BuildCaller` 是声明式多 endpoint 入口;`NewCaller` 仍是单 endpoint 薄包装。HTTP `service.Service` 接收已经绑定 Caller 的 Agent;租户或凭证上下文到 ComposeCaller 的映射、缓存与鉴权留在集成层,避免把账户模型塞进框架服务包。
 - **hook 主流程解耦**:同步 hook 与异步 hook 分离;异步 hook 不阻塞 Agent 主流程,分发失败不上抛打断运行。
 - **评测器可组合**:每个评测器单一标准,Composite/Weighted 把多标准汇总为综合评分,支持批量报告。
 - **向量接口刻意最小**:只定义存取与嵌入的最小面,让 qdrant/pgvector/chroma/pinecone 等无扭曲实现;内存 MapVectorStore 覆盖测试与本地实验。
