@@ -19,7 +19,8 @@
 | **会话(Session)** | 一等的对话实体:身份 + 追加型事件流 + 结构化状态 KV + 可插拔存储后端。事件只追加,结构化状态可覆盖。 |
 | **检查点(Checkpoint)** | 某次迭代的完整可恢复快照,用于崩溃/重启后断点续跑。注意:`checkpoint` 包(ReAct 迭代级)与 `orchestrate` 的 DAG 级检查点是两套不同机制。 |
 | **Interrupt** | Third durable execution state from the `interrupt` package: when a policy flags one or more tool calls before the batch runs, the framework freezes the whole batch, persists an `interrupt.Record`, and ends this call with `StopReasonInterrupted` (the logical Run is not finished). `TaskAgent.ResumeInterrupt(ctx, req)` injects external decisions by `interrupt_id + tool_call_id` and continues from that batch. Distinct from `ask_user` (handler already running, in-process blocking wait, no framework suspend record) and from checkpoint (crash-replay snapshot of a completed turn or finished Run, resumed via `Resume(sessionID)` from the latest complete turn). The three do not substitute; see [agent-core](domains/agent/agent-core/agent-core.md) and [orchestration](domains/agent/orchestration/orchestration.md). |
-| **DAG 编排** | 以有向无环图组织多个 Runner(Agent 满足此接口),支持并行、条件、循环、补偿、背压、优先级调度。 |
+| **DAG 编排** | 以有向无环图组织多个 Runner(Agent 满足此接口),支持并行、条件、循环、补偿、背压、优先级调度。承载包是 `orchestrate`;工作流型 Agent(`agent/workflowagent`)是它的调用方。 |
+| **Typed workflow** | Process-local generic graph over application state `S` (`workflow` package): nodes read `Snapshot[S]` and return `Patch[S]`; a parallel batch that writes the same Field fails at merge. Distinct from WorkflowAgent. Not a durable/distributed workflow platform. |
 | **补偿(Compensation / Saga)** | 编排失败时对已提交步骤执行的回滚动作,保证长流程的最终一致。 |
 | **背压(Backpressure)** | 根据运行时负载自适应调节 DAG 并发度的机制。 |
 | **技能(Skill)** | 兼容 [Agent Skills](https://agentskills.io) 开放标准的能力包,可向 Agent 注入提示与过滤工具。 |

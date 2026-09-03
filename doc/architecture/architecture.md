@@ -33,6 +33,7 @@ graph TD
         session[session 会话]
         workspace[workspace 工作区]
         orchestrate[orchestrate DAG]
+        typedWF[typed workflow]
         checkpoint[checkpoint 断点]
         interrupt[interrupt suspend/resume]
     end
@@ -79,6 +80,7 @@ CI 在 `integrations/architecture_test.go` 中扫描**全部受管生产 Go 包*
 | `workspace` | L1 | `workspace` |
 | `sessionview` | L1 | `sessionview` |
 | `orchestrate` | L1 | `orchestrate` |
+| `workflow` | L1 | `workflow` |
 | `checkpoint` | L1 | `checkpoint` |
 | `interrupt` | L1 | `interrupt` |
 | `largemodel` | L2 | `largemodel` 及子包 |
@@ -119,7 +121,7 @@ CI 在 `integrations/architecture_test.go` 中扫描**全部受管生产 Go 包*
 ## 依赖拓扑核心规则
 
 1. **`schema` 是根契约包**:只依赖标准库,零 vage 内部依赖、零 `aimodel` 依赖。厂商 wire 编解码收敛在 `largemodel/provider/*`。所有其他包依赖它,反向依赖被禁止。
-2. **TaskAgent 是集成中枢**:四种 Agent 中,只有任务型直接依赖模型、工具、记忆、护栏、技能、检查点、interrupt store、hook、context。其余三型只依赖 `agent` + `schema`(工作流型另依赖 `orchestrate`)。它只**编排**这些能力,不实现它们 —— 全部以接口/管理器形式注入。
+2. **TaskAgent 是集成中枢**:四种 Agent 中,只有任务型直接依赖模型、工具、记忆、护栏、技能、检查点、interrupt store、hook、context。其余三型只依赖 `agent` + `schema`(工作流型另依赖 `orchestrate`)。强类型 `workflow` 属 L1,只依赖 L0/`schema`,通过最小 `Runner` 接口适配 Agent,不反向依赖 `agent`。TaskAgent 只**编排**这些能力,不实现它们 —— 全部以接口/管理器形式注入。
 3. **能力以接口注入**:各子系统对 TaskAgent 暴露的都是接口(ToolRegistry、memory.Manager、Guard、IterationStore、largemodel.Caller 链……),因此每一项都可被替换或 mock。
 
 ## 一次 TaskAgent 运行的数据流
