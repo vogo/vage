@@ -50,6 +50,7 @@ import (
 	"slices"
 
 	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/vage/largemodel/internal/modelcore"
 	"github.com/vogo/vage/largemodel/router"
 )
 
@@ -158,7 +159,7 @@ func (c *ComposeClient) Stats() []router.EndpointStat { return c.router.Stats() 
 func (c *ComposeClient) ChatCompletions(
 	ctx context.Context, request *openai.ChatCompletionRequest,
 ) (*openai.ChatCompletionResponse, error) {
-	return router.Dispatch(ctx, c.router, chatCall(request, false),
+	return router.Dispatch(ctx, c.router, c.chatCall(ctx, request, false),
 		func(ctx context.Context, endpoint int) (*openai.ChatCompletionResponse, error) {
 			return c.entries[endpoint].Client.ChatCompletions(ctx, c.chatRequestFor(endpoint, request))
 		})
@@ -171,7 +172,7 @@ func (c *ComposeClient) ChatCompletions(
 func (c *ComposeClient) ChatCompletionsStream(
 	ctx context.Context, request *openai.ChatCompletionRequest,
 ) (*openai.ChatCompletionStream, error) {
-	return router.Dispatch(ctx, c.router, chatCall(request, true),
+	return router.Dispatch(ctx, c.router, c.chatCall(ctx, request, true),
 		func(ctx context.Context, endpoint int) (*openai.ChatCompletionStream, error) {
 			return c.entries[endpoint].Client.ChatCompletionsStream(ctx, c.chatRequestFor(endpoint, request))
 		})
@@ -214,12 +215,34 @@ func (c *ComposeClient) responsesStream(
 
 // chatCall describes a Chat Completions dispatch to the neutral router: the
 // labels this request needs and the output volume that scales cost ordering.
-func chatCall(request *openai.ChatCompletionRequest, stream bool) router.Call {
+func (c *ComposeClient) chatCall(ctx context.Context, request *openai.ChatCompletionRequest, stream bool) router.Call {
 	return router.Call{
 		Requires:    chatRequires(request),
+		Eligible:    eligibleIndices(ctx, c.router),
 		OutputUnits: chatOutputUnits(request),
 		Stream:      stream,
 	}
+}
+
+func eligibleIndices(ctx context.Context, r *router.Router) []int {
+	aliases := modelcore.EligibleAliases(ctx)
+	if aliases == nil {
+		return nil
+	}
+
+	indexByAlias := map[string]int{}
+	for i, alias := range r.Aliases() {
+		indexByAlias[alias] = i
+	}
+
+	out := make([]int, 0, len(aliases))
+	for _, alias := range aliases {
+		if idx, ok := indexByAlias[alias]; ok {
+			out = append(out, idx)
+		}
+	}
+
+	return out
 }
 
 // responsesCall describes a Responses dispatch, restricted to entries that can

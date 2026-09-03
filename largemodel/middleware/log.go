@@ -50,9 +50,9 @@ func NewLogMiddleware(opts ...LogOption) *LogMiddleware {
 
 // Wrap implements Middleware.
 func (m *LogMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.BindCaller(
+		next,
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			start := time.Now()
 			m.logger.InfoContext(
 				ctx, "chat_completion_start",
@@ -86,7 +86,7 @@ func (m *LogMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			m.logger.InfoContext(
 				ctx, "chat_completion_stream_start",
 				"model", req.Model,
@@ -106,5 +106,5 @@ func (m *LogMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 
 			return s, nil
 		},
-	}
+	)
 }

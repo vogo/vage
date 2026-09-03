@@ -389,3 +389,30 @@ func TestCacheKey_DifferentProtocol(t *testing.T) {
 		t.Fatal("requests under different protocols must produce different cache keys")
 	}
 }
+
+func TestCacheKey_FormalFieldsAndExtensions(t *testing.T) {
+	base := []schema.Message{schema.NewTextMessage(schema.ProtocolOpenAIChat, schema.RoleUser, "hello")}
+	topP := 0.5
+	reqA := &largemodel.Request{Model: "gpt-4", Messages: base, TopP: &topP}
+	reqB := &largemodel.Request{Model: "gpt-4", Messages: base}
+	reqC := &largemodel.Request{Model: "gpt-4", Messages: base, ProviderExtensions: map[string]any{"openais": map[string]any{"x": 1}}}
+
+	kA, err := cacheKey(schema.ProtocolOpenAIChat, reqA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kB, err := cacheKey(schema.ProtocolOpenAIChat, reqB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kC, err := cacheKey(schema.ProtocolOpenAIChat, reqC)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if kA == kB || kB == kC || kA == kC {
+		t.Fatal("different formal fields or extensions must not share a cache key")
+	}
+}

@@ -39,6 +39,7 @@ import (
 	"slices"
 
 	"github.com/vogo/aimodel/anthropic"
+	"github.com/vogo/vage/largemodel/internal/modelcore"
 	"github.com/vogo/vage/largemodel/router"
 )
 
@@ -107,7 +108,7 @@ func (c *ComposeClient) Stats() []router.EndpointStat { return c.router.Stats() 
 func (c *ComposeClient) Messages(
 	ctx context.Context, request *anthropic.MessagesRequest,
 ) (*anthropic.MessagesResponse, error) {
-	return router.Dispatch(ctx, c.router, messagesCall(request, false),
+	return router.Dispatch(ctx, c.router, c.messagesCall(ctx, request, false),
 		func(ctx context.Context, endpoint int) (*anthropic.MessagesResponse, error) {
 			return c.entries[endpoint].Client.Messages(ctx, c.requestFor(endpoint, request))
 		})
@@ -119,7 +120,7 @@ func (c *ComposeClient) Messages(
 func (c *ComposeClient) MessagesStream(
 	ctx context.Context, request *anthropic.MessagesRequest,
 ) (*anthropic.MessageStream, error) {
-	return router.Dispatch(ctx, c.router, messagesCall(request, true),
+	return router.Dispatch(ctx, c.router, c.messagesCall(ctx, request, true),
 		func(ctx context.Context, endpoint int) (*anthropic.MessageStream, error) {
 			return c.entries[endpoint].Client.MessagesStream(ctx, c.requestFor(endpoint, request))
 		})
@@ -127,12 +128,34 @@ func (c *ComposeClient) MessagesStream(
 
 // messagesCall describes a Messages dispatch to the neutral router: the labels
 // this request needs and the output volume that scales cost ordering.
-func messagesCall(request *anthropic.MessagesRequest, stream bool) router.Call {
+func (c *ComposeClient) messagesCall(ctx context.Context, request *anthropic.MessagesRequest, stream bool) router.Call {
 	return router.Call{
 		Requires:    messagesRequires(request),
+		Eligible:    eligibleIndices(ctx, c.router),
 		OutputUnits: messagesOutputUnits(request),
 		Stream:      stream,
 	}
+}
+
+func eligibleIndices(ctx context.Context, r *router.Router) []int {
+	aliases := modelcore.EligibleAliases(ctx)
+	if aliases == nil {
+		return nil
+	}
+
+	indexByAlias := map[string]int{}
+	for i, alias := range r.Aliases() {
+		indexByAlias[alias] = i
+	}
+
+	out := make([]int, 0, len(aliases))
+	for _, alias := range aliases {
+		if idx, ok := indexByAlias[alias]; ok {
+			out = append(out, idx)
+		}
+	}
+
+	return out
 }
 
 // requestFor copies the request and overrides the model name for one endpoint,

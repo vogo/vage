@@ -57,6 +57,9 @@ func NewMessagesCodec(client Messenger) *MessagesCodec { return &MessagesCodec{c
 // Protocol implements modelcore.Codec.
 func (c *MessagesCodec) Protocol() schema.Protocol { return schema.ProtocolAnthropicMessages }
 
+// NativeStructuredOutput implements modelcore.Codec.
+func (c *MessagesCodec) NativeStructuredOutput() bool { return true }
+
 // Call implements modelcore.Codec.
 func (c *MessagesCodec) Call(ctx context.Context, req *modelcore.Request) (*modelcore.Result, error) {
 	wire, err := buildMessagesRequest(req)
@@ -146,6 +149,10 @@ func decodeMessagesResponse(resp *anthropic.MessagesResponse) (schema.Message, e
 // messages recorded under another protocol. Both the streaming and the
 // non-streaming path go through it, and it fails before any network I/O.
 func buildMessagesRequest(req *modelcore.Request) (*anthropic.MessagesRequest, error) {
+	if err := rejectUnsupportedParameters(req); err != nil {
+		return nil, err
+	}
+
 	maxTokens := defaultMaxTokens
 	if req.MaxTokens != nil && *req.MaxTokens > 0 {
 		maxTokens = *req.MaxTokens
@@ -155,6 +162,7 @@ func buildMessagesRequest(req *modelcore.Request) (*anthropic.MessagesRequest, e
 		Model:         req.Model,
 		MaxTokens:     maxTokens,
 		Temperature:   req.Temperature,
+		TopP:          req.TopP,
 		StopSequences: req.Stop,
 	}
 
@@ -206,6 +214,10 @@ func buildMessagesRequest(req *modelcore.Request) (*anthropic.MessagesRequest, e
 
 	buildMessagesTools(req, wire)
 
+	if err := applyMessagesToolChoice(req, wire); err != nil {
+		return nil, err
+	}
+
 	if req.ResponseSchema != nil {
 		if wire.OutputConfig == nil {
 			wire.OutputConfig = &anthropic.OutputConfig{}
@@ -231,7 +243,7 @@ func buildMessagesTools(req *modelcore.Request, wire *anthropic.MessagesRequest)
 			InputSchema: def.Parameters,
 		})
 
-		if def.ForceUse && wire.ToolChoice == nil {
+		if req.ToolChoice == nil && def.ForceUse && wire.ToolChoice == nil {
 			wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeTool, Name: def.Name}
 		}
 	}
@@ -241,6 +253,61 @@ func buildMessagesTools(req *modelcore.Request, wire *anthropic.MessagesRequest)
 			Type: anthropic.CacheControlTypeEphemeral,
 		}
 	}
+}
+
+// ExtensionNamespace is the ProviderExtensions key this codec reads.
+const ExtensionNamespace = "anthropics"
+
+func rejectUnsupportedParameters(req *modelcore.Request) error {
+	if req.Seed != nil {
+		return unsupportedParameter("seed")
+	}
+
+	if req.FrequencyPenalty != nil {
+		return unsupportedParameter("frequency_penalty")
+	}
+
+	if req.PresencePenalty != nil {
+		return unsupportedParameter("presence_penalty")
+	}
+
+	for namespace := range req.ProviderExtensions {
+		if namespace != ExtensionNamespace {
+			return fmt.Errorf("vage: provider extension namespace %q does not match protocol anthropic-messages", namespace)
+		}
+
+		return unsupportedParameter("provider_extensions." + ExtensionNamespace)
+	}
+
+	return nil
+}
+
+func unsupportedParameter(name string) error {
+	return &modelcore.UnsupportedParameterError{
+		Protocol:  schema.ProtocolAnthropicMessages,
+		Parameter: name,
+	}
+}
+
+func applyMessagesToolChoice(req *modelcore.Request, wire *anthropic.MessagesRequest) error {
+	if req.ToolChoice == nil {
+		return nil
+	}
+
+	switch req.ToolChoice.Mode {
+	case "auto":
+		wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeAuto}
+	case "none":
+		wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeNone}
+	case "required":
+		wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeAny}
+	case "named":
+		wire.ToolChoice = &anthropic.ToolChoice{Type: anthropic.ToolChoiceTypeTool, Name: req.ToolChoice.Name}
+	default:
+		return fmt.Errorf("vage: invalid tool_choice mode %q", req.ToolChoice.Mode)
+	}
+
+	return nil
 }
 
 // messagesSystemField encodes the system prompt. With prompt caching on it is

@@ -549,3 +549,67 @@ func TestChatCodec_EncodeFailureSkipsBackend(t *testing.T) {
 		t.Error("the backend was called despite an encoding failure")
 	}
 }
+
+func TestBuildChatRequest_FormalParametersAndToolChoice(t *testing.T) {
+	topP := 0.4
+	seed := int64(11)
+	freq := 0.2
+	pres := 0.1
+	req := codecRequest(t)
+	req.TopP = &topP
+	req.Seed = &seed
+	req.FrequencyPenalty = &freq
+	req.PresencePenalty = &pres
+	req.Tools = []schema.ToolDef{{Name: "search"}, {Name: "commit", ForceUse: true}}
+	req.ToolChoice = &modelcore.ToolChoice{Mode: "named", Name: "search"}
+
+	wire, err := buildChatRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if wire.TopP == nil || *wire.TopP != topP || wire.Seed == nil || *wire.Seed != seed {
+		t.Fatalf("sampling = top_p %v seed %v", wire.TopP, wire.Seed)
+	}
+
+	if wire.FrequencyPenalty == nil || *wire.FrequencyPenalty != freq {
+		t.Fatalf("frequency_penalty = %v", wire.FrequencyPenalty)
+	}
+
+	choice, ok := wire.ToolChoice.(map[string]any)
+	if !ok {
+		t.Fatalf("tool_choice = %#v", wire.ToolChoice)
+	}
+
+	fn, _ := choice["function"].(map[string]any)
+	if fn["name"] != "search" {
+		t.Fatalf("explicit tool_choice must win over ForceUse, got %#v", wire.ToolChoice)
+	}
+}
+
+func TestBuildChatRequest_ExtraBodyAndUnknownNamespace(t *testing.T) {
+	req := codecRequest(t)
+	payload, err := WithExtraBody(map[string]any{"enable_thinking": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.ProviderExtensions = map[string]any{ExtensionNamespace: payload}
+	wire, err := buildChatRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := wire.ExtraBody["enable_thinking"]; !ok {
+		t.Fatalf("extra body = %v", wire.ExtraBody)
+	}
+
+	req.ProviderExtensions = map[string]any{"anthropics": map[string]any{"x": 1}}
+	if _, err := buildChatRequest(req); err == nil {
+		t.Fatal("mismatched namespace must fail")
+	}
+
+	if _, err := WithExtraBody(map[string]any{"top_p": 0.1}); err == nil {
+		t.Fatal("colliding extra body key must fail")
+	}
+}

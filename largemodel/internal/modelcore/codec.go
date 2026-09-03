@@ -58,6 +58,22 @@ type Request struct {
 	// that cap, and whether it is mandatory, is the codec's business.
 	MaxTokens *int
 
+	// TopP is nucleus sampling when set.
+	TopP *float64
+
+	// Seed requests deterministic sampling when set.
+	Seed *int64
+
+	// FrequencyPenalty maps to vendors that accept it; others must reject it.
+	FrequencyPenalty *float64
+
+	// PresencePenalty maps to vendors that accept it; others must reject it.
+	PresencePenalty *float64
+
+	// ToolChoice, when set, is the cross-provider tool-selection policy and
+	// wins over ToolDef.ForceUse.
+	ToolChoice *ToolChoice
+
 	// Stop are stop sequences that end generation.
 	Stop []string
 
@@ -69,6 +85,17 @@ type Request struct {
 	// JSON matching this schema. It is read-only: a codec never mutates or
 	// trims it.
 	ResponseSchema any
+
+	// ProviderExtensions holds namespaced provider-private payloads. A codec
+	// reads only its own namespace.
+	ProviderExtensions map[string]any
+}
+
+// ToolChoice is the cross-provider tool-selection policy, mirroring
+// largemodel.ToolChoice.
+type ToolChoice struct {
+	Mode string
+	Name string
 }
 
 // Result is one completed non-streaming call, already normalized off the
@@ -149,4 +176,10 @@ type Codec interface {
 
 	// CallStream performs one streaming model call.
 	CallStream(ctx context.Context, req *Request) (*Stream, error)
+
+	// NativeStructuredOutput reports whether this codec maps ResponseSchema
+	// onto a vendor field. Codecs that return false must not send the schema
+	// as a native constraint; the facade either prompt-degrades (opt-in) or
+	// returns a capability error.
+	NativeStructuredOutput() bool
 }

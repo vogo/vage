@@ -19,6 +19,7 @@ package largemodel_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/largemodel/middleware"
+	"github.com/vogo/vage/largemodel/provider/openais"
 	"github.com/vogo/vage/schema"
 )
 
@@ -204,4 +206,63 @@ func ExampleCaller_protocolMismatch() {
 	})
 	fmt.Println(err != nil)
 	// Output: true
+}
+
+// ExampleRequireNativeCapabilities fails closed when structured output is
+// requested from a caller that never declared the capability. The fake
+// backend is not invoked.
+func ExampleRequireNativeCapabilities() {
+	fake := &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
+			largemodel.FakeStopResponse(schema.ProtocolOpenAIChat, `{"ok":true}`, schema.Usage{}),
+		},
+	}
+	caller := largemodel.RequireNativeCapabilities(fake)
+	_, err := caller.Call(context.Background(), &largemodel.Request{
+		Messages:       []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
+		ResponseSchema: map[string]any{"type": "object"},
+	})
+	fmt.Println(errors.Is(err, largemodel.ErrCapabilityUnavailable))
+	fmt.Println(fake.Calls())
+	// Output:
+	// true
+	// 0
+}
+
+// ExampleRequest_formalFields sets cross-provider sampling and tool_choice.
+// Unset pointer fields stay off the wire; an explicit zero is sent.
+func ExampleRequest_formalFields() {
+	topP := 0.2
+	req := &largemodel.Request{
+		Model:      "gpt-4o",
+		Messages:   []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
+		TopP:       &topP,
+		ToolChoice: largemodel.ToolChoiceAutoValue(),
+	}
+	fmt.Println(*req.TopP)
+	fmt.Println(req.ToolChoice.Mode)
+	// Output:
+	// 0.2
+	// auto
+}
+
+// ExampleWithExtraBody puts OpenAI-private fields in the openais namespace.
+// Keys that collide with formal request fields are rejected here, not on the wire.
+func ExampleWithExtraBody() {
+	extra, err := openais.WithExtraBody(map[string]any{"enable_thinking": true})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req := &largemodel.Request{
+		Model:              "gpt-4o",
+		ProviderExtensions: map[string]any{openais.ExtensionNamespace: extra},
+	}
+	_, exists := req.ProviderExtensions[openais.ExtensionNamespace]
+	fmt.Println(exists)
+	_, err = openais.WithExtraBody(map[string]any{"top_p": 0.1})
+	fmt.Println(err != nil)
+	// Output:
+	// true
+	// true
 }

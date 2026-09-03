@@ -29,7 +29,7 @@
   - **工作流型(WorkflowAgent)** —— 编排器:以顺序 / DAG / 循环三种模式组合多个子 Agent,执行委托给 `orchestration` 领域。
   - **自定义型(CustomAgent)** —— 逃生舱:把用户提供的函数直接包装成 Agent。
 - **RunRequest / RunResponse**:一次调用的输入/输出信封。
-- **Message**:叠加了 Agent 语义元数据的对话消息。用户消息可用 `NewUserMessageWithParts` 混排文本、图片(`MessagePartImage`)与文件(`MessagePartFile`)part;两者是 provider-neutral 的 canonical 内容,具体 wire 形态由 `model` 领域的 codec 决定(见 [model.md](../../capability/model/model.md))。
+- **Message**:叠加了 Agent 语义元数据的对话消息。用户消息可用 `NewUserMessageWithParts` 混排文本、图片(`MessagePartImage`)与文件(`MessagePartFile`)part;两者是 provider-neutral 的 canonical 内容,具体 wire 形态由 `model` 领域的 codec 决定(见 [model.md](../../capability/model/model.md))。推荐入口是 `schema.ImageFromURL` / `ImageFromBytes` / `FileFromID` / `FileFromBytes`:它们拒绝无法通过 `Message.Validate` 的状态,并复制内联 bytes;struct literal 仍然合法。
 - **ToolDef / ToolResult**:工具的可注册描述 / 中立的执行结果。`ToolResult.Text()` 是取其文本的推荐入口 —— 它只返回第一个文本 part(框架实际发给模型的那段),与拼接全部文本的 `Message.Text()` 刻意不同;需要完整或多模态内容时直接读 `Content`。
 - **Run 值(Run values)**:一次运行内、进程内的临时键值表,供多个工具在同一次执行中传递中间状态。它不是会话记忆:生命周期是「这一次运行」,而非「这个会话」。
 - **Event / RunStream**:全谱系可观测事件 / 拉取式流通道。`ForEach` 是排空一条流的推荐入口;`EventAccumulator` 把排空过程中的事件折回非流式调用方要的形状(文本、工具活动、终态记账)。

@@ -56,6 +56,15 @@ type FakeCaller struct {
 	// scripted result.
 	Err error
 
+	// Declared, when set together with DeclaredSet, is returned by
+	// Capabilities. A query error is DeclaredErr.
+	Declared    Capabilities
+	DeclaredSet bool
+	DeclaredErr error
+
+	// Endpoints, when non-nil, is returned by EndpointCapabilities.
+	Endpoints []EndpointCapability
+
 	calls    int
 	requests []*Request
 }
@@ -139,6 +148,35 @@ func (f *FakeCaller) Requests() []*Request {
 	return out
 }
 
+func (f *FakeCaller) Capabilities(_ context.Context, _ *Request) (Capabilities, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.DeclaredErr != nil {
+		return Capabilities{}, f.DeclaredErr
+	}
+
+	if f.DeclaredSet {
+		return f.Declared, nil
+	}
+
+	return Capabilities{}, nil
+}
+
+func (f *FakeCaller) EndpointCapabilities() []EndpointCapability {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.Endpoints == nil {
+		return nil
+	}
+
+	out := make([]EndpointCapability, len(f.Endpoints))
+	copy(out, f.Endpoints)
+
+	return out
+}
+
 // FakeStopResponse builds a scripted response for a turn that ends normally.
 func FakeStopResponse(proto schema.Protocol, text string, usage schema.Usage) *Response {
 	return &Response{
@@ -158,4 +196,8 @@ func FakeToolCallResponse(proto schema.Protocol, calls []schema.ToolCall, usage 
 	}
 }
 
-var _ Caller = (*FakeCaller)(nil)
+var (
+	_ Caller                     = (*FakeCaller)(nil)
+	_ CapabilityProvider         = (*FakeCaller)(nil)
+	_ EndpointCapabilityProvider = (*FakeCaller)(nil)
+)
