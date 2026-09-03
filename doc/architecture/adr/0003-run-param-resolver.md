@@ -1,6 +1,6 @@
 # 0003. Run Parameter Resolver (Single-Slot Parameterization, Not a New Plane)
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-09-03
 
 ## Context
