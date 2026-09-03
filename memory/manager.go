@@ -44,6 +44,37 @@ func WithStore(m Memory) ManagerOption {
 	return func(mgr *Manager) { mgr.store = m }
 }
 
+// WithDurableStore sets the store-tier memory to a backend that must survive
+// a process restart. The raw Store is checked with RequireDurableStore before
+// being wrapped as the store tier, so a backend that cannot keep cross-session
+// facts across a restart fails here, at assembly time, rather than the first
+// time a restart eats them. On failure the returned option is nil.
+//
+// The wrapped tier behaves exactly like NewLongTermMemory(store) with the
+// scope stamped ScopeStore; only the durability requirement is added.
+func WithDurableStore(store Store) (ManagerOption, error) {
+	if err := RequireDurableStore(store); err != nil {
+		return nil, err
+	}
+	return WithStore(NewLongTermMemory(store)), nil
+}
+
+// WithAtomicStore sets the store-tier memory to a backend that provides
+// single-key compare-and-swap. The raw Store is checked with
+// RequireAtomicStore before being wrapped as the store tier, so a component
+// that depends on CAS (idempotent updates, lease ownership) cannot be wired to
+// a backend that would silently lose those updates. On failure the returned
+// option is nil.
+//
+// The wrapped tier behaves exactly like NewLongTermMemory(store) with the
+// scope stamped ScopeStore; only the atomicity requirement is added.
+func WithAtomicStore(store Store) (ManagerOption, error) {
+	if err := RequireAtomicStore(store); err != nil {
+		return nil, err
+	}
+	return WithStore(NewLongTermMemory(store)), nil
+}
+
 // WithPromoter sets the promotion strategy.
 func WithPromoter(p Promoter) ManagerOption {
 	return func(mgr *Manager) { mgr.promoter = p }

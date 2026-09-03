@@ -45,7 +45,7 @@ func TestNewManager_Defaults(t *testing.T) {
 
 func TestNewManager_WithOptions(t *testing.T) {
 	session := NewSessionMemory("agent-1", "sess-1")
-	store := NewPersistentMemory()
+	store := NewInMemoryLongTermMemory()
 	compressor := NewSlidingWindowCompressor(10)
 
 	mgr := NewManager(
@@ -188,7 +188,7 @@ func TestManager_PromoteToSession_PromoterError(t *testing.T) {
 
 func TestManager_ArchiveToStore(t *testing.T) {
 	session := NewSessionMemory("agent-1", "sess-1")
-	store := NewPersistentMemory()
+	store := NewInMemoryLongTermMemory()
 	mgr := NewManager(
 		WithSession(session),
 		WithStore(store),
@@ -222,7 +222,7 @@ func TestManager_ArchiveToStore_NoStore(t *testing.T) {
 }
 
 func TestManager_ArchiveToStore_NoSession(t *testing.T) {
-	store := NewPersistentMemory()
+	store := NewInMemoryLongTermMemory()
 	mgr := NewManager(WithStore(store))
 
 	ctx := context.Background()
@@ -234,7 +234,7 @@ func TestManager_ArchiveToStore_NoSession(t *testing.T) {
 
 func TestManager_ArchiveToStore_ArchiveNone(t *testing.T) {
 	session := NewSessionMemory("agent-1", "sess-1")
-	store := NewPersistentMemory()
+	store := NewInMemoryLongTermMemory()
 	mgr := NewManager(
 		WithSession(session),
 		WithStore(store),
@@ -256,7 +256,7 @@ func TestManager_ArchiveToStore_ArchiveNone(t *testing.T) {
 
 func TestManager_ArchiveToStore_ArchiverError(t *testing.T) {
 	session := NewSessionMemory("agent-1", "sess-1")
-	store := NewPersistentMemory()
+	store := NewInMemoryLongTermMemory()
 	errArchiver := ArchiveFunc(func(_ context.Context, _ []Entry) ([]Entry, error) {
 		return nil, errors.New("archive failed")
 	})

@@ -11,7 +11,7 @@ A Go framework for building LLM-based intelligent agent systems.
 - **Composable Agents** — TaskAgent (ReAct tool-calling), RouterAgent (routing), WorkflowAgent (DAG orchestration), and CustomAgent (user-defined)
 - **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling
 - **Cross-Process Interrupt & Resume** — Suspend a tool batch before it runs, persist it, and let a different process inject a human decision and resume from exactly that batch
-- **Three-Level Memory** — Working (request) → Session (conversation) → Store (persistent), with context compression and token budgets
+- **Three-Level Memory** — Working (request) → Session (conversation) → Store (long-term; durability depends on the backend), with context compression and token budgets
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
 - **Agent Middleware** — One decorator chain shared by sync and streaming runs: short-circuit, audit, or rewrite the final response once per run (hooks stay read-only, stream middleware stays event-level)
 - **LLM Middleware** — Decorator chain: logging, rate limiting, timeout, cache, metrics (retries and endpoint health live in the caller's router pool)

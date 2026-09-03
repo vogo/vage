@@ -7,12 +7,15 @@
 | 文件/关键类型 | 设计角色 |
 |---------------|----------|
 | `memory/working.go`(`WorkingMemory`) | 请求级临时记忆 |
-| `memory/session.go`(`SessionMemory`) | 对话级多轮记忆 |
-| `memory/persistent.go`(`PersistentMemory`)/`mapstore.go`(`MapStore`) | 持久记忆与内存实现 |
-| `memory/manager.go`(`Manager`) | 三层记忆的统一编排入口 |
-| `memory/promoter.go`(`Promoter`) | 层间提升策略 |
+| `memory/session.go`(`SessionMemory`) | 会话级多轮记忆 |
+| `memory/longterm.go`(`LongTermMemory`) | 跨会话(store)记忆 tier;是否 durable 由注入的 Store 决定 |
+| `memory/mapstore.go`(`MapStore`) | 进程内 Store 后端;不实现任何能力接口,`Require*` 按缺失拒绝 |
+| `memory/store_capability.go`(`DurableStore`/`AtomicStore`/`Require*`) | 后端能力契约与构造期 fail-fast 校验 |
+| `memory/manager.go`(`Manager`, `WithDurableStore`/`WithAtomicStore`) | 三层记忆统一编排;声明式能力装配入口 |
+| `memory/promoter.go`/`selector.go` | 层间提升策略与可组合谓词(`PromoteWhen`/`ArchiveWhen` 等) |
+| `memory/archiver.go` | 归档策略 |
 | `memory/compressor*.go`(`ContextCompressor` 及各实现) | 滑动窗口 / 重要度排序 / 摘要+截断 / token 预算 / 压缩链 |
-| `memory/compactor.go`/`archiver.go` | 会话压紧与归档 |
+| `memory/compactor.go` | 会话压紧 |
 | `memory/token_estimate.go` | token 估算(压缩决策依据) |
 | `context/source.go`(`Builder`/`Source`) | 装配管线契约 |
 | `context/sources_*.go` | 各内置 Source(系统提示、会话记忆、向量召回等) |
@@ -23,6 +26,10 @@
 - **压缩器职责单一 + 可链式组合**:每个压缩器只处理一个维度(窗口、重要度、摘要、预算),用压缩链组合,避免单个巨型压缩器。
 - **`vctx` 命名**:包名避开标准库 `context`,导入路径仍为 `github.com/vogo/vage/context`。
 - **token 估算集中**:压缩决策统一依赖 `token_estimate`,避免各处各估一套。
+- **长期记忆 ≠ 持久化**:`LongTermMemory` 是 store tier 的名字,只承诺跨会话;是否跨进程重启存活由注入的 `Store` 后端决定。默认 `MapStore` 后端进程内即丢,故 `NewInMemoryLongTermMemory()` 的 godoc 明示非 durable;需要 durable 的装配方用 `NewLongTermMemory(store)` + `Require*` 或 `Manager.WithDurableStore` 显式声明。
+- **能力契约与构造期 fail-fast**:`DurableStore`(`Durability()` 等级化自报)与 `AtomicStore`(`CompareAndSwap`)是可选接口;`RequireDurableStore`/`RequireAtomicStore` 缺能力时返回点名能力、后端类型与出路的可行动错误。`MapStore` 不实现新接口也不自我声明——缺失即被拒绝。等级校验要求自报 ≥ `DurabilityRestart`,防止"实现了接口却只自报进程内"的绕行。
+- **selector 元数据来源 = 结构化 Value(duck-typed)**:`Entry` 是底层记录重建的只读投影、`Memory.Set` 无 metadata 通道,故不扩 `Entry`。谓词从 `e.Value` 读取 `Importance() float64` / `Tags() []string` 可选接口;未实现的值在选择性谓词下**不匹配**(被过滤)。谁配置选择性 Promoter/Archiver,谁就让对应值携带元数据。
+- **组合谓词的恒等律与装配期失败**:`And()` 空参恒真、`Or()` 空参恒假(保持组合恒等律);`PromoteWhen(nil)`/`ArchiveWhen(nil)` 及 `And`/`Or` 的 nil 成员在构造期 panic,把运行期 nil deref 提前到装配期。
 
 ## 与上下文编辑的分工
 
