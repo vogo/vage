@@ -186,7 +186,7 @@ Recorded:
 
 - Independent interrupt state machine rather than extending `checkpoint.IterationStore` for cross-process human-in-the-loop suspend: [0001-interrupt-independent-state-machine.md](adr/0001-interrupt-independent-state-machine.md).
 - Session memory namespaced by caller-declared `(agentID, sessionID)`: [0002-session-memory-namespace.md](adr/0002-session-memory-namespace.md) (`proposed`).
-- Single-slot Run parameter resolver (parameterization, not a new plane) and host-side routing Caller assembly via `BuildCaller` / `ComposeCaller`: [0003-run-param-resolver.md](adr/0003-run-param-resolver.md) (`proposed`).
+- Single-slot Run parameter resolver (parameterization, not a new plane) and host-side routing Caller assembly via `BuildCaller` / `ComposeCaller`: [0003-run-param-resolver.md](adr/0003-run-param-resolver.md).
 
 Candidates still in code that later ADRs may capture:
 
