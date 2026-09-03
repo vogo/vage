@@ -57,6 +57,9 @@ type OpenAIEndpoint struct {
 	Tags    map[string]string
 	Cost    *EndpointCost
 	Latency *time.Duration
+	// Capabilities optionally declares what this endpoint/model can do.
+	// Nil (the zero value) is unknown, not unsupported.
+	Capabilities *Capabilities
 }
 
 // OpenAIConfig holds the endpoints and selection strategy for an OpenAI Chat
@@ -79,6 +82,9 @@ type AnthropicEndpoint struct {
 	Beta    []string
 	Cost    *EndpointCost
 	Latency *time.Duration
+	// Capabilities optionally declares what this endpoint/model can do.
+	// Nil (the zero value) is unknown, not unsupported.
+	Capabilities *Capabilities
 }
 
 // AnthropicConfig holds the endpoints and selection strategy for an Anthropic

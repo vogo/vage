@@ -8,7 +8,7 @@
 | 状态 | active |
 | 依赖领域 | agent-core(`schema`)、tooling(上下文编辑感知工具资源) |
 | 对外 API | 是(Go 库 API) |
-| 覆盖包 | `largemodel`、`largemodel/middleware`、`largemodel/middleware/contexteditor`、`largemodel/router` |
+| 覆盖包 | `largemodel`、`largemodel/structured`、`largemodel/middleware`、`largemodel/middleware/contexteditor`、`largemodel/router` |
 
 ## 概述
 
@@ -20,7 +20,7 @@
 
 在 `Caller` 之上是一条**装饰器中间件链**:日志、缓存、限流、超时、指标、token 预算、上下文编辑、溢出处理。每个中间件包裹下一个,组成可插拔的治理栈,并透传被包裹 Caller 的协议。重试与熔断不在其中。
 
-**边界(不做):** 不实现模型推理(委托底层 `aimodel` 的 provider 客户端);不自研重试、熔断、路由与健康判定 —— 全部取 `largemodel/router` 的实现;不做跨协议的路由或故障转移(OpenAI 池与 Anthropic 池各自独立,请求模型不共享);不做提示词内容治理(那是 `prompt`/`skill`)。
+**边界(不做):** 不实现模型推理(委托底层 `aimodel` 的 provider 客户端);不自研重试、熔断、路由与健康判定 —— 全部取 `largemodel/router` 的实现;不做跨协议的路由或故障转移(OpenAI 池与 Anthropic 池各自独立,请求模型不共享);不做提示词内容治理(那是 `prompt`/`skill`);不建设远程能力探测、缓存或全局能力注册服务 —— 能力以构造期声明加可选本地查询为主;本领域不新增具体 vendor endpoint。
 
 ## 核心实体(概念层)
 
@@ -36,8 +36,11 @@
 - **预算中间件(budget)**:在调用前后核算 token 消耗,配合 Agent 的预算终止。
 - **溢出处理(overflow)**:上下文超限时的处置。
 - **上下文编辑器(ContextEditor)**:请求到达模型前,把较早的工具结果折叠为短占位符,并可将超大工具结果外置到工件存储。
-- **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段;无原生映射的 codec 走包内提示降级(在请求副本插入确定性 system 指令)。三态互斥,一次调用只选一种;vage 不解析、不校验、不清理最终 JSON。
-- **多模态输入(image/file)**:`schema.MessagePartImage`/`MessagePartFile` 是用户消息可携带的 provider-neutral 媒体来源(URL、内联 Data+MimeType,文件另可 FileID);MimeType / Filename 只属于内联 Data 来源。厂商 wire 字段只出现在 `EncodeOpenAIMessage`/`EncodeAnthropicMessage` 内部,来源到 wire 的映射固定,见 [model-design](model-design.md)。
+- **ResponseSchema(结构化输出约束)**:`Request.ResponseSchema` 是可选的、与 `ToolDef.Parameters` 同形的 JSON Schema,约束模型最终文本(非工具参数)。原生支持的 codec(OpenAI Chat、Anthropic Messages)按 codec 静态映射为厂商字段。无原生映射的 codec **默认返回 typed `CapabilityError`**,只有显式 `largemodel.AllowPromptFallback(...)` 才走包内提示降级(在请求副本插入确定性 system 指令)。三态互斥,一次调用只选一种;底层 `Caller` 路径不解析、不校验、不清理最终 JSON —— 类型化解码、本地校验与内容修复在 `largemodel/structured`。
+- **能力协商(CapabilityProvider)**:Caller 可选声明或查询当前请求有效模型的输入 modality(`text`/`image`/`file`)、`StructuredOutput`、`ToolCalling`。支持级别为 unknown / unsupported / prompt / native;`prompt` 只对结构化输出合法。能力是 endpoint/model 的声明事实,不从模型名、URL、Tags 或一次成功调用中猜测。`RequireNativeCapabilities(...)` 在进入 backend 前 fail-closed;未知与明确不支持都不能当作满足。多 endpoint 按「单个候选满足全部要求」筛选,不能把不同 endpoint 的能力做并集。
+- **正式参数与 provider 扩展**:跨 provider 正式字段是 `TopP`、`Seed`、`FrequencyPenalty`、`PresencePenalty`、`ToolChoice`(中立 auto/none/required/named)。厂商私有参数放在 `Request.ProviderExtensions` 的稳定 namespace(至少 `openais.WithExtraBody`);扩展不能覆盖正式字段,也不是凭证通道。
+- **structured.Call[T]**:非流式类型化结构化输出 helper。默认要求 native structured output;`AllowPromptFallback()` 必须显式开启。JSON 解码到 `T` 是成功条件;`WithValidation()` 按有效 schema 校验,可选 typed validator 承担 schema 表达不了的语义;`WithRepairAttempts(n)` 是响应后的内容修复,与 router 传输重试分开。失败保留最后一次 raw response。
+- **多模态输入(image/file)**:`schema.MessagePartImage`/`MessagePartFile` 是用户消息可携带的 provider-neutral 媒体来源(URL、内联 Data+MimeType,文件另可 FileID);MimeType / Filename 只属于内联 Data 来源。安全入口是 `schema.ImageFromURL`、`ImageFromBytes`、`FileFromID`、`FileFromBytes`(拒绝空来源/缺 MIME/非 image MIME,并复制 bytes)。厂商 wire 字段只出现在 `EncodeOpenAIMessage`/`EncodeAnthropicMessage` 内部,来源到 wire 的映射固定,见 [model-design](model-design.md)。
 
 ## 业务规则与不变式
 
@@ -53,9 +56,12 @@
 | MOD-6 | **超大结果外置**:单条工具结果超过字节上限时外置到工件存储,提示里只留短引用;外置失败则回退为内联提示。 |
 | MOD-9 | **重试与存活判定单一来源**:归 `largemodel/router`,vage 不提供 Retry / CircuitBreaker 中间件,以免尝试次数相乘。代价须知悉:router 只把 401/403 视为不可重试,确定性的 400 也会被重试满并使端点进入恢复窗口。`largemodel.IsRetryable` 保留 vage 自己更窄的错误判读,供上层决策使用,但不驱动任何重试循环。 |
 | MOD-10 | **池不共享**:一个 router 池归属一个会话、一次只服务一个调用;并发由多个池承担,每个池独立学习端点健康。跨池的健康视图只在读取时按别名合并,不回写;合并取各池中最有把握的判断(available > probation > dead),无法识别的状态按 dead 处理。 |
-| MOD-11 | **ResponseSchema 非强保证**:原生字段成功发出不等于响应必为合规 JSON —— provider 拒答、内容过滤、截断仍按现有 finish reason / error 语义返回;降级提示只提高遵循概率,不构成 schema 合规保证。vage 不因本地校验失败自动重试,也不在 provider 4xx 后剥离原生字段重试。 |
+| MOD-11 | **ResponseSchema 非强保证**:原生字段成功发出不等于响应必为合规 JSON —— provider 拒答、内容过滤、截断仍按现有 finish reason / error 语义返回。无原生映射时默认 fail-closed,不静默注入 prompt;显式 `AllowPromptFallback` 的降级提示只提高遵循概率,仍不构成 schema 合规保证。底层 Caller 不因本地校验失败自动重试,也不在 provider 4xx 后剥离原生字段重试。`structured.Call` 的修复是收到响应后的内容修复,次数单独配置,不与 router 传输重试相乘。 |
 | MOD-12 | **多模态来源→wire 映射固定,不可表示即报错**:image/file 来源到 OpenAI/Anthropic wire 的映射按 [model-design](model-design.md) 的表静态决定,不按模型名或端点探测切换。无法表示的组合(OpenAI 的文件 URL、Anthropic 的 FileID)在编码期、backend 调用前失败;vage 不下载 URL、不上传文件、不管理 FileID、不猜测 MIME 或模型能力,厂商的格式/大小/模型限制以 provider 错误呈现。Anthropic document block 丢弃 Filename 是唯一允许的静默降级 —— 字节与 MIME 类型仍完整送达。 |
 | MOD-13 | **Caller 在 Agent 构造期绑定**:一个 TaskAgent 持有一条 Caller 链,直到该 Agent 被替换。同协议多 endpoint 的 failover 发生在该 Caller 的 router 池内,并发 `schema.EventRouteSelected`(alias / strategy / reason / stream,不含凭证)。不得把 Caller、endpoint、API key 或 `RoutePolicy` 放进 `RunRequest`;跨租户切换是宿主选择另一个已绑定 Agent,而不是 per-call 换池。 |
+| MOD-14 | **能力是声明事实,严格模式 fail-closed**:`CapabilityProvider` 查询必须是只读、无模型调用的本地操作。unknown 与 unsupported 在 `RequireNativeCapabilities` 下均不满足要求,错误是可 `errors.As` 的 `CapabilityError`(sentinel `ErrCapabilityUnavailable`),且 backend 调用次数为零。查询失败同样不得继续调用。自定义 Caller/中间件不提供能力时仍可用于普通调用,但严格策略视其为 unknown。 |
+| MOD-15 | **prompt fallback 仅结构化输出且必须 opt-in**:图片、文件和 tool calling 不做 prompt 模拟,也不因 provider 4xx 自动降低保证后重试。`AllowPromptFallback` 与显式「要求 native structured output」同时出现是配置冲突,不得暗中选择较弱策略。 |
+| MOD-16 | **扩展不是凭证通道**:API key、base URL、header 只从 Caller 构造配置注入。`ProviderExtensions` 进入缓存键并按与其他请求字段相同的规则出现在 debug/log 中;不得用扩展覆盖 model/messages/tools 或正式采样/tool_choice 字段。 |
 
 ## 状态与转换
 
@@ -75,4 +81,4 @@
 - **tooling**:上下文编辑的 stale_resource 判定需查询工具的资源语义(ResourceTracker),识别"被后续写作废的旧读结果"。
 - **memory**:与记忆压缩互补 —— 编辑管"每轮少付 token",压缩管"记多少历史"(见 [memory-design](../../memory/memory/memory-design.md))。
 
-技术实现(中间件清单、上下文编辑 V1/V2 兼容层)见 [model-design](model-design.md)。多端点路由、重试与健康见 [router-design](router-design.md)。
+技术实现(中间件清单、上下文编辑 V1/V2 兼容层、能力协商与结构化 helper)见 [model-design](model-design.md)。多端点路由、重试与健康见 [router-design](router-design.md)。可编译示例:`largemodel/example_test.go`(formal fields / ExtraBody / strict capabilities)、`largemodel/structured/example_test.go`、`schema/example_media_test.go`。

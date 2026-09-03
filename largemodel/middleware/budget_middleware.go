@@ -59,9 +59,8 @@ func NewBudgetMiddleware(preCheck BudgetPreCheckFunc, postRecord BudgetPostRecor
 
 // Wrap implements Middleware.
 func (m *BudgetMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto: next.Protocol(),
-		Chat: func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
+	return largemodel.BindCaller(
+		next, func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
@@ -79,7 +78,7 @@ func (m *BudgetMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 
 			return resp, nil
 		},
-		ChatStream: func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
+		func(ctx context.Context, req *largemodel.Request) (*largemodel.Stream, error) {
 			if m.preCheck != nil {
 				if err := m.preCheck(ctx); err != nil {
 					return nil, err
@@ -102,5 +101,5 @@ func (m *BudgetMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
 				m.postRecord(ctx, *usage)
 			}), nil
 		},
-	}
+	)
 }

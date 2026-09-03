@@ -20,6 +20,8 @@ package modelcore
 import (
 	"errors"
 	"fmt"
+
+	"github.com/vogo/vage/schema"
 )
 
 // ErrEmptyResponse is the single underlying instance behind
@@ -53,3 +55,14 @@ func (e *APIError) Error() string {
 
 // Unwrap exposes the underlying vendor error.
 func (e *APIError) Unwrap() error { return e.Err }
+
+// UnsupportedParameterError reports a request field this protocol cannot
+// express. The codec returns it before any vendor call.
+type UnsupportedParameterError struct {
+	Protocol  schema.Protocol
+	Parameter string
+}
+
+func (e *UnsupportedParameterError) Error() string {
+	return fmt.Sprintf("vage: unsupported model parameter %q for protocol %s", e.Parameter, e.Protocol)
+}

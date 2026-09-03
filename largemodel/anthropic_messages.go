@@ -33,5 +33,12 @@ type AnthropicMessagesBackend = anthropics.Messenger
 // hoisted system text, content blocks, mandatory max_tokens, index-addressed
 // stream blocks — are all absorbed by the provider codec.
 func newAnthropicMessagesCaller(backend AnthropicMessagesBackend) Caller {
-	return &codecCaller{codec: anthropics.NewMessagesCodec(backend)}
+	c := &codecCaller{codec: anthropics.NewMessagesCodec(backend)}
+	if cp, ok := backend.(anthropics.CapabilityProvider); ok {
+		from := cp.ComposeCapability()
+		c.caps = fromProviderBools(from.Tools, from.Vision)
+		c.hasCaps = true
+	}
+
+	return c
 }

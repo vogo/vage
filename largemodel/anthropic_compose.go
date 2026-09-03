@@ -33,8 +33,9 @@ import (
 // labour is the same: routing, retries and endpoint health belong to
 // largemodel/router, including the reading of a 400 as retryable.
 type AnthropicMessagesComposeCaller struct {
-	caller Caller
-	pool   *composePool[*anthropics.ComposeClient]
+	caller   Caller
+	pool     *composePool[*anthropics.ComposeClient]
+	declared []EndpointCapability
 }
 
 // Protocol implements Caller.
@@ -53,7 +54,7 @@ func (c *AnthropicMessagesComposeCaller) CallStream(ctx context.Context, req *Re
 // newAnthropicComposeCaller wires a pool set built by build behind the
 // Anthropic caller, for both the one-endpoint and the several-endpoint path.
 func newAnthropicComposeCaller(
-	build func() (*anthropics.ComposeClient, error), cfg *composeConfig,
+	build func() (*anthropics.ComposeClient, error), cfg *composeConfig, declared []EndpointCapability,
 ) (*AnthropicMessagesComposeCaller, error) {
 	pool, err := newComposePool(cfg.concurrency, build)
 	if err != nil {
@@ -61,8 +62,9 @@ func newAnthropicComposeCaller(
 	}
 
 	return &AnthropicMessagesComposeCaller{
-		caller: newAnthropicMessagesCaller(&anthropicComposeBackend{pool: pool}),
-		pool:   pool,
+		caller:   newAnthropicMessagesCaller(&anthropicComposeBackend{pool: pool}),
+		pool:     pool,
+		declared: declared,
 	}, nil
 }
 
@@ -75,6 +77,17 @@ func (c *AnthropicMessagesComposeCaller) Stats() []router.EndpointStat {
 
 // EndpointStats reports endpoint health merged across the caller's pools.
 func (c *AnthropicMessagesComposeCaller) EndpointStats() []router.EndpointStat { return c.Stats() }
+
+func (c *AnthropicMessagesComposeCaller) Capabilities(_ context.Context, req *Request) (Capabilities, error) {
+	return resolveDeclaredCapabilities(c.declared, req), nil
+}
+
+func (c *AnthropicMessagesComposeCaller) EndpointCapabilities() []EndpointCapability {
+	out := make([]EndpointCapability, len(c.declared))
+	copy(out, c.declared)
+
+	return out
+}
 
 // anthropicComposeBackend borrows a pool for the duration of one call.
 type anthropicComposeBackend struct {
@@ -138,9 +151,14 @@ func newAnthropicMessagesCallerFromConfig(
 
 	composeCfg := newComposeConfig(opts...)
 
+	declared, err := declaredFromAnthropic(cfg.Endpoints)
+	if err != nil {
+		return nil, err
+	}
+
 	return newAnthropicComposeCaller(func() (*anthropics.ComposeClient, error) {
 		return buildAnthropicComposeClient(cfg, composeCfg)
-	}, composeCfg)
+	}, composeCfg, declared)
 }
 
 // buildAnthropicComposeClient turns the neutral endpoint configuration into a
@@ -170,13 +188,14 @@ func buildAnthropicComposeClient(cfg AnthropicConfig, composeCfg *composeConfig)
 		}
 
 		entries[i] = anthropics.ModelEntry{
-			Name:    e.Model,
-			Client:  anthropic.NewClient(e.APIKey, clientOpts...),
-			Weight:  e.Weight,
-			Alias:   e.Alias,
-			Tags:    e.Tags,
-			Cost:    e.Cost,
-			Latency: e.Latency,
+			Name:       e.Model,
+			Client:     anthropic.NewClient(e.APIKey, clientOpts...),
+			Weight:     e.Weight,
+			Alias:      e.Alias,
+			Tags:       e.Tags,
+			Capability: anthropicProviderCapability(e.Capabilities),
+			Cost:       e.Cost,
+			Latency:    e.Latency,
 		}
 	}
 
@@ -190,16 +209,17 @@ func toAnthropicSpecs(endpoints []AnthropicEndpoint) []anthropics.EndpointSpec {
 
 	for i, e := range endpoints {
 		specs[i] = anthropics.EndpointSpec{
-			BaseURL: e.BaseURL,
-			APIKey:  e.APIKey,
-			Model:   e.Model,
-			Alias:   e.Alias,
-			Weight:  e.Weight,
-			Tags:    e.Tags,
-			Version: e.Version,
-			Beta:    e.Beta,
-			Cost:    e.Cost,
-			Latency: e.Latency,
+			BaseURL:    e.BaseURL,
+			APIKey:     e.APIKey,
+			Model:      e.Model,
+			Alias:      e.Alias,
+			Weight:     e.Weight,
+			Tags:       e.Tags,
+			Version:    e.Version,
+			Beta:       e.Beta,
+			Capability: anthropicProviderCapability(e.Capabilities),
+			Cost:       e.Cost,
+			Latency:    e.Latency,
 		}
 	}
 
@@ -207,6 +227,8 @@ func toAnthropicSpecs(endpoints []AnthropicEndpoint) []anthropics.EndpointSpec {
 }
 
 var (
-	_ Caller                   = (*AnthropicMessagesComposeCaller)(nil)
-	_ AnthropicMessagesBackend = (*anthropicComposeBackend)(nil)
+	_ Caller                     = (*AnthropicMessagesComposeCaller)(nil)
+	_ CapabilityProvider         = (*AnthropicMessagesComposeCaller)(nil)
+	_ EndpointCapabilityProvider = (*AnthropicMessagesComposeCaller)(nil)
+	_ AnthropicMessagesBackend   = (*anthropicComposeBackend)(nil)
 )

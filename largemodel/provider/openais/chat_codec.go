@@ -49,6 +49,9 @@ func NewChatCodec(client ChatCompleter) *ChatCodec { return &ChatCodec{client: c
 // Protocol implements modelcore.Codec.
 func (c *ChatCodec) Protocol() schema.Protocol { return schema.ProtocolOpenAIChat }
 
+// NativeStructuredOutput implements modelcore.Codec.
+func (c *ChatCodec) NativeStructuredOutput() bool { return true }
+
 // Call implements modelcore.Codec.
 func (c *ChatCodec) Call(ctx context.Context, req *modelcore.Request) (*modelcore.Result, error) {
 	wire, err := buildChatRequest(req)
@@ -138,6 +141,10 @@ func buildChatRequest(req *modelcore.Request) (*openai.ChatCompletionRequest, er
 		// vage only ever sets max_completion_tokens.
 		MaxCompletionTokens: req.MaxTokens,
 		Stop:                req.Stop,
+		TopP:                req.TopP,
+		Seed:                req.Seed,
+		FrequencyPenalty:    req.FrequencyPenalty,
+		PresencePenalty:     req.PresencePenalty,
 	}
 
 	for i := range req.Messages {
@@ -166,13 +173,22 @@ func buildChatRequest(req *modelcore.Request) (*openai.ChatCompletionRequest, er
 		})
 	}
 
-	if choice := chatForcedToolChoice(req.Tools); choice != nil {
+	if choice, err := chatToolChoice(req); err != nil {
+		return nil, err
+	} else if choice != nil {
 		wire.ToolChoice = choice
 	}
 
 	if req.ResponseSchema != nil {
 		wire.ResponseFormat = chatResponseFormat(req.ResponseSchema)
 	}
+
+	extra, err := extraBodyFromRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	wire.ExtraBody = extra
 
 	return wire, nil
 }
@@ -194,6 +210,30 @@ func chatResponseFormat(respSchema any) map[string]any {
 			"strict": true,
 		},
 	}
+}
+
+// chatToolChoice maps the canonical tool-choice, preferring Request.ToolChoice
+// over ToolDef.ForceUse when the former is set.
+func chatToolChoice(req *modelcore.Request) (any, error) {
+	if req.ToolChoice != nil {
+		switch req.ToolChoice.Mode {
+		case "auto":
+			return "auto", nil
+		case "none":
+			return "none", nil
+		case "required":
+			return "required", nil
+		case "named":
+			return map[string]any{
+				"type":     openai.ToolTypeFunction,
+				"function": map[string]any{"name": req.ToolChoice.Name},
+			}, nil
+		default:
+			return nil, fmt.Errorf("vage: invalid tool_choice mode %q", req.ToolChoice.Mode)
+		}
+	}
+
+	return chatForcedToolChoice(req.Tools), nil
 }
 
 // chatForcedToolChoice returns OpenAI's tool_choice value when a tool is marked

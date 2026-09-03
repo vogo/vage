@@ -50,8 +50,9 @@ import (
 // vage's own, narrower reading of the same error, for callers deciding whether
 // a failure is worth reacting to.
 type OpenAIChatComposeCaller struct {
-	caller Caller
-	pool   *composePool[*openais.ComposeClient]
+	caller   Caller
+	pool     *composePool[*openais.ComposeClient]
+	declared []EndpointCapability
 }
 
 // Protocol implements Caller.
@@ -71,7 +72,7 @@ func (c *OpenAIChatComposeCaller) CallStream(ctx context.Context, req *Request) 
 // caller. It is what both entry points — one endpoint and several — end up
 // calling, so the two differ only in how a pool is built.
 func newOpenAIComposeCaller(
-	build func() (*openais.ComposeClient, error), cfg *composeConfig,
+	build func() (*openais.ComposeClient, error), cfg *composeConfig, declared []EndpointCapability,
 ) (*OpenAIChatComposeCaller, error) {
 	pool, err := newComposePool(cfg.concurrency, build)
 	if err != nil {
@@ -79,8 +80,9 @@ func newOpenAIComposeCaller(
 	}
 
 	return &OpenAIChatComposeCaller{
-		caller: newOpenAIChatCaller(&openAIComposeBackend{pool: pool}),
-		pool:   pool,
+		caller:   newOpenAIChatCaller(&openAIComposeBackend{pool: pool}),
+		pool:     pool,
+		declared: declared,
 	}, nil
 }
 
@@ -96,6 +98,17 @@ func (c *OpenAIChatComposeCaller) Stats() []router.EndpointStat {
 
 // EndpointStats reports endpoint health merged across the caller's pools.
 func (c *OpenAIChatComposeCaller) EndpointStats() []router.EndpointStat { return c.Stats() }
+
+func (c *OpenAIChatComposeCaller) Capabilities(_ context.Context, req *Request) (Capabilities, error) {
+	return resolveDeclaredCapabilities(c.declared, req), nil
+}
+
+func (c *OpenAIChatComposeCaller) EndpointCapabilities() []EndpointCapability {
+	out := make([]EndpointCapability, len(c.declared))
+	copy(out, c.declared)
+
+	return out
+}
 
 // openAIComposeBackend borrows a pool for the duration of one call.
 type openAIComposeBackend struct {
@@ -161,9 +174,14 @@ func newOpenAIChatCallerFromConfig(cfg OpenAIConfig, opts ...CallerOption) (*Ope
 
 	composeCfg := newComposeConfig(opts...)
 
+	declared, err := declaredFromOpenAI(cfg.Endpoints)
+	if err != nil {
+		return nil, err
+	}
+
 	return newOpenAIComposeCaller(func() (*openais.ComposeClient, error) {
 		return buildOpenAIComposeClient(cfg, composeCfg)
-	}, composeCfg)
+	}, composeCfg, declared)
 }
 
 // buildOpenAIComposeClient turns the neutral endpoint configuration into a
@@ -186,13 +204,14 @@ func buildOpenAIComposeClient(cfg OpenAIConfig, composeCfg *composeConfig) (*ope
 		}
 
 		entries[i] = openais.ModelEntry{
-			Name:    e.Model,
-			Client:  openai.NewClient(e.APIKey, clientOpts...),
-			Weight:  e.Weight,
-			Alias:   e.Alias,
-			Tags:    e.Tags,
-			Cost:    e.Cost,
-			Latency: e.Latency,
+			Name:       e.Model,
+			Client:     openai.NewClient(e.APIKey, clientOpts...),
+			Weight:     e.Weight,
+			Alias:      e.Alias,
+			Tags:       e.Tags,
+			Capability: openAIProviderCapability(e.Capabilities),
+			Cost:       e.Cost,
+			Latency:    e.Latency,
 		}
 	}
 
@@ -206,14 +225,15 @@ func toOpenAISpecs(endpoints []OpenAIEndpoint) []openais.EndpointSpec {
 
 	for i, e := range endpoints {
 		specs[i] = openais.EndpointSpec{
-			BaseURL: e.BaseURL,
-			APIKey:  e.APIKey,
-			Model:   e.Model,
-			Alias:   e.Alias,
-			Weight:  e.Weight,
-			Tags:    e.Tags,
-			Cost:    e.Cost,
-			Latency: e.Latency,
+			BaseURL:    e.BaseURL,
+			APIKey:     e.APIKey,
+			Model:      e.Model,
+			Alias:      e.Alias,
+			Weight:     e.Weight,
+			Tags:       e.Tags,
+			Capability: openAIProviderCapability(e.Capabilities),
+			Cost:       e.Cost,
+			Latency:    e.Latency,
 		}
 	}
 
@@ -221,6 +241,8 @@ func toOpenAISpecs(endpoints []OpenAIEndpoint) []openais.EndpointSpec {
 }
 
 var (
-	_ Caller            = (*OpenAIChatComposeCaller)(nil)
-	_ OpenAIChatBackend = (*openAIComposeBackend)(nil)
+	_ Caller                     = (*OpenAIChatComposeCaller)(nil)
+	_ CapabilityProvider         = (*OpenAIChatComposeCaller)(nil)
+	_ EndpointCapabilityProvider = (*OpenAIChatComposeCaller)(nil)
+	_ OpenAIChatBackend          = (*openAIComposeBackend)(nil)
 )

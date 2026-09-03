@@ -80,10 +80,11 @@ stats := caller.EndpointStats() // []router.EndpointStat
 
 每次 dispatch:
 
-1. **Capability filter** — 按 opaque label 排除不声明能力的端点;全不满足则 `CapabilityError`(无网络 I/O)
-2. **复用 active** — 健康且 capable 则继续用
-3. **冻结策略序** — 否则按策略排一次序,沿序 failover
-4. **调用内重试** — 对当前端点指数退避,耗尽则判 dead 并换下一个
+1. **Caller 层严格能力筛选(可选)** — `RequireNativeCapabilities` 按「单个候选满足全部要求」收窄 alias,写入 `router.Call.Eligible`;未开启严格策略时 Eligible 为空,不改变选路。这与下一步的 label filter 是两层:前者看统一 `Capabilities` 声明,后者看 provider 既有 tools/vision 谓词。
+2. **Capability filter** — 按 opaque label 排除不声明能力的端点;全不满足则 `CapabilityError`(无网络 I/O)
+3. **复用 active** — 健康且 capable 则继续用
+4. **冻结策略序** — 否则按策略排一次序,沿序 failover
+5. **调用内重试** — 对当前端点指数退避,耗尽则判 dead 并换下一个
 
 流式:仅**建流**受路由保护;流建立后 release 池 slot,中途错误不 retry、不改 health。
 

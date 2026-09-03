@@ -73,11 +73,7 @@ func NewDebugMiddleware(sink DebugSink) *DebugMiddleware {
 
 // Wrap implements Middleware.
 func (m *DebugMiddleware) Wrap(next largemodel.Caller) largemodel.Caller {
-	return &largemodel.CallerFunc{
-		Proto:      next.Protocol(),
-		Chat:       m.call(next),
-		ChatStream: m.callStream(next),
-	}
+	return largemodel.BindCaller(next, m.call(next), m.callStream(next))
 }
 
 func (m *DebugMiddleware) call(next largemodel.Caller) func(ctx context.Context, req *largemodel.Request) (*largemodel.Response, error) {
@@ -172,14 +168,20 @@ func requestFields(req *largemodel.Request, streamed bool) map[string]any {
 	}
 
 	return map[string]any{
-		"model":          req.Model,
-		"messages":       req.Messages,
-		"tools":          req.Tools,
-		"temperature":    req.Temperature,
-		"max_tokens":     req.MaxTokens,
-		"stream":         streamed,
-		"prompt_caching": req.PromptCaching,
-		"stop":           req.Stop,
+		"model":               req.Model,
+		"messages":            req.Messages,
+		"tools":               req.Tools,
+		"temperature":         req.Temperature,
+		"max_tokens":          req.MaxTokens,
+		"stream":              streamed,
+		"prompt_caching":      req.PromptCaching,
+		"stop":                req.Stop,
+		"top_p":               req.TopP,
+		"seed":                req.Seed,
+		"frequency_penalty":   req.FrequencyPenalty,
+		"presence_penalty":    req.PresencePenalty,
+		"tool_choice":         req.ToolChoice,
+		"provider_extensions": req.ProviderExtensions,
 	}
 }
 

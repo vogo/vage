@@ -6,7 +6,7 @@
 
 | 领域 | 职责 | 覆盖包 |
 |------|------|--------|
-| [model](model/model.md) | LLM 中间件装饰链、上下文编辑、预算/溢出治理 | `largemodel` |
+| [model](model/model.md) | LLM 中间件装饰链、能力协商、上下文编辑、预算/溢出治理 | `largemodel`、`largemodel/structured` |
 | [tooling](tooling/tooling.md) | 工具系统、MCP client/server 协议、Agent Skills | `tool`、`mcp`、`skill` |
 
 ## 共享上下文

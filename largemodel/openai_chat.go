@@ -34,5 +34,12 @@ type OpenAIChatBackend = openais.ChatCompleter
 // and usage normalization, stream decoding, error classification — lives in
 // the provider codec; this file only names the seam.
 func newOpenAIChatCaller(backend OpenAIChatBackend) Caller {
-	return &codecCaller{codec: openais.NewChatCodec(backend)}
+	c := &codecCaller{codec: openais.NewChatCodec(backend)}
+	if cp, ok := backend.(openais.CapabilityProvider); ok {
+		from := cp.ComposeCapability()
+		c.caps = fromProviderBools(from.Tools, from.Vision)
+		c.hasCaps = true
+	}
+
+	return c
 }

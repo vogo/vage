@@ -123,6 +123,40 @@ func TestEncodeMixedContentBlocks(t *testing.T) {
 
 // TestEncodeRejectsFileID pins the documented gap: Anthropic Messages has no
 // FileID wire shape, so encoding must fail before any backend call.
+func TestEncodeConstructorBuiltParts(t *testing.T) {
+	imgURL, err := schema.ImageFromURL("https://example.com/cat.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imgBytes, err := schema.ImageFromBytes([]byte{0x89, 0x50, 0x4e, 0x47}, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileBytes, err := schema.FileFromBytes([]byte("%PDF"), "application/pdf", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := schema.NewUserMessageWithParts(schema.ProtocolAnthropicMessages, []schema.MessagePart{
+		{Type: schema.MessagePartText, Text: "see"},
+		imgURL, imgBytes, fileBytes,
+	})
+	if _, err := EncodeAnthropicMessage(msg); err != nil {
+		t.Fatalf("EncodeAnthropicMessage: %v", err)
+	}
+
+	fileID, err := schema.FileFromID("file-abc123")
+	if err != nil {
+		t.Fatalf("canonical FileID must be allowed: %v", err)
+	}
+
+	if _, err := EncodeAnthropicMessage(schema.NewUserMessageWithParts(schema.ProtocolAnthropicMessages, []schema.MessagePart{fileID})); err == nil {
+		t.Fatal("Anthropic must still reject FileID")
+	}
+}
+
 func TestEncodeRejectsFileID(t *testing.T) {
 	msg := schema.NewUserMessageWithParts(schema.ProtocolAnthropicMessages, []schema.MessagePart{
 		{Type: schema.MessagePartFile, FileID: "file-abc123"},

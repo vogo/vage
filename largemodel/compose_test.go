@@ -930,3 +930,45 @@ func TestNewCaller_IsAPoolOfOne(t *testing.T) {
 		t.Errorf("Stats() = %+v, want the single endpoint judged dead", stats)
 	}
 }
+
+// TestComposeCaller_StrictCapabilitiesDoesNotUnionEndpoints proves a
+// declared-unknown primary is not treated as capable just because a backup
+// declared native tools: strict mode must keep the call off the unknown
+// endpoint before any HTTP.
+func TestComposeCaller_StrictCapabilitiesDoesNotUnionEndpoints(t *testing.T) {
+	unknown := newCountingServer(t, http.StatusOK, openAITextReply, 0)
+	native := newCountingServer(t, http.StatusOK, openAITextReply, 0)
+
+	caller, err := BuildCaller(OpenAIConfig{
+		Strategy: StrategyFailover,
+		Endpoints: []OpenAIEndpoint{
+			{Alias: "unknown", APIKey: "test-key", BaseURL: unknown.URL, Model: "model-a"},
+			{
+				Alias:        "native",
+				APIKey:       "test-key",
+				BaseURL:      native.URL,
+				Model:        "model-b",
+				Capabilities: &Capabilities{ToolCalling: SupportNative},
+			},
+		},
+	}, fastRouting())
+	if err != nil {
+		t.Fatalf("BuildCaller: %v", err)
+	}
+
+	_, err = RequireNativeCapabilities(caller).Call(context.Background(), &Request{
+		Messages: []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
+		Tools:    []schema.ToolDef{{Name: "lookup"}},
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	if unknown.hits.Load() != 0 {
+		t.Fatalf("unknown endpoint hits = %d, want 0", unknown.hits.Load())
+	}
+
+	if native.hits.Load() != 1 {
+		t.Fatalf("native endpoint hits = %d, want 1", native.hits.Load())
+	}
+}

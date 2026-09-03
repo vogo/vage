@@ -39,7 +39,9 @@ var ErrEmptyResponse = modelcore.ErrEmptyResponse
 // type, a stop reason or an error body — every one of those decisions belongs
 // to the codec it wraps.
 type codecCaller struct {
-	codec modelcore.Codec
+	codec   modelcore.Codec
+	caps    Capabilities
+	hasCaps bool
 }
 
 // Protocol implements Caller.
@@ -47,7 +49,12 @@ func (c *codecCaller) Protocol() schema.Protocol { return c.codec.Protocol() }
 
 // Call implements Caller.
 func (c *codecCaller) Call(ctx context.Context, req *Request) (*Response, error) {
-	result, err := c.codec.Call(ctx, codecRequest(req))
+	prepared, err := c.prepare(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := c.codec.Call(ctx, codecRequest(prepared))
 	if err != nil {
 		return nil, apiError(err)
 	}
@@ -63,7 +70,12 @@ func (c *codecCaller) Call(ctx context.Context, req *Request) (*Response, error)
 
 // CallStream implements Caller.
 func (c *codecCaller) CallStream(ctx context.Context, req *Request) (*Stream, error) {
-	stream, err := c.codec.CallStream(ctx, codecRequest(req))
+	prepared, err := c.prepare(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := c.codec.CallStream(ctx, codecRequest(prepared))
 	if err != nil {
 		return nil, apiError(err)
 	}
@@ -78,20 +90,60 @@ func (c *codecCaller) CallStream(ctx context.Context, req *Request) (*Stream, er
 	}, stream.Close), nil
 }
 
+func (c *codecCaller) prepare(ctx context.Context, req *Request) (*Request, error) {
+	if err := validateToolChoice(req); err != nil {
+		return nil, err
+	}
+
+	if req == nil || req.ResponseSchema == nil {
+		return req, nil
+	}
+
+	if c.codec.NativeStructuredOutput() {
+		return req, nil
+	}
+
+	if modelcore.PromptFallback(ctx) {
+		return degradeResponseSchemaPrompt(c.Protocol(), req)
+	}
+
+	model := ""
+	if req != nil {
+		model = req.Model
+	}
+
+	return nil, &CapabilityError{
+		Protocol:    c.Protocol(),
+		Model:       model,
+		Required:    Requirements{StructuredOutput: SupportNative},
+		Unsatisfied: []string{"structured_output"},
+	}
+}
+
 // codecRequest projects the public request onto the codec bridge. Slices are
 // shared rather than copied: a codec treats the request as read-only, exactly
 // as the middleware chain above already does.
 func codecRequest(req *Request) *modelcore.Request {
-	return &modelcore.Request{
-		Model:          req.Model,
-		Messages:       req.Messages,
-		Tools:          req.Tools,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
-		Stop:           req.Stop,
-		PromptCaching:  req.PromptCaching,
-		ResponseSchema: req.ResponseSchema,
+	out := &modelcore.Request{
+		Model:              req.Model,
+		Messages:           req.Messages,
+		Tools:              req.Tools,
+		Temperature:        req.Temperature,
+		MaxTokens:          req.MaxTokens,
+		TopP:               req.TopP,
+		Seed:               req.Seed,
+		FrequencyPenalty:   req.FrequencyPenalty,
+		PresencePenalty:    req.PresencePenalty,
+		Stop:               req.Stop,
+		PromptCaching:      req.PromptCaching,
+		ResponseSchema:     req.ResponseSchema,
+		ProviderExtensions: req.ProviderExtensions,
 	}
+	if req.ToolChoice != nil {
+		out.ToolChoice = &modelcore.ToolChoice{Mode: string(req.ToolChoice.Mode), Name: req.ToolChoice.Name}
+	}
+
+	return out
 }
 
 // publicChunk projects a decoded chunk onto the public envelope.
@@ -124,6 +176,14 @@ func publicChunk(chunk *modelcore.Chunk) *Chunk {
 // codec did not classify — transport failures, a cancelled context, io.EOF at
 // the end of a stream — pass through untouched.
 func apiError(err error) error {
+	if unsupported, ok := errors.AsType[*modelcore.UnsupportedParameterError](err); ok {
+		return &UnsupportedParameterError{
+			Protocol:  unsupported.Protocol,
+			Parameter: unsupported.Parameter,
+			Err:       err,
+		}
+	}
+
 	var classified *modelcore.APIError
 	if !errors.As(err, &classified) {
 		return err
@@ -138,4 +198,15 @@ func apiError(err error) error {
 	}
 }
 
-var _ Caller = (*codecCaller)(nil)
+var (
+	_ Caller             = (*codecCaller)(nil)
+	_ CapabilityProvider = (*codecCaller)(nil)
+)
+
+func (c *codecCaller) Capabilities(_ context.Context, _ *Request) (Capabilities, error) {
+	if !c.hasCaps {
+		return Capabilities{}, nil
+	}
+
+	return c.caps, nil
+}
