@@ -9,7 +9,8 @@ A Go framework for building LLM-based intelligent agent systems.
 ## Features
 
 - **Composable Agents** — TaskAgent (ReAct tool-calling), RouterAgent (routing), WorkflowAgent (DAG orchestration), and CustomAgent (user-defined)
-- **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling
+- **DAG Orchestration** — Parallel execution, loops, conditionals, compensation (Saga), checkpointing, backpressure, priority scheduling (`orchestrate` + WorkflowAgent)
+- **Typed Workflow State** — Generic `workflow.New[S]` over an application struct; parallel writes to the same Field fail at merge. Incremental to the DAG API, and not `agent/workflowagent`
 - **Cross-Process Interrupt & Resume** — Suspend a tool batch before it runs, persist it, and let a different process inject a human decision and resume from exactly that batch
 - **Three-Level Memory** — Working (request) → Session (conversation) → Store (long-term; durability depends on the backend), with context compression and token budgets. One `memory.Manager` can be reused across sessions: session data is isolated by the caller-declared `(agentID, sessionID)` pair.
 - **Security Guardrails** — Prompt injection, content filter, PII, topic, length, and custom guards
@@ -632,6 +633,52 @@ the legacy `New` / `Quick` — never a silent no-op — and this is deliberately
 not a wrapper around `ask_user`'s blocking mode or `checkpoint`'s crash-replay
 `Resume(sessionID)`: all three answer different questions and none
 substitutes for another (see [doc/glossary.md](doc/glossary.md) — "Interrupt").
+
+## Typed Workflow State
+
+`agent/workflowagent` still runs a DAG of `RunRequest`/`RunResponse` values.
+When several nodes should share one business struct instead of stuffing
+fields into `RunResponse.Metadata`, use the separate `workflow` package:
+
+```go
+type Ticket struct {
+	Query    string
+	Category string
+	Reply    string
+}
+
+var (
+	query = workflow.NewField("query",
+		func(s Ticket) string { return s.Query },
+		func(s *Ticket, v string) { s.Query = v },
+	)
+	category = workflow.NewField("category",
+		func(s Ticket) string { return s.Category },
+		func(s *Ticket, v string) { s.Category = v },
+	)
+)
+
+classify := workflow.AdaptRunner(classifier,
+	func(snap workflow.Snapshot[Ticket]) (*schema.RunRequest, error) {
+		return &schema.RunRequest{
+			Messages: []schema.Message{
+				schema.NewUserMessage(schema.ProtocolOpenAIChat, workflow.Get(snap, query)),
+			},
+		}, nil
+	},
+	func(_ workflow.Snapshot[Ticket], resp *schema.RunResponse) (workflow.Patch[Ticket], error) {
+		return workflow.NewPatch(workflow.Set(category, resp.Messages[0].Text())), nil
+	},
+)
+```
+
+Nodes in the same ready set see one committed snapshot. Two of them writing
+the same Field is a merge error (`workflow.ErrWriteConflict`); later batches
+may write that Field in order. Getters for maps, slices, or pointers must
+return an immutable value or a copy — the scheduler does not deep-copy `S`.
+This run is process-local: there is no durable workflow document and no
+visual editor. The runnable SupportFlow lives in
+[`workflow/example_test.go`](workflow/example_test.go).
 
 ## License
 
