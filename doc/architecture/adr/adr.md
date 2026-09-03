@@ -42,3 +42,4 @@ ReAct 热路径上的拦截/装饰平面已记录在 [agent-core-design.md](../.
 - 上下文编辑采用"收敛策略单一判定点 + V1 兼容层隔离"。
 - DAG 执行器"锁契约收尾单点"(错误与取消收敛到同一收尾路径)。
 - An independent `interrupt` state machine, rather than extending `checkpoint.IterationStore`, carries the cross-process human-in-the-loop suspend (`agent/taskagent` interrupt/resume). See [0001-interrupt-independent-state-machine.md](0001-interrupt-independent-state-machine.md).
+- Session memory is namespaced by caller-declared `(agentID, sessionID)` rather than bare `msg:` keys, so a shared Manager/Store cannot mix sessions. See [0002-session-memory-namespace.md](0002-session-memory-namespace.md).

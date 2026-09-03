@@ -110,6 +110,22 @@ func (mgr *Manager) Session() Memory {
 	return mgr.session
 }
 
+// ForSession returns a lightweight view bound to (agentID, sessionID).
+// The view shares the original backend, promoter, archiver, compressor,
+// and session-tier mutex; it does not mutate mgr. Calling ForSession on a
+// view replaces identity rather than stacking prefixes. Long-term store
+// identity is unchanged (cross-session).
+func (mgr *Manager) ForSession(agentID, sessionID string) *Manager {
+	if mgr == nil {
+		return nil
+	}
+	view := *mgr
+	if rebinder, ok := mgr.session.(sessionRebinder); ok {
+		view.session = rebinder.forSession(agentID, sessionID)
+	}
+	return &view
+}
+
 // Store returns the store-tier memory, or nil if not configured.
 func (mgr *Manager) Store() Memory {
 	return mgr.store

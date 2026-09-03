@@ -17,6 +17,8 @@
 
 package memory
 
+import "sync"
+
 // SessionMemory is a per-session in-process memory store.
 // It is safe for concurrent use.
 type SessionMemory struct {
@@ -26,6 +28,12 @@ type SessionMemory struct {
 // Compile-time check: SessionMemory implements Memory.
 var _ Memory = (*SessionMemory)(nil)
 
+// sessionRebinder is implemented by SessionMemory so Manager.ForSession can
+// rebind identity onto the same Store and mutex without stacking prefixes.
+type sessionRebinder interface {
+	forSession(agentID, sessionID string) Memory
+}
+
 // NewSessionMemory creates a new SessionMemory backed by an in-memory MapStore.
 func NewSessionMemory(agentID, sessionID string) *SessionMemory {
 	return NewSessionMemoryWithStore(NewMapStore(), agentID, sessionID)
@@ -33,10 +41,28 @@ func NewSessionMemory(agentID, sessionID string) *SessionMemory {
 
 // NewSessionMemoryWithStore creates a new SessionMemory backed by the given Store.
 func NewSessionMemoryWithStore(store Store, agentID, sessionID string) *SessionMemory {
-	return &SessionMemory{syncMemory: syncMemory{memoryBase: memoryBase{
-		store:     store,
-		scope:     ScopeSession,
-		agentID:   agentID,
-		sessionID: sessionID,
-	}}}
+	return &SessionMemory{syncMemory: syncMemory{
+		mu: new(sync.Mutex),
+		memoryBase: memoryBase{
+			store:     store,
+			scope:     ScopeSession,
+			agentID:   agentID,
+			sessionID: sessionID,
+		},
+	}}
+}
+
+// forSession returns a SessionMemory that shares this instance's Store and
+// mutex but uses the given identity. Calling it on a view replaces identity
+// rather than nesting prefixes.
+func (m *SessionMemory) forSession(agentID, sessionID string) Memory {
+	return &SessionMemory{syncMemory: syncMemory{
+		mu: m.mu,
+		memoryBase: memoryBase{
+			store:     m.store,
+			scope:     ScopeSession,
+			agentID:   agentID,
+			sessionID: sessionID,
+		},
+	}}
 }

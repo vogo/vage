@@ -47,22 +47,21 @@ func (m *WorkingMemory) Get(ctx context.Context, key string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	v, _, err := m.store.Get(ctx, key)
-	return v, err
+	return m.get(ctx, key)
 }
 
 func (m *WorkingMemory) Set(ctx context.Context, key string, value any, ttl int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return m.store.Set(ctx, key, value, ttl)
+	return m.set(ctx, key, value, ttl)
 }
 
 func (m *WorkingMemory) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return m.store.Delete(ctx, key)
+	return m.delete(ctx, key)
 }
 
 func (m *WorkingMemory) List(ctx context.Context, prefix string) ([]Entry, error) {

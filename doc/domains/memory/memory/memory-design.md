@@ -30,6 +30,12 @@
 - **能力契约与构造期 fail-fast**:`DurableStore`(`Durability()` 等级化自报)与 `AtomicStore`(`CompareAndSwap`)是可选接口;`RequireDurableStore`/`RequireAtomicStore` 缺能力时返回点名能力、后端类型与出路的可行动错误。`MapStore` 不实现新接口也不自我声明——缺失即被拒绝。等级校验要求自报 ≥ `DurabilityRestart`,防止"实现了接口却只自报进程内"的绕行。
 - **selector 元数据来源 = 结构化 Value(duck-typed)**:`Entry` 是底层记录重建的只读投影、`Memory.Set` 无 metadata 通道,故不扩 `Entry`。谓词从 `e.Value` 读取 `Importance() float64` / `Tags() []string` 可选接口;未实现的值在选择性谓词下**不匹配**(被过滤)。谁配置选择性 Promoter/Archiver,谁就让对应值携带元数据。
 - **组合谓词的恒等律与装配期失败**:`And()` 空参恒真、`Or()` 空参恒假(保持组合恒等律);`PromoteWhen(nil)`/`ArchiveWhen(nil)` 及 `And`/`Or` 的 nil 成员在构造期 panic,把运行期 nil deref 提前到装配期。
+- **ForSession 视图,而非 ScopedStore**:`Manager.ForSession(agentID, sessionID)` 返回轻量视图,共享原 Manager 的后端、promoter、archiver、compressor 以及 session 层互斥锁,只把 session 数据访问 rebound 到该二元组。原 Manager 不被修改;对视图再 `ForSession` 是替换身份,不叠加前缀。`Store` 接口保持原样,不引入 adapter。
+- **逻辑键与物理键分离**:Memory API 继续使用逻辑键(如 `msg:000001`)。底层键为 `mem:<tier>:<agent>:<session>:<logical-key>`,其中 agent/session 段是 ID UTF-8 字节的无填充 base64url,避免分隔符伪造与前缀碰撞。session / working 必须带两个身份段;长期 store tier 身份段为空,因而仍跨 session,但不会与 session 数据或无关键落在同一前缀。List / BatchGet 对调用方只返回逻辑键。
+- **作用域清理**:session/store 层的 `Clear` 只 List 当前物理前缀再逐项 Delete,禁止 `store.Clear()`,以免清空共享后端或其他 scope。List 失败则不删除;Delete 失败向调用方返回,已成功的删除不回滚。
+- **空 SessionID 与 checkpoint 命名空间**:读侧(`SessionMemorySource`)与写侧(TaskAgent 提升)在空 SessionID 时跳过 session 记忆,不降级到裸 `msg:` 命名空间。`Resume` 仍用查询参数定位 checkpoint,但加载成功后以记录的 `Checkpoint.SessionID` 为恢复后 memory scope / 事件 / 响应的权威值;与查询参数冲突时 checkpoint 赢并 `slog.Warn`。
+- **同 session 并发 Run 的 offset 覆盖(已知限制)**:新消息的 `msg:%06d` 以当前视图读到的历史条数为偏移。同一 `(agentID, sessionID)` 下两个并发 Run 可能读到相同长度并写入同一逻辑键,后者覆盖前者。第一阶段不把 RunID 纳入隔离键,也不在此修复该竞态。
+- **有意的 keyspace 断裂**:升级后旧版本写入的裸 `msg:` 键不会被新读路径发现,也没有存量迁移或读侧 fallback。需要保留历史的部署须在升级前自行按新 scope 重写。决策记录见 [0002-session-memory-namespace](../../../architecture/adr/0002-session-memory-namespace.md)。
 
 ## 与上下文编辑的分工
 

@@ -41,6 +41,7 @@
 | MEM-4 | **事实与提示分离**:Source 只读取事实来源,不改写它们;装配结果不回写记忆。 |
 | MEM-5 | **压缩可组合**:多个压缩器可串成链,按序施加,每个只负责单一维度。 |
 | MEM-6 | **选择性提升/归档不丢源**:`PromoteWhen`/`ArchiveWhen` 只过滤不删除——不匹配谓词的条目留在原层,归档不触碰 session 源数据;谓词元数据由 `Value` 自行携带(`Importance() float64` / `Tags() []string`),未携带者在选择性谓词下不匹配。 |
+| MEM-7 | **会话记忆按声明的二元组隔离**:不同 `(agentID, sessionID)` 的 session 记忆在读、写、提升和清理上互不可见。scope 是调用方传入的身份声明,不是 TenantID/UserID 授权。空 SessionID 跳过 session 记忆(Run 照常执行)。同一二元组下并发 Run 仍可能用相同 `msg:%06d` 偏移互相覆盖——该限制本阶段不修。 |
 
 ## 状态与转换
 
