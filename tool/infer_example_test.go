@@ -27,6 +27,9 @@ import (
 
 // ExampleInfer shows the struct -> Infer -> Register flow, with the inferred
 // tool coexisting alongside a hand-written one in the same registry.
+// Infer keeps the original panic-on-illegal-type contract. New static
+// declarations should prefer MustInfer; dynamic registration should use
+// Compile (see ExampleCompile).
 func ExampleInfer() {
 	type grepArgs struct {
 		Pattern string `json:"pattern" jsonschema_description:"Regular expression to search for"`
@@ -66,4 +69,71 @@ func ExampleInfer() {
 	// Output:
 	// search "foo" under ""
 	// pong
+}
+
+// ExampleMustInfer is the explicit panic constructor for static declarations
+// where an illegal parameter type is a programming mistake. It shares
+// Compile's construction path and panics with the same payload as Infer.
+func ExampleMustInfer() {
+	type echoArgs struct {
+		Text string `json:"text"`
+	}
+
+	def, handler := tool.MustInfer("echo", "echo the text",
+		func(_ context.Context, a echoArgs) (schema.ToolResult, error) {
+			return schema.TextResult("", a.Text), nil
+		})
+
+	reg := tool.NewRegistry()
+	_ = reg.Register(def, handler)
+
+	res, err := reg.Execute(context.Background(), "echo", `{"text":"hi"}`)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(res.Content[0].Text)
+
+	// Output:
+	// hi
+}
+
+// ExampleCompile shows recoverable construction for batch registration: an
+// illegal definition returns an error, the caller skips it, and later tools
+// still register. Prefer Compile whenever a single bad type must not abort
+// the rest of the catalog. Successful products are the same ToolDef+Handler
+// pair Register already accepts.
+func ExampleCompile() {
+	type grepArgs struct {
+		Pattern string `json:"pattern" jsonschema_description:"Regular expression to search for"`
+		Path    string `json:"path,omitempty"`
+	}
+
+	reg := tool.NewRegistry()
+
+	_, _, err := tool.Compile("bad", "illegal argument type",
+		func(context.Context, int) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+	if err != nil {
+		fmt.Println("skipped bad tool")
+	}
+
+	def, handler, err := tool.Compile("grep", "Search a file for a pattern",
+		func(_ context.Context, a grepArgs) (schema.ToolResult, error) {
+			return schema.TextResult("", fmt.Sprintf("search %q under %q", a.Pattern, a.Path)), nil
+		})
+	if err != nil {
+		panic(err)
+	}
+	_ = reg.Register(def, handler)
+
+	res, err := reg.Execute(context.Background(), "grep", `{"pattern":"foo"}`)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(res.Content[0].Text)
+
+	// Output:
+	// skipped bad tool
+	// search "foo" under ""
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
 	"github.com/vogo/vage/schema"
+	"github.com/vogo/vage/tool"
 	"github.com/vogo/vage/workspace"
 )
 
@@ -181,6 +182,44 @@ func ExampleWithParamResolver() {
 
 	fmt.Println(resp.Messages[len(resp.Messages)-1].Text())
 	// Output: ok
+}
+
+// Example_compileToolsForAgent attaches inferred tools to a TaskAgent.
+// Compile is the recoverable entry for dynamic catalogs: skip a single
+// illegal type and keep registering. MustInfer (or Infer) is for static
+// declarations where a bad type is a programming mistake.
+func Example_compileToolsForAgent() {
+	type echoArgs struct {
+		Text string `json:"text"`
+	}
+
+	reg := tool.NewRegistry()
+
+	_, _, err := tool.Compile("bad", "illegal argument type",
+		func(context.Context, int) (schema.ToolResult, error) {
+			return schema.ToolResult{}, nil
+		})
+	fmt.Println("skipped illegal tool:", err != nil)
+
+	def, handler, err := tool.Compile("echo", "echo the text",
+		func(_ context.Context, a echoArgs) (schema.ToolResult, error) {
+			return schema.TextResult("", a.Text), nil
+		})
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = reg.Register(def, handler)
+
+	a := taskagent.New(
+		agent.Config{ID: "assistant", Name: "Assistant"},
+		taskagent.WithCaller(exampleCaller("done")),
+		taskagent.WithModel("gpt-4o"),
+		taskagent.WithToolRegistry(reg),
+	)
+	fmt.Println(len(a.Tools()), a.Tools()[0].Name)
+	// Output:
+	// skipped illegal tool: true
+	// 1 echo
 }
 
 // ExampleWithContextBudget_deepAgent wires workspace, unified window budget,

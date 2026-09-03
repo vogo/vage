@@ -27,8 +27,14 @@ import (
 	"github.com/vogo/vage/schema"
 )
 
-// Infer derives a schema.ToolDef and ToolHandler from a parameter struct T,
-// keeping the schema and the argument decoding contract in one place.
+// Compile derives a schema.ToolDef and ToolHandler from a parameter struct T
+// and returns a construction error instead of panicking.
+//
+// Use Compile when a single illegal definition should be skipped — dynamic
+// discovery, batch registration, or any caller that can handle the error.
+// On failure the ToolDef is zero and the handler is nil; do not register or
+// invoke that result. Type-inference errors include the tool name and the
+// unsupported Go type; field-level errors also keep the field path.
 //
 // Parameters is a JSON object schema inferred from T's exported fields: names
 // follow json tags, fields without omitempty are required, and descriptions
@@ -38,29 +44,32 @@ import (
 // handler is bound to name and fn: it decodes args into a fresh T per call and
 // forwards the original context and decoded value to fn.
 //
-// Types whose JSON shape cannot be derived — non-struct roots, non-string map
-// keys, interfaces, recursive types, custom JSON marshaling — panic at
-// construction with the tool name and offending type.
-//
-// Infer is purely additive: existing hand-written ToolDef/ToolHandler pairs,
-// the Registry, and existing tools are unaffected.
-func Infer[T any](name, desc string, fn func(context.Context, T) (schema.ToolResult, error)) (schema.ToolDef, ToolHandler) {
+// JSON decoding errors and business-function errors are handler errors, not
+// construction errors; Compile does not change their wrapping or call
+// semantics. Schema inference itself is unchanged: types whose JSON shape
+// cannot be derived still fail construction.
+func Compile[T any](name, desc string, fn func(context.Context, T) (schema.ToolResult, error)) (schema.ToolDef, ToolHandler, error) {
 	if fn == nil {
-		panic(fmt.Sprintf("tool %q: Infer requires a non-nil handler function", name))
+		return schema.ToolDef{}, nil, fmt.Errorf("tool %q: Infer requires a non-nil handler function", name)
 	}
 	t := reflect.TypeFor[T]()
 	if t.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("tool %q: unsupported argument type %v: Infer requires a non-pointer struct type", name, t))
+		return schema.ToolDef{}, nil, fmt.Errorf("tool %q: unsupported argument type %v: Infer requires a non-pointer struct type", name, t)
 	}
 	if implementsCustomJSON(t) {
-		panic(fmt.Sprintf("tool %q: unsupported argument type %v: custom JSON marshaling cannot be inferred", name, t))
+		return schema.ToolDef{}, nil, fmt.Errorf("tool %q: unsupported argument type %v: custom JSON marshaling cannot be inferred", name, t)
+	}
+
+	params, err := (&schemaBuilder{name: name, visiting: make(map[reflect.Type]bool)}).structSchema(t)
+	if err != nil {
+		return schema.ToolDef{}, nil, err
 	}
 
 	def := schema.ToolDef{
 		Name:        name,
 		Description: desc,
 		Source:      schema.ToolSourceLocal,
-		Parameters:  (&schemaBuilder{name: name, visiting: make(map[reflect.Type]bool)}).structSchema(t),
+		Parameters:  params,
 	}
 
 	handler := func(ctx context.Context, _ string, args string) (schema.ToolResult, error) {
@@ -71,7 +80,43 @@ func Infer[T any](name, desc string, fn func(context.Context, T) (schema.ToolRes
 		return fn(ctx, in)
 	}
 
+	return def, handler, nil
+}
+
+// MustInfer derives a schema.ToolDef and ToolHandler from a parameter struct T
+// and panics if construction fails. It is Compile plus panic, for static
+// declarations where an illegal parameter type is a programming mistake.
+//
+// Prefer Compile when the caller can recover from one bad definition. Infer
+// remains the compatibility panic entry and delegates here; new static
+// declarations should call MustInfer so the name states that failure is fatal.
+func MustInfer[T any](name, desc string, fn func(context.Context, T) (schema.ToolResult, error)) (schema.ToolDef, ToolHandler) {
+	def, handler, err := Compile(name, desc, fn)
+	if err != nil {
+		// Panic the formatted string, not the error value, so the recoverable
+		// payload stays identical to the pre-Compile Infer constructor.
+		panic(err.Error())
+	}
 	return def, handler
+}
+
+// Infer derives a schema.ToolDef and ToolHandler from a parameter struct T,
+// keeping the schema and the argument decoding contract in one place.
+//
+// Infer is the compatibility constructor: it keeps the original signature and
+// panics at construction when the JSON shape of T cannot be derived — non-struct
+// roots, non-string map keys, interfaces, recursive types, custom JSON
+// marshaling, or a nil handler function — with the tool name and offending
+// type. It delegates to MustInfer. Existing call sites do not need to migrate.
+//
+// New static declarations should prefer MustInfer so the name states that
+// failure is fatal. Dynamic or batch registration should use Compile, which
+// returns the same successful product and an error instead of panicking.
+//
+// Infer is purely additive: existing hand-written ToolDef/ToolHandler pairs,
+// the Registry, and existing tools are unaffected.
+func Infer[T any](name, desc string, fn func(context.Context, T) (schema.ToolResult, error)) (schema.ToolDef, ToolHandler) {
+	return MustInfer(name, desc, fn)
 }
 
 var (
@@ -96,23 +141,28 @@ type fieldSpec struct {
 }
 
 // schemaBuilder reflects a struct into a JSON schema. It carries the tool name
-// for panic messages and a visiting set that detects recursive types.
+// for error messages and a visiting set that detects recursive types.
 type schemaBuilder struct {
 	name     string
 	visiting map[reflect.Type]bool
 }
 
 // structSchema derives a JSON object schema for struct type t.
-func (b *schemaBuilder) structSchema(t reflect.Type) any {
+func (b *schemaBuilder) structSchema(t reflect.Type) (any, error) {
 	if b.visiting[t] {
-		panic(fmt.Sprintf("tool %q: unsupported recursive type %v", b.name, t))
+		return nil, fmt.Errorf("tool %q: unsupported recursive type %v", b.name, t)
 	}
 	b.visiting[t] = true
 	defer delete(b.visiting, t)
 
+	fields, err := b.fields(t, "")
+	if err != nil {
+		return nil, err
+	}
+
 	properties := make(map[string]any)
 	required := []string{}
-	for _, f := range b.fields(t, "") {
+	for _, f := range fields {
 		if _, exists := properties[f.name]; exists {
 			// Direct fields precede promoted ones, so the first wins.
 			continue
@@ -131,12 +181,12 @@ func (b *schemaBuilder) structSchema(t reflect.Type) any {
 	if len(required) > 0 {
 		node["required"] = required
 	}
-	return node
+	return node, nil
 }
 
 // fields returns JSON-visible fields in precedence order: direct fields first,
-// then fields promoted from anonymous embedded structs. path is for panics.
-func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
+// then fields promoted from anonymous embedded structs. path is for errors.
+func (b *schemaBuilder) fields(t reflect.Type, path string) ([]fieldSpec, error) {
 	var direct, promoted []fieldSpec
 
 	for sf := range t.Fields() {
@@ -165,7 +215,11 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 		// Flatten unnamed anonymous structs like encoding/json.
 		if sf.Anonymous {
 			if jsonName == "" && !implementsCustomJSON(sf.Type) && et.Kind() == reflect.Struct {
-				promoted = append(promoted, b.fields(et, fp)...)
+				nested, err := b.fields(et, fp)
+				if err != nil {
+					return nil, err
+				}
+				promoted = append(promoted, nested...)
 				continue
 			}
 			if jsonName == "" {
@@ -176,7 +230,10 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 			jsonName = sf.Name
 		}
 
-		node := b.typeSchema(fp, sf.Type)
+		node, err := b.typeSchema(fp, sf.Type)
+		if err != nil {
+			return nil, err
+		}
 		// Prefer jsonschema_description, falling back to description.
 		desc := sf.Tag.Get("jsonschema_description")
 		if desc == "" {
@@ -198,43 +255,59 @@ func (b *schemaBuilder) fields(t reflect.Type, path string) []fieldSpec {
 		})
 	}
 
-	return append(direct, promoted...)
+	return append(direct, promoted...), nil
 }
 
 // typeSchema maps a Go type to a JSON schema node.
-func (b *schemaBuilder) typeSchema(path string, t reflect.Type) any {
+func (b *schemaBuilder) typeSchema(path string, t reflect.Type) (any, error) {
 	if implementsCustomJSON(t) {
-		panic(fmt.Sprintf("tool %q: field %q: unsupported type %v: custom JSON marshaling cannot be inferred", b.name, path, t))
+		return nil, fmt.Errorf("tool %q: field %q: unsupported type %v: custom JSON marshaling cannot be inferred", b.name, path, t)
 	}
 	switch t.Kind() {
 	case reflect.Bool:
-		return map[string]any{"type": "boolean"}
+		return map[string]any{"type": "boolean"}, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return map[string]any{"type": "integer"}
+		return map[string]any{"type": "integer"}, nil
 	case reflect.Float32, reflect.Float64:
-		return map[string]any{"type": "number"}
+		return map[string]any{"type": "number"}, nil
 	case reflect.String:
-		return map[string]any{"type": "string"}
+		return map[string]any{"type": "string"}, nil
 	case reflect.Slice:
 		// encoding/json encodes []byte as a base64 string.
 		if t.Elem().Kind() == reflect.Uint8 {
-			return map[string]any{"type": "string"}
+			return map[string]any{"type": "string"}, nil
 		}
-		return map[string]any{"type": "array", "items": b.typeSchema(path, t.Elem())}
+		items, err := b.typeSchema(path, t.Elem())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"type": "array", "items": items}, nil
 	case reflect.Array:
-		return map[string]any{"type": "array", "items": b.typeSchema(path, t.Elem())}
+		items, err := b.typeSchema(path, t.Elem())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"type": "array", "items": items}, nil
 	case reflect.Map:
 		if t.Key().Kind() != reflect.String {
-			panic(fmt.Sprintf("tool %q: field %q: unsupported type %v: map keys must be strings", b.name, path, t))
+			return nil, fmt.Errorf("tool %q: field %q: unsupported type %v: map keys must be strings", b.name, path, t)
 		}
-		return map[string]any{"type": "object", "additionalProperties": b.typeSchema(path, t.Elem())}
+		values, err := b.typeSchema(path, t.Elem())
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"type": "object", "additionalProperties": values}, nil
 	case reflect.Pointer:
-		return makeNullable(b.typeSchema(path, t.Elem()))
+		inner, err := b.typeSchema(path, t.Elem())
+		if err != nil {
+			return nil, err
+		}
+		return makeNullable(inner), nil
 	case reflect.Struct:
 		return b.structSchema(t)
 	default:
-		panic(fmt.Sprintf("tool %q: field %q: unsupported type %v", b.name, path, t))
+		return nil, fmt.Errorf("tool %q: field %q: unsupported type %v", b.name, path, t)
 	}
 }
 
