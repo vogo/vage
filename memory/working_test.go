@@ -139,7 +139,7 @@ func TestWorkingMemory_TTLExpiry(t *testing.T) {
 	ctx := context.Background()
 
 	_ = m.Set(ctx, "expiring", "value", 1)
-	ms.SetCreatedAtForTest("expiring", time.Now().Add(-2*time.Second))
+	ms.SetCreatedAtForTest(m.physicalKey("expiring"), time.Now().Add(-2*time.Second))
 
 	val, _ := m.Get(ctx, "expiring")
 	if val != nil {
@@ -154,7 +154,7 @@ func TestWorkingMemory_TTLExpiryList(t *testing.T) {
 
 	_ = m.Set(ctx, "alive", "yes", 0)
 	_ = m.Set(ctx, "dead", "no", 1)
-	ms.SetCreatedAtForTest("dead", time.Now().Add(-2*time.Second))
+	ms.SetCreatedAtForTest(m.physicalKey("dead"), time.Now().Add(-2*time.Second))
 
 	entries, _ := m.List(ctx, "")
 	if len(entries) != 1 {
@@ -172,7 +172,7 @@ func TestWorkingMemory_TTLExpiryBatchGet(t *testing.T) {
 
 	_ = m.Set(ctx, "alive", "yes", 0)
 	_ = m.Set(ctx, "dead", "no", 1)
-	ms.SetCreatedAtForTest("dead", time.Now().Add(-2*time.Second))
+	ms.SetCreatedAtForTest(m.physicalKey("dead"), time.Now().Add(-2*time.Second))
 
 	result, _ := m.BatchGet(ctx, []string{"alive", "dead"})
 	if len(result) != 1 {

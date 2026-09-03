@@ -23,6 +23,9 @@ import (
 )
 
 // memoryBase holds the fields and helpers shared by all memory tiers.
+// Logical Memory keys are mapped to a physical Store keyspace so
+// co-located backends stay partitioned by tier and, for session/working,
+// by (agentID, sessionID).
 type memoryBase struct {
 	store     Store
 	scope     Scope
@@ -30,11 +33,28 @@ type memoryBase struct {
 	sessionID string
 }
 
-// list converts StoreEntry results into tier-annotated Entry values.
+func (b *memoryBase) get(ctx context.Context, key string) (any, error) {
+	v, _, err := b.store.Get(ctx, b.physicalKey(key))
+	return v, err
+}
+
+func (b *memoryBase) set(ctx context.Context, key string, value any, ttl int64) error {
+	return b.store.Set(ctx, b.physicalKey(key), value, ttl)
+}
+
+func (b *memoryBase) delete(ctx context.Context, key string) error {
+	return b.store.Delete(ctx, b.physicalKey(key))
+}
+
+// list converts StoreEntry results into tier-annotated Entry values with
+// logical keys restored so the Memory API never leaks the physical prefix.
 func (b *memoryBase) list(ctx context.Context, prefix string) ([]Entry, error) {
-	raw, err := b.store.List(ctx, prefix)
+	raw, err := b.store.List(ctx, b.physicalKey(prefix))
 	if err != nil {
 		return nil, err
+	}
+	for i := range raw {
+		raw[i].Key = b.logicalKey(raw[i].Key)
 	}
 	return b.toEntries(raw), nil
 }
@@ -58,31 +78,60 @@ func (b *memoryBase) toEntries(raw []StoreEntry) []Entry {
 }
 
 // batchGet delegates to BatchStore if available, otherwise falls back to
-// sequential Get calls.
+// sequential Get calls. Keys on the Memory API stay logical.
 func (b *memoryBase) batchGet(ctx context.Context, keys []string) (map[string]any, error) {
-	if bs, ok := b.store.(BatchStore); ok {
-		return bs.BatchGet(ctx, keys)
+	physical := make([]string, len(keys))
+	rev := make(map[string]string, len(keys))
+	for i, k := range keys {
+		pk := b.physicalKey(k)
+		physical[i] = pk
+		rev[pk] = k
 	}
-	result := make(map[string]any, len(keys))
-	for _, key := range keys {
-		v, found, err := b.store.Get(ctx, key)
-		if err != nil {
-			return nil, err
+
+	var (
+		raw map[string]any
+		err error
+	)
+	if bs, ok := b.store.(BatchStore); ok {
+		raw, err = bs.BatchGet(ctx, physical)
+	} else {
+		raw = make(map[string]any, len(keys))
+		for _, pk := range physical {
+			v, found, gerr := b.store.Get(ctx, pk)
+			if gerr != nil {
+				return nil, gerr
+			}
+			if found {
+				raw[pk] = v
+			}
 		}
-		if found {
-			result[key] = v
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]any, len(raw))
+	for pk, v := range raw {
+		if lk, ok := rev[pk]; ok {
+			result[lk] = v
+		} else {
+			result[b.logicalKey(pk)] = v
 		}
 	}
 	return result, nil
 }
 
 // batchSet delegates to BatchStore if available, otherwise falls back to
-// sequential Set calls.
+// sequential Set calls. Keys on the Memory API stay logical.
 func (b *memoryBase) batchSet(ctx context.Context, entries map[string]any, ttl int64) error {
-	if bs, ok := b.store.(BatchStore); ok {
-		return bs.BatchSet(ctx, entries, ttl)
-	}
+	physical := make(map[string]any, len(entries))
 	for key, value := range entries {
+		physical[b.physicalKey(key)] = value
+	}
+	if bs, ok := b.store.(BatchStore); ok {
+		return bs.BatchSet(ctx, physical, ttl)
+	}
+	for key, value := range physical {
 		if err := b.store.Set(ctx, key, value, ttl); err != nil {
 			return err
 		}
@@ -92,9 +141,10 @@ func (b *memoryBase) batchSet(ctx context.Context, entries map[string]any, ttl i
 
 // syncMemory wraps memoryBase with a mutex for concurrent use.
 // It implements the Memory interface and is embedded by SessionMemory
-// and LongTermMemory.
+// and LongTermMemory. mu is a pointer so ForSession views share the
+// original synchronisation domain (Store is single-goroutine-safe).
 type syncMemory struct {
-	mu sync.Mutex
+	mu *sync.Mutex
 	memoryBase
 }
 
@@ -107,8 +157,7 @@ func (m *syncMemory) Get(ctx context.Context, key string) (any, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	v, _, err := m.store.Get(ctx, key)
-	return v, err
+	return m.get(ctx, key)
 }
 
 func (m *syncMemory) Set(ctx context.Context, key string, value any, ttl int64) error {
@@ -117,7 +166,7 @@ func (m *syncMemory) Set(ctx context.Context, key string, value any, ttl int64) 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.store.Set(ctx, key, value, ttl)
+	return m.set(ctx, key, value, ttl)
 }
 
 func (m *syncMemory) Delete(ctx context.Context, key string) error {
@@ -126,7 +175,7 @@ func (m *syncMemory) Delete(ctx context.Context, key string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.store.Delete(ctx, key)
+	return m.delete(ctx, key)
 }
 
 func (m *syncMemory) List(ctx context.Context, prefix string) ([]Entry, error) {
@@ -138,13 +187,27 @@ func (m *syncMemory) List(ctx context.Context, prefix string) ([]Entry, error) {
 	return m.list(ctx, prefix)
 }
 
+// Clear deletes every key in this view's physical prefix. It never calls
+// Store.Clear, so sibling scopes and non-memory data on the same backend
+// stay intact. A List failure aborts before any Delete; a Delete failure
+// is returned without rolling back earlier deletes in this call.
 func (m *syncMemory) Clear(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.store.Clear(ctx)
+
+	raw, err := m.store.List(ctx, m.keyPrefix())
+	if err != nil {
+		return err
+	}
+	for i := range raw {
+		if err := m.store.Delete(ctx, raw[i].Key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *syncMemory) BatchGet(ctx context.Context, keys []string) (map[string]any, error) {

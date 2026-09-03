@@ -164,11 +164,18 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 		return nil, checkpoint.ErrAlreadyFinal
 	}
 
+	effectiveSessionID := cp.SessionID
+	if effectiveSessionID != sessionID {
+		slog.Warn("vage: resume session id differs from checkpoint",
+			"requested_session_id", sessionID,
+			"checkpoint_session_id", cp.SessionID)
+	}
+
 	p := a.resolveRunParams(nil)
 	agentID := a.ID()
 
 	rc := &runContext{
-		sessionID:  sessionID,
+		sessionID:  effectiveSessionID,
 		start:      time.Now(),
 		tracker:    newBudgetTracker(p.runTokenBudget),
 		totalUsage: cp.Usage,

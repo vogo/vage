@@ -33,8 +33,8 @@ import (
 // drop-in replacement for the previous loadAndCompressSessionHistory path.
 const DefaultSessionMemoryPrefix = "msg:"
 
-// SessionMemorySource loads ordered messages from
-// memory.Manager.Session() (the conversation-scoped tier), optionally
+// SessionMemorySource loads ordered messages from a
+// memory.Manager.ForSession view (the conversation-scoped tier), optionally
 // applies the manager's compressor, and emits the resulting message slice.
 //
 // FetchReport.OriginalCount is filled with the pre-compression count, which
@@ -54,7 +54,8 @@ func (s *SessionMemorySource) Name() string { return SourceNameSessionMemory }
 // Fetch loads, sorts, and compresses session-tier messages. List failures
 // and compressor failures are both fail-open: a slog.Warn is emitted, the
 // report is annotated, and the source returns whatever messages it could
-// recover (possibly none).
+// recover (possibly none). Missing Manager/session-tier or an empty
+// SessionID skip without touching the Store.
 func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchResult, error) {
 	rep := schema.ContextSourceReport{Source: SourceNameSessionMemory}
 
@@ -63,13 +64,20 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 		rep.Note = "no session memory"
 		return FetchResult{Report: rep}, nil
 	}
+	if in.SessionID == "" {
+		rep.Status = StatusSkipped
+		rep.Note = "no session"
+		return FetchResult{Report: rep}, nil
+	}
+
+	view := s.Manager.ForSession(in.AgentID, in.SessionID)
 
 	prefix := s.Prefix
 	if prefix == "" {
 		prefix = DefaultSessionMemoryPrefix
 	}
 
-	loaded, err := s.loadOrdered(ctx, prefix)
+	loaded, err := loadOrderedSession(ctx, view.Session(), prefix)
 	if err != nil {
 		// Fail-open: warn, mark report, return empty.
 		slog.Warn("vctx: load session messages", "error", err)
@@ -87,7 +95,7 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 		return FetchResult{Report: rep}, nil
 	}
 
-	if c := s.Manager.Compressor(); c != nil {
+	if c := view.Compressor(); c != nil {
 		compressed, compErr := c.Compress(ctx, loaded, 0)
 		if compErr != nil {
 			slog.Warn("vctx: compress session messages", "error", compErr)
@@ -116,12 +124,12 @@ func (s *SessionMemorySource) Fetch(ctx context.Context, in FetchInput) (FetchRe
 	return FetchResult{Messages: out, Report: rep}, nil
 }
 
-// loadOrdered fetches every entry under prefix, sorts by key, and converts
-// to schema.Message. Entries whose value is not a schema.Message are
-// skipped with a slog.Warn (matching prior taskagent behaviour). The
+// loadOrderedSession fetches every entry under prefix, sorts by key, and
+// converts to schema.Message. Entries whose value is not a schema.Message
+// are skipped with a slog.Warn (matching prior taskagent behaviour). The
 // caller is responsible for treating any error as fail-open.
-func (s *SessionMemorySource) loadOrdered(ctx context.Context, prefix string) ([]schema.Message, error) {
-	entries, err := s.Manager.Session().List(ctx, prefix)
+func loadOrderedSession(ctx context.Context, sess memory.Memory, prefix string) ([]schema.Message, error) {
+	entries, err := sess.List(ctx, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("vctx: list session: %w", err)
 	}

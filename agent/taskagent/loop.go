@@ -559,11 +559,13 @@ func (a *Agent) interruptSafeRespMsgs(rc *runContext, resp *schema.RunResponse) 
 // storeAndPromoteMessages stores request and response messages in working memory
 // and promotes them to session memory. sessionMsgCount is the original session
 // message count (pre-compression), used as key offset to avoid collisions.
+// An empty sessionID skips session writes entirely (Run still proceeds).
 func (a *Agent) storeAndPromoteMessages(ctx context.Context, sessionID string, reqMsgs, respMsgs []schema.Message, sessionMsgCount int) {
-	if a.memoryManager == nil {
+	if a.memoryManager == nil || sessionID == "" {
 		return
 	}
 
+	scoped := a.memoryManager.ForSession(a.ID(), sessionID)
 	working := memory.NewWorkingMemory(a.ID(), sessionID)
 
 	idx := sessionMsgCount
@@ -586,7 +588,7 @@ func (a *Agent) storeAndPromoteMessages(ctx context.Context, sessionID string, r
 		idx++
 	}
 
-	if err := a.memoryManager.PromoteToSession(ctx, working); err != nil {
+	if err := scoped.PromoteToSession(ctx, working); err != nil {
 		slog.Warn("vage: promote to session", "error", err)
 	}
 }

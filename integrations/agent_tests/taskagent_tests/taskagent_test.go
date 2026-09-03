@@ -211,7 +211,10 @@ func drainStream(rs *schema.RunStream) {
 }
 
 func runStreaming(a *taskagent.Agent, question string) {
-	rs, err := agent.RunStreamText(context.Background(), a, question)
+	rs, err := a.RunStream(context.Background(), &schema.RunRequest{
+		SessionID: "demo-session",
+		Messages:  []schema.Message{schema.NewUserMessage(a.Protocol(), question)},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

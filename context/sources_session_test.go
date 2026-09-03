@@ -46,13 +46,17 @@ func newSessionMemoryWithMsgs(t *testing.T, count int) *memory.Manager {
 	return memory.NewManager(memory.WithSession(sess))
 }
 
+func sessionFetchInput() FetchInput {
+	return FetchInput{AgentID: "agent", SessionID: "session"}
+}
+
 // TestSessionMemorySource_LoadOrdered verifies messages return in key-sort
 // order with OriginalCount populated.
 func TestSessionMemorySource_LoadOrdered(t *testing.T) {
 	mgr := newSessionMemoryWithMsgs(t, 3)
 	src := &SessionMemorySource{Manager: mgr}
 
-	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "session"})
+	res, err := src.Fetch(context.Background(), sessionFetchInput())
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -78,7 +82,7 @@ func TestSessionMemorySource_LoadOrdered(t *testing.T) {
 // skip — matches the legacy taskagent "no memory configured" branch.
 func TestSessionMemorySource_NoManager(t *testing.T) {
 	src := &SessionMemorySource{}
-	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	res, err := src.Fetch(context.Background(), sessionFetchInput())
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -96,7 +100,7 @@ func TestSessionMemorySource_EmptySession(t *testing.T) {
 	mgr := newSessionMemoryWithMsgs(t, 0)
 	src := &SessionMemorySource{Manager: mgr}
 
-	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	res, err := src.Fetch(context.Background(), sessionFetchInput())
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -119,7 +123,7 @@ func TestSessionMemorySource_Compressor(t *testing.T) {
 	mgr2 := memory.NewManager(memory.WithSession(mgr.Session()), memory.WithCompressor(comp))
 
 	src := &SessionMemorySource{Manager: mgr2}
-	res, err := src.Fetch(context.Background(), FetchInput{SessionID: "s"})
+	res, err := src.Fetch(context.Background(), sessionFetchInput())
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
@@ -137,5 +141,69 @@ func TestSessionMemorySource_Compressor(t *testing.T) {
 	if res.Messages[0].Text() != "turn 3" || res.Messages[1].Text() != "turn 4" {
 		t.Errorf("compressor kept wrong slice: %q / %q",
 			res.Messages[0].Text(), res.Messages[1].Text())
+	}
+}
+
+// panicStore fails the test if SessionMemorySource touches the backend
+// on a skip path.
+type panicStore struct{}
+
+func (panicStore) Get(context.Context, string) (any, bool, error) {
+	panic("store.Get")
+}
+
+func (panicStore) Set(context.Context, string, any, int64) error { panic("store.Set") }
+func (panicStore) Delete(context.Context, string) error          { panic("store.Delete") }
+func (panicStore) List(context.Context, string) ([]memory.StoreEntry, error) {
+	panic("store.List")
+}
+func (panicStore) Clear(context.Context) error { panic("store.Clear") }
+
+func TestSessionMemorySource_EmptySessionID_SkippedNoStore(t *testing.T) {
+	sess := memory.NewSessionMemoryWithStore(panicStore{}, "agent", "session")
+	src := &SessionMemorySource{Manager: memory.NewManager(memory.WithSession(sess))}
+
+	res, err := src.Fetch(context.Background(), FetchInput{AgentID: "agent", SessionID: ""})
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if res.Report.Status != StatusSkipped {
+		t.Errorf("Status = %q, want %q", res.Report.Status, StatusSkipped)
+	}
+	if len(res.Messages) != 0 {
+		t.Errorf("messages = %d, want 0", len(res.Messages))
+	}
+}
+
+func TestSessionMemorySource_ForSession_DoesNotLeak(t *testing.T) {
+	shared := memory.NewMapStore()
+	sess := memory.NewSessionMemoryWithStore(shared, "unused", "unused")
+	mgr := memory.NewManager(memory.WithSession(sess))
+	ctx := context.Background()
+
+	if err := mgr.ForSession("agent", "sA").Session().Set(ctx, "msg:000000",
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "secret-from-A"), 0); err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	if err := mgr.ForSession("agent", "sB").Session().Set(ctx, "msg:000000",
+		schema.NewUserMessage(schema.ProtocolOpenAIChat, "visible-B"), 0); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+
+	src := &SessionMemorySource{Manager: mgr}
+	res, err := src.Fetch(ctx, FetchInput{AgentID: "agent", SessionID: "sB"})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(res.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(res.Messages))
+	}
+	if res.Messages[0].Text() != "visible-B" {
+		t.Errorf("text = %q, want visible-B", res.Messages[0].Text())
+	}
+	for _, m := range res.Messages {
+		if m.Text() == "secret-from-A" {
+			t.Fatal("session B prompt leaked session A history")
+		}
 	}
 }

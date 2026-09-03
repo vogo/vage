@@ -54,6 +54,7 @@ func TestBuildReport_JSONRoundTrip(t *testing.T) {
 
 	res, err := builder.Build(ctx, vctx.BuildInput{
 		SessionID: "json-session",
+		AgentID:   "json",
 		Request: &schema.RunRequest{
 			SessionID: "json-session",
 			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "now")},
