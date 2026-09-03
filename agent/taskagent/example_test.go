@@ -152,3 +152,27 @@ func ExampleWithGuards() {
 	fmt.Println(err)
 	// Output: <nil>
 }
+
+// ExampleWithParamResolver installs the single construction-time slot that
+// runs after input guards and before tools are frozen. Resume does not call
+// it. Subject is an opaque audit string, not an auth principal.
+func ExampleWithParamResolver() {
+	a := taskagent.New(
+		agent.Config{ID: "assistant", Name: "Assistant"},
+		taskagent.WithCaller(exampleCaller("ok")),
+		taskagent.WithModel("gpt-4o"),
+		taskagent.WithParamResolver(func(_ context.Context, _ *schema.RunRequest, cur taskagent.RunParams) (taskagent.RunParams, error) {
+			cur.Subject = "tenant-acme"
+			cur.ToolMode = schema.ToolModeNone
+			return cur, nil
+		}),
+	)
+
+	resp, err := agent.RunText(context.Background(), a, "Hi")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(resp.Messages[len(resp.Messages)-1].Text())
+	// Output: ok
+}

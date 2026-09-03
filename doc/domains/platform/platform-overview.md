@@ -13,4 +13,4 @@
 
 - 护栏动作只有三态:Pass / Rewrite / Block(章程安全基线)。
 - 可观测的统一载体是 `schema.Event`,由 hook 分发。
-- HTTP 服务对外必须同时支持 sync、streaming、async 三种执行语义(章程运维原则)。
+- HTTP 服务对外必须同时支持 sync、streaming、async 三种执行语义(章程运维原则)。租户→Caller 绑定留在宿主,不进入 `service.Service`。

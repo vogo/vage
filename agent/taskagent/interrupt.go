@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/vogo/vage/interrupt"
@@ -308,7 +309,8 @@ func runParamsToEffective(p runParams) interrupt.EffectiveParams {
 		MaxIterations:  p.maxIter,
 		RunTokenBudget: p.runTokenBudget,
 		MaxTokens:      p.maxTokens,
-		ToolFilter:     p.toolFilter,
+		ToolMode:       p.toolMode,
+		ToolFilter:     slices.Clone(p.toolFilter),
 		StopSequences:  p.stopSeq,
 	}
 }
@@ -318,14 +320,20 @@ func runParamsToEffective(p runParams) interrupt.EffectiveParams {
 // config change on the resuming process cannot silently change the
 // remaining budget, tool scope, model or stop sequences mid-run.
 func effectiveParamsToRunParams(ep interrupt.EffectiveParams) runParams {
+	filter := ep.ToolFilter
+	if filter == nil {
+		filter = []string{}
+	}
 	return runParams{
 		model:          ep.Model,
 		temperature:    ep.Temperature,
 		maxIter:        ep.MaxIterations,
 		runTokenBudget: ep.RunTokenBudget,
 		maxTokens:      ep.MaxTokens,
-		toolFilter:     ep.ToolFilter,
+		toolMode:       ep.ToolMode,
+		toolFilter:     filter,
 		stopSeq:        ep.StopSequences,
+		toolsFrozen:    true,
 	}
 }
 
@@ -379,6 +387,7 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 	policy := policyResume
 
 	ctx = bindRunValues(ctx, policy)
+	ctx = schema.WithEventDispatcher(ctx, a.hookManager.Dispatch)
 
 	if _, err := a.preflightEntry(ctx, policy, nil); err != nil {
 		return nil, err
@@ -558,7 +567,7 @@ func (a *Agent) resumeFromInterrupt(ctx context.Context, rec *interrupt.Record, 
 		return resp, nil
 	}
 
-	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
+	aiTools := a.toolsForRun(p, rc.sessionID)
 	mode := &syncMode{a: a, ctx: ctx}
 
 	stopReason, err := a.runReactLoop(ctx, rc, p, messages, aiTools, mode, rec.Iteration+1)

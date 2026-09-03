@@ -625,6 +625,7 @@ func TestAgent_RunStream_ReturnDirect_NoSecondIteration(t *testing.T) {
 	want := []string{
 		schema.EventAgentStart,
 		schema.EventIterationStart,
+		schema.EventRouteSelected,
 		schema.EventToolCallStart,
 		schema.EventToolCallEnd,
 		schema.EventToolResult,

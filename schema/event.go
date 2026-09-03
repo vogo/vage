@@ -141,6 +141,28 @@ const (
 	// switch on EventCustom *and* CustomEventData.Name before interpreting
 	// the payload. The framework never mints new top-level types from Name.
 	EventCustom = "custom"
+
+	// EventParamsResolved fires after a fresh Run's parameters and tool
+	// set have been frozen and before context is built. Resume paths do
+	// not emit it.
+	EventParamsResolved = "params_resolved"
+
+	// EventRouteSelected fires when largemodel/router commits or reuses an
+	// active endpoint. Payload never carries credentials or endpoint config.
+	EventRouteSelected = "route_selected"
+
+	// EventToolExcluded fires when EnabledFunc returns an error for a
+	// candidate tool; the tool is dropped fail-closed and the reason is
+	// a scrubbed copy of the error text.
+	EventToolExcluded = "tool_excluded"
+)
+
+// Route-selection reasons carried by RouteSelectedData.Reason.
+const (
+	RouteReasonInitial   = "initial"
+	RouteReasonReuse     = "reuse"
+	RouteReasonFailover  = "failover"
+	RouteReasonProbation = "probation"
 )
 
 // EventData is a sealed interface for event payloads.
@@ -669,6 +691,42 @@ type CustomEventData struct {
 }
 
 func (CustomEventData) eventData() {}
+
+// ParamsResolvedData is the payload for EventParamsResolved. Tool names
+// themselves are not included; consumers correlate via ToolsSHA256.
+type ParamsResolvedData struct {
+	Model           string `json:"model"`
+	MaxIterations   int    `json:"max_iterations"`
+	MaxTokens       *int   `json:"max_tokens,omitempty"`
+	RunTokenBudget  int    `json:"run_token_budget"`
+	ToolMode        string `json:"tool_mode"`
+	ToolCount       int    `json:"tool_count"`
+	ToolsSHA256     string `json:"tools_sha256"`
+	Subject         string `json:"subject,omitempty"`
+	ResolverTouched bool   `json:"resolver_touched"`
+}
+
+func (ParamsResolvedData) eventData() {}
+
+// RouteSelectedData is the payload for EventRouteSelected. Alias is the
+// public operational identity of the chosen endpoint; it must not contain
+// credentials. Reason is one of the RouteReason* constants.
+type RouteSelectedData struct {
+	Alias    string `json:"alias"`
+	Strategy string `json:"strategy"`
+	Reason   string `json:"reason"`
+	Stream   bool   `json:"stream,omitempty"`
+}
+
+func (RouteSelectedData) eventData() {}
+
+// ToolExcludedData is the payload for EventToolExcluded.
+type ToolExcludedData struct {
+	ToolName string `json:"tool_name"`
+	Reason   string `json:"reason"`
+}
+
+func (ToolExcludedData) eventData() {}
 
 // NewEvent creates an Event with the given type, agent ID, session ID, and data.
 func NewEvent(eventType, agentID, sessionID string, data EventData) Event {

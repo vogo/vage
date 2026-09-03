@@ -584,3 +584,26 @@ func TestFileStore_UnknownVersionRejected(t *testing.T) {
 		t.Errorf("Get unknown version err = %v, want ErrUnknownVersion", err)
 	}
 }
+
+func TestFileStore_V1RejectedByV2Reader(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	s, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	rec := newTestRecord("sess-v1", []string{"call-1"})
+	if err := s.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	rec.Version = 1
+	if err := s.writeRecord(rec); err != nil {
+		t.Fatalf("writeRecord: %v", err)
+	}
+
+	if _, err := s.Get(ctx, rec.ID); !errors.Is(err, ErrUnknownVersion) {
+		t.Errorf("Get v1 record err = %v, want ErrUnknownVersion", err)
+	}
+}

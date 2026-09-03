@@ -45,6 +45,7 @@
 | TOOL-7 | **取文本与截断走框架入口**:"从工具结果取文本"与"按字节安全截断"是通用能力,只有一个推荐入口(`schema.ToolResult.Text` / `tool.TruncateUTF8`),调用方不再自建重复助手。字节上限与 token 预算是两件事,不可互换(详见 [tooling-design](tooling-design.md))。 |
 | TOOL-8 | **执行中间件包裹完整分派**:`WithExecuteMiddleware` 装饰 `Registry.Execute` 的整段查找与执行;本地、外部与"未找到/无 handler"等分派错误都在链内可观察可改写。第一个注册者最外层;nil 跳过;链在构造时固定。并发 `Execute` 共享同一组中间件实例,有状态实现须自保并发安全。直接调用某个 `ToolHandler` 会绕过该链。 |
 | TOOL-9 | **askuser's two collaboration paths do not substitute**: blocking mode (`tool/askuser.Register` + `UserInteractor`) waits inside the handler; in-process, timeout or process exit ends it, with no framework suspend record. The cross-process path is `taskagent.WithInterruptPolicy` taking over the same `ask_user` name — on a hit the handler does not run; the framework persists an `interrupt.Record` and returns `StopReasonInterrupted`, resumed by `ResumeInterrupt`. Pick one path; do not wrap the blocking mode as a fake cross-process Resume (see [agent-core](../../agent/agent-core/agent-core.md) AC-14, [orchestration](../../agent/orchestration/orchestration.md) OR-9). |
+| TOOL-10 | **TaskAgent 工具披露 fail-closed**:一次新 Run 的模型可见工具集是「`RunOptions` 请求范围 ∩ 活跃 skill `AllowedTools` ∩ `EnabledFunc`」的交集,任一层只能收紧。`ToolMode=none`、`allow` 加空名单、交集为空,都使模型看到空工具表,不得回退注册表全集。`tool.FilterTools` 对其他调用方仍保持「空名单 = 不限制」;`prepareFrozenAITools` 才是冻结空集路径。`EnabledFunc` 返回 error 时排除该工具并发脱敏 `tool_excluded` 事件,不得 fail-open。ResumeInterrupt 使用 v2 快照中的最终工具名,不再查询当前 skill 或重跑谓词(见 [agent-core](../../agent/agent-core/agent-core.md) AC-19)。 |
 
 ## 状态与转换
 

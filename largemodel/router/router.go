@@ -76,6 +76,7 @@ type Router struct {
 	maxRetries       int
 	recoverTime      time.Duration
 	attemptObservers []func(AttemptResult)
+	routeObservers   []func(ctx context.Context, sel RouteSelection)
 	nowFunc          func() time.Time
 	// waitFunc blocks for d or until ctx ends, returning ctx.Err() if it does.
 	// It is a field so tests can assert the retry wait sequence without sleeping.
@@ -158,6 +159,42 @@ func WithAttemptObserver(fn func(AttemptResult)) Option {
 	return func(r *Router) {
 		if fn != nil {
 			r.attemptObservers = append(r.attemptObservers, fn)
+		}
+	}
+}
+
+// RouteReason names why the router selected or reused an endpoint. Values
+// match schema.RouteReason* so events serialize without a schema import.
+type RouteReason string
+
+const (
+	RouteReasonInitial   RouteReason = "initial"
+	RouteReasonReuse     RouteReason = "reuse"
+	RouteReasonFailover  RouteReason = "failover"
+	RouteReasonProbation RouteReason = "probation"
+)
+
+// RouteSelection is the protocol-neutral observation of one routing
+// decision. It carries only public operational identity: never endpoint
+// configuration, tags, request bodies or raw errors.
+type RouteSelection struct {
+	Alias    string
+	Strategy Strategy
+	Reason   RouteReason
+	Stream   bool
+}
+
+// WithRouteObserver registers a callback invoked when the router selects or
+// reuses an active endpoint (see RouteSelection). Multiple observers may be
+// registered. Observers run synchronously on the request path under no
+// internal lock: they must be fast, must not call blocking Router
+// operations, and must not change the routing result. ComposeCaller may
+// invoke observers concurrently across pools; implementations must
+// synchronize any shared state themselves.
+func WithRouteObserver(fn func(ctx context.Context, sel RouteSelection)) Option {
+	return func(r *Router) {
+		if fn != nil {
+			r.routeObservers = append(r.routeObservers, fn)
 		}
 	}
 }
@@ -405,6 +442,8 @@ func Dispatch[T any](
 
 		tried[choice.endpoint] = true
 
+		r.observeRoute(ctx, choice, call.Stream)
+
 		result, failure, cancelled := runAttempts(ctx, r, call, choice, attempt)
 		if cancelled != nil {
 			return zero, cancelled
@@ -501,6 +540,7 @@ type endpointPick struct {
 	// time elapsed. It gets one attempt rather than a retry round.
 	probation bool
 	serving   bool
+	reason    RouteReason
 }
 
 // reuseActive returns the pool's active endpoint when it is selectable, capable
@@ -520,7 +560,13 @@ func (r *Router) reuseActive(capable []int, tried map[int]bool) (endpointPick, b
 		return endpointPick{}, false
 	}
 
-	return endpointPick{endpoint: r.active, generation: r.generation, probation: probation, serving: true}, true
+	return endpointPick{
+		endpoint:   r.active,
+		generation: r.generation,
+		probation:  probation,
+		serving:    true,
+		reason:     routeReason(true, probation, 0),
+	}, true
 }
 
 // pickFromOrdering returns the next endpoint from a frozen strategy ordering.
@@ -548,14 +594,26 @@ func (r *Router) pickFromOrdering(ordering []int, tried map[int]bool) (endpointP
 	}
 
 	if activeUsable {
-		return endpointPick{endpoint: pick, generation: r.generation, probation: probation, serving: false}, true
+		return endpointPick{
+			endpoint:   pick,
+			generation: r.generation,
+			probation:  probation,
+			serving:    false,
+			reason:     routeReason(false, probation, r.commits),
+		}, true
 	}
 
 	r.active = pick
 	r.generation++
 	r.commits++
 
-	return endpointPick{endpoint: pick, generation: r.generation, probation: probation, serving: true}, true
+	return endpointPick{
+		endpoint:   pick,
+		generation: r.generation,
+		probation:  probation,
+		serving:    true,
+		reason:     routeReason(false, probation, r.commits),
+	}, true
 }
 
 // nextInOrdering returns the first index in ordering that is not yet tried and
@@ -617,6 +675,33 @@ func (r *Router) retireActive(endpoint int, generation uint64) {
 func (r *Router) observe(result AttemptResult) {
 	for _, fn := range r.attemptObservers {
 		fn(result)
+	}
+}
+
+// routeReason classifies a pick. Probation wins over reuse/initial/failover
+// because a recovered endpoint is a distinct operational signal.
+func routeReason(reused, probation bool, commits uint64) RouteReason {
+	if probation {
+		return RouteReasonProbation
+	}
+	if reused {
+		return RouteReasonReuse
+	}
+	if commits <= 1 {
+		return RouteReasonInitial
+	}
+	return RouteReasonFailover
+}
+
+func (r *Router) observeRoute(ctx context.Context, pick endpointPick, stream bool) {
+	sel := RouteSelection{
+		Alias:    r.endpoints[pick.endpoint].Alias,
+		Strategy: r.strategy,
+		Reason:   pick.reason,
+		Stream:   stream,
+	}
+	for _, fn := range r.routeObservers {
+		fn(ctx, sel)
 	}
 }
 

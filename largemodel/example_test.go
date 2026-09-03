@@ -118,6 +118,41 @@ func ExampleBuildCaller() {
 	// Output: openai-chat
 }
 
+// ExampleBuildCaller_tenantBinding maps a tenant (or credential domain) onto
+// a same-protocol ComposeCaller at Agent construction. Failover stays inside
+// that caller's router pool; the ReAct loop does not swap callers.
+func ExampleBuildCaller_tenantBinding() {
+	type tenantID string
+
+	buildForTenant := func(_ tenantID) (largemodel.ComposeCaller, error) {
+		return largemodel.BuildCaller(largemodel.OpenAIConfig{
+			Strategy: largemodel.StrategyFailover,
+			Endpoints: []largemodel.OpenAIEndpoint{
+				{Alias: "primary", BaseURL: "https://api.openai.com/v1", APIKey: "sk-primary", Model: "gpt-4o"},
+				{Alias: "backup", BaseURL: "https://backup.example.com/v1", APIKey: "sk-backup", Model: "gpt-4o-mini"},
+			},
+		})
+	}
+
+	// Host cache: one ComposeCaller per tenant, reused across Runs.
+	callers := map[tenantID]largemodel.Caller{}
+	c, err := buildForTenant("acme")
+	if err != nil {
+		log.Fatal(err)
+	}
+	callers["acme"] = c
+
+	model := largemodel.New(callers["acme"])
+	a := taskagent.New(
+		agent.Config{ID: "assistant", Protocol: model.Protocol()},
+		taskagent.WithCaller(model),
+		taskagent.WithModel("gpt-4o"),
+	)
+
+	fmt.Println(a.Protocol())
+	// Output: openai-chat
+}
+
 // ExampleBuildCaller_endpointStats shows per-endpoint health.
 func ExampleBuildCaller_endpointStats() {
 	caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{

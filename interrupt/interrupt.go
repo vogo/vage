@@ -44,7 +44,7 @@ import (
 // must reject records whose Version does not match a version they know how
 // to read rather than guessing at an unfamiliar layout — see
 // ErrUnknownVersion.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 // Status is the interrupt state-machine position of a Record.
 type Status string
@@ -77,7 +77,8 @@ type EffectiveParams struct {
 	MaxIterations  int      `json:"max_iterations"`
 	RunTokenBudget int      `json:"run_token_budget"`
 	MaxTokens      *int     `json:"max_tokens,omitempty"`
-	ToolFilter     []string `json:"tool_filter,omitempty"`
+	ToolMode       string   `json:"tool_mode,omitempty"`
+	ToolFilter     []string `json:"tool_filter"`
 	StopSequences  []string `json:"stop_sequences,omitempty"`
 }
 

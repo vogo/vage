@@ -59,7 +59,7 @@ func TestWithExtraSources_Order(t *testing.T) {
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
 		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
-	})
+	}, 0)
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildInitialMessages_NoExtras_BehaviourCompat(t *testing.T) {
 	br, err := a.buildInitialMessages(context.Background(), &schema.RunRequest{
 		SessionID: "sess",
 		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "hi")},
-	})
+	}, 0)
 	if err != nil {
 		t.Fatalf("buildInitialMessages: %v", err)
 	}

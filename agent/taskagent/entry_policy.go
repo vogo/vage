@@ -31,6 +31,7 @@ type entryPolicy struct {
 	initRunValues   bool
 	inputGuards     bool
 	agentMiddleware bool
+	paramResolver   bool
 }
 
 // policyFreshRun is the entry policy for Run and RunStream.
@@ -38,6 +39,7 @@ var policyFreshRun = entryPolicy{
 	initRunValues:   true,
 	inputGuards:     true,
 	agentMiddleware: true,
+	paramResolver:   true,
 }
 
 // policyResume is the entry policy for Resume and ResumeInterrupt.
@@ -45,6 +47,7 @@ var policyResume = entryPolicy{
 	initRunValues:   true,
 	inputGuards:     false,
 	agentMiddleware: false,
+	paramResolver:   false,
 }
 
 // bindRunValues attaches a fresh run-value store when policy requires it.

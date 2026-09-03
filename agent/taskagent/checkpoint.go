@@ -139,6 +139,8 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 	policy := policyResume
 
 	ctx = bindRunValues(ctx, policy)
+	ctx = schema.WithEventDispatcher(ctx, a.hookManager.Dispatch)
+	ctx = schema.WithSessionID(ctx, sessionID)
 
 	if _, err := a.preflightEntry(ctx, policy, nil); err != nil {
 		return nil, err
@@ -188,7 +190,7 @@ func (a *Agent) Resume(ctx context.Context, sessionID string) (*schema.RunRespon
 	// intent that runResumeLoop sets on every outbound request, and the
 	// protocol caller renders the vendor breakpoints.
 	messages := cp.Messages
-	aiTools := a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, rc.sessionID))
+	aiTools := a.toolsForRun(p, rc.sessionID)
 
 	startIter := cp.Iteration + 1
 	return a.runResumeLoop(ctx, rc, p, messages, aiTools, startIter)

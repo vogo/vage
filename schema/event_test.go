@@ -94,6 +94,9 @@ func TestEventData_SealedInterface(t *testing.T) {
 	var _ EventData = SkillDeactivateData{}
 	var _ EventData = SkillResourceLoadData{}
 	var _ EventData = CustomEventData{}
+	var _ EventData = ParamsResolvedData{}
+	var _ EventData = RouteSelectedData{}
+	var _ EventData = ToolExcludedData{}
 }
 
 // TestCustomEventData_WireShape pins the wire contract consumers dispatch on:

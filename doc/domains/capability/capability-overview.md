@@ -11,6 +11,6 @@
 
 ## 共享上下文
 
-- 模型接入的唯一入口是 `largemodel.Caller`(章程红线:厂商 wire 细节不外泄)。`largemodel` 按协议直连各厂商 native 客户端,并在其上叠加中间件。
+- 模型接入的唯一入口是 `largemodel.Caller`(章程红线:厂商 wire 细节不外泄)。`largemodel` 按协议直连各厂商 native 客户端,并在其上叠加中间件。同协议多 endpoint 用 `BuildCaller` 收成 `ComposeCaller`,由宿主在 Agent 构造期按租户/凭证域绑定,不在单次请求上换 Caller。
 - 工具有三个来源:本地函数、MCP 远程、agent-as-tool。所有工具经统一注册表暴露给 Agent。
 - 技能(`skill`)兼容 Agent Skills 开放标准,向 Agent 注入提示并过滤可用工具。

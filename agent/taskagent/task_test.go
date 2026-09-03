@@ -738,10 +738,12 @@ func TestAgent_RunStream_ToolCallLoop(t *testing.T) {
 	wantTypes := []string{
 		schema.EventAgentStart,
 		schema.EventIterationStart,
+		schema.EventRouteSelected,
 		schema.EventToolCallStart,
 		schema.EventToolCallEnd,
 		schema.EventToolResult,
 		schema.EventIterationStart,
+		schema.EventRouteSelected,
 		schema.EventTextDelta,
 		schema.EventAgentEnd,
 	}
@@ -907,10 +909,10 @@ func TestRunStreamText(t *testing.T) {
 		types = append(types, e.Type)
 	}
 
-	if len(types) != 4 {
-		t.Fatalf("got %d events, want 4: %v", len(types), types)
+	if len(types) != 5 {
+		t.Fatalf("got %d events, want 5: %v", len(types), types)
 	}
-	wantTypes := []string{schema.EventAgentStart, schema.EventIterationStart, schema.EventTextDelta, schema.EventAgentEnd}
+	wantTypes := []string{schema.EventAgentStart, schema.EventIterationStart, schema.EventRouteSelected, schema.EventTextDelta, schema.EventAgentEnd}
 	for i, want := range wantTypes {
 		if types[i] != want {
 			t.Errorf("types[%d] = %q, want %q", i, types[i], want)
@@ -967,8 +969,8 @@ func TestAgent_RunStream_Middleware(t *testing.T) {
 		}
 	}
 
-	if count.Load() != 4 {
-		t.Errorf("middleware called %d times, want 4", count.Load())
+	if count.Load() != 5 {
+		t.Errorf("middleware called %d times, want 5", count.Load())
 	}
 }
 

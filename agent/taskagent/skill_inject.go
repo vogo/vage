@@ -25,12 +25,35 @@ import (
 )
 
 // prepareAITools returns the registry's tool definitions, applying any filter.
+// Empty names with the historical FilterTools helper means "no request-level
+// restriction" (all tools). Frozen empty sets must go through
+// prepareFrozenAITools instead.
 func (a *Agent) prepareAITools(filter []string) []schema.ToolDef {
 	if a.toolRegistry == nil {
 		return nil
 	}
 
 	return tool.FilterTools(a.toolRegistry.List(), filter)
+}
+
+// prepareFrozenAITools selects tools by a post-intersection name list.
+// An empty list is fail-closed: no tools, never a fallback to the full set.
+func (a *Agent) prepareFrozenAITools(names []string) []schema.ToolDef {
+	if a.toolRegistry == nil || len(names) == 0 {
+		return nil
+	}
+
+	return tool.FilterTools(a.toolRegistry.List(), names)
+}
+
+// toolsForRun returns the tool definitions this invocation may expose.
+// Fresh runs freeze names in preflight; resume-from-interrupt consumes the
+// snapshot as-is. Checkpoint Resume keeps the historical unfrozen merge.
+func (a *Agent) toolsForRun(p runParams, sessionID string) []schema.ToolDef {
+	if p.toolsFrozen {
+		return a.prepareFrozenAITools(p.toolFilter)
+	}
+	return a.prepareAITools(a.mergeSkillToolFilter(p.toolFilter, sessionID))
 }
 
 // mergeSkillToolFilter merges skill AllowedTools with the request-level tool filter.

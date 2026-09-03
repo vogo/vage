@@ -22,7 +22,7 @@
 
 ## 关键设计决策
 
-- **Builder/Source 显式化**:把提示装配从"散落在 Agent 里的拼接逻辑"提升为一等、可插拔、可审计的管线。新增上下文来源 = 新增一个 Source,不改 Agent。
+- **Builder/Source 显式化**:把提示装配从"散落在 Agent 里的拼接逻辑"提升为一等、可插拔、可审计的管线。新增上下文来源 = 新增一个 Source,不改 Agent。TaskAgent 把解析后的 `RunTokenBudget` 传入 `BuildInput.Budget`;非零预算只裁剪 optional Source,must-include 来源仍完整保留。
 - **压缩器职责单一 + 可链式组合**:每个压缩器只处理一个维度(窗口、重要度、摘要、预算),用压缩链组合,避免单个巨型压缩器。
 - **`vctx` 命名**:包名避开标准库 `context`,导入路径仍为 `github.com/vogo/vage/context`。
 - **token 估算集中**:压缩决策统一依赖 `token_estimate`,避免各处各估一套。

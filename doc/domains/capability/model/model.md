@@ -30,6 +30,7 @@
 - **compose Caller(池化调用接缝)**:vage 唯一的 Caller 实现形态,持有一个或多个端点。端点选择策略(failover/random/weighted/cost/latency)、调用内指数重试、端点存活三态与恢复窗口全部来自 `largemodel/router`;每个端点声明自己的模型名,发出请求时覆盖信封中的模型。
 - **池集合(pool set)**:compose Caller 持有的多个 router 池。一个池一次只服务一个调用,而 vage 的 Caller 被并行 Agent 共享,故按需借还;并发上限即池数上限,超出时等待而非失败。
 - **中间件**:`Wrap(next Caller) Caller` 的装饰器,可任意组合与排序。
+- **compose Caller 的宿主绑定**:多凭证/多 endpoint 的运维装配在 Agent 构造边界完成。宿主按租户或凭证域调用 `largemodel.BuildCaller` 得到同协议 `ComposeCaller`,再注入 TaskAgent;`NewCaller` 仍是单 endpoint 薄包装。router 只在已绑定 Caller 的池内选路,不在 ReAct 循环或单次 `RunRequest` 上更换 Caller。
 - **治理中间件**:超时、限流、缓存 —— 约束对上游模型的调用(重试与熔断不在此处,归 `router`)。
 - **可观测中间件**:日志、指标、debug。
 - **预算中间件(budget)**:在调用前后核算 token 消耗,配合 Agent 的预算终止。
@@ -54,6 +55,7 @@
 | MOD-10 | **池不共享**:一个 router 池归属一个会话、一次只服务一个调用;并发由多个池承担,每个池独立学习端点健康。跨池的健康视图只在读取时按别名合并,不回写;合并取各池中最有把握的判断(available > probation > dead),无法识别的状态按 dead 处理。 |
 | MOD-11 | **ResponseSchema 非强保证**:原生字段成功发出不等于响应必为合规 JSON —— provider 拒答、内容过滤、截断仍按现有 finish reason / error 语义返回;降级提示只提高遵循概率,不构成 schema 合规保证。vage 不因本地校验失败自动重试,也不在 provider 4xx 后剥离原生字段重试。 |
 | MOD-12 | **多模态来源→wire 映射固定,不可表示即报错**:image/file 来源到 OpenAI/Anthropic wire 的映射按 [model-design](model-design.md) 的表静态决定,不按模型名或端点探测切换。无法表示的组合(OpenAI 的文件 URL、Anthropic 的 FileID)在编码期、backend 调用前失败;vage 不下载 URL、不上传文件、不管理 FileID、不猜测 MIME 或模型能力,厂商的格式/大小/模型限制以 provider 错误呈现。Anthropic document block 丢弃 Filename 是唯一允许的静默降级 —— 字节与 MIME 类型仍完整送达。 |
+| MOD-13 | **Caller 在 Agent 构造期绑定**:一个 TaskAgent 持有一条 Caller 链,直到该 Agent 被替换。同协议多 endpoint 的 failover 发生在该 Caller 的 router 池内,并发 `schema.EventRouteSelected`(alias / strategy / reason / stream,不含凭证)。不得把 Caller、endpoint、API key 或 `RoutePolicy` 放进 `RunRequest`;跨租户切换是宿主选择另一个已绑定 Agent,而不是 per-call 换池。 |
 
 ## 状态与转换
 
@@ -69,7 +71,7 @@
 
 ## 与其他领域的交互
 
-- **agent-core**:任务型 Agent 通过组装好的 Caller 链发起每轮 LLM 调用,并接入上下文编辑中间件与预算中间件;Agent 的 Protocol 决定 provider codec 如何编解码消息。
+- **agent-core**:任务型 Agent 通过组装好的 Caller 链发起每轮 LLM 调用,并接入上下文编辑中间件与预算中间件;Agent 的 Protocol 决定 provider codec 如何编解码消息。宿主在构造该 Agent 时绑定 `ComposeCaller`;ParamResolver 不选择 endpoint。
 - **tooling**:上下文编辑的 stale_resource 判定需查询工具的资源语义(ResourceTracker),识别"被后续写作废的旧读结果"。
 - **memory**:与记忆压缩互补 —— 编辑管"每轮少付 token",压缩管"记多少历史"(见 [memory-design](../../memory/memory/memory-design.md))。
 

@@ -202,7 +202,8 @@ func (r *Registry) dispatch(ctx context.Context, name, args string) (schema.Tool
 }
 
 // FilterTools returns only the tools whose names are in the whitelist.
-// If names is empty, all tools are returned.
+// If names is empty, all tools are returned. TaskAgent's frozen empty
+// tool set does not use this helper (empty there means no tools).
 func FilterTools(defs []schema.ToolDef, names []string) []schema.ToolDef {
 	if len(names) == 0 {
 		return defs
