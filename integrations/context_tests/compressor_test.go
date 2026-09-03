@@ -64,6 +64,7 @@ func TestBuilder_SessionMemory_WithSlidingWindowCompressor(t *testing.T) {
 
 	res, err := builder.Build(ctx, vctx.BuildInput{
 		SessionID: "comp-session",
+		AgentID:   "comp-agent",
 		Request: &schema.RunRequest{
 			SessionID: "comp-session",
 			Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "now")},

@@ -81,7 +81,7 @@ type Memory interface {
 	Delete(ctx context.Context, key string) error
 	// List returns all entries whose keys have the given prefix.
 	List(ctx context.Context, prefix string) ([]Entry, error)
-	// Clear removes all entries.
+	// Clear removes all entries in this Memory's keyspace.
 	Clear(ctx context.Context) error
 	// BatchGet returns the values for the given keys.
 	BatchGet(ctx context.Context, keys []string) (map[string]any, error)

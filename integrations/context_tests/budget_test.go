@@ -68,6 +68,7 @@ func TestBuilder_Budget_OldestDropped(t *testing.T) {
 
 	res, err := builder.Build(ctx, vctx.BuildInput{
 		SessionID: "budget-session",
+		AgentID:   "budget",
 		Budget:    budget,
 		Request: &schema.RunRequest{
 			SessionID: "budget-session",
@@ -153,6 +154,7 @@ func TestBuilder_BudgetZero_Unlimited(t *testing.T) {
 
 	res, err := builder.Build(ctx, vctx.BuildInput{
 		SessionID: "nolimit-session",
+		AgentID:   "nolimit",
 		Budget:    0,
 		Request: &schema.RunRequest{
 			SessionID: "nolimit-session",

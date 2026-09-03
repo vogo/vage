@@ -17,6 +17,8 @@
 
 package memory
 
+import "sync"
+
 // LongTermMemory is the cross-session ("store") memory tier: facts written
 // here outlive a single Run and a single session.
 //
@@ -57,8 +59,11 @@ func NewInMemoryLongTermMemory() *LongTermMemory {
 // build the Manager tier with WithDurableStore, both of which fail fast on a
 // backend that lacks the capability.
 func NewLongTermMemory(store Store) *LongTermMemory {
-	return &LongTermMemory{syncMemory: syncMemory{memoryBase: memoryBase{
-		store: store,
-		scope: ScopeStore,
-	}}}
+	return &LongTermMemory{syncMemory: syncMemory{
+		mu: new(sync.Mutex),
+		memoryBase: memoryBase{
+			store: store,
+			scope: ScopeStore,
+		},
+	}}
 }
