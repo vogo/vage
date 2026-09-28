@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // suspendedResponse builds the half-written turn a TaskAgent returns when a

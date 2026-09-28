@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func newTestFileStore(t *testing.T) *FileSessionStore {

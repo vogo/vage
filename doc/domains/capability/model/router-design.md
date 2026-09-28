@@ -7,36 +7,36 @@
 多端点 dispatch 分两层:**路由机制**与**协议语义**分离,池不跨协议混用。
 
 ```
-largemodel/provider/openais     ChatCompletions · ChatCompletionsStream · message codec · internal Responses route
-largemodel/provider/anthropics  Messages · MessagesStream · message codec
+largemodel/model/provider/openais     ChatCompletions · ChatCompletionsStream · message codec · internal Responses route
+largemodel/model/provider/anthropics  Messages · MessagesStream · message codec
         │  opaque labels + per-endpoint closure              endpoint index
         ▼                                                              ▲
-largemodel/router              capability filter → active endpoint → retries → failover
+largemodel/model/router              capability filter → active endpoint → retries → failover
                                health · aliases · observers · EndpointStat · MultiError
         ▲
-largemodel/compose_pool.go     池集合:并行 Agent 借还多个 router 池,合并 EndpointStats
-largemodel/*_compose.go        provider 池 → Backend 接口 → Caller facade
-largemodel/endpoint_config.go  公开 API: OpenAIConfig / WithRetryPolicy / …
+largemodel/model/compose_pool.go     池集合:并行 Agent 借还多个 router 池,合并 EndpointStats
+largemodel/model/*_compose.go        provider 池 → Backend 接口 → Caller facade
+largemodel/model/endpoint_config.go  公开 API: OpenAIConfig / WithRetryPolicy / …
 ```
 
 | 层 | 包 | 职责 |
 |---|---|---|
-| 路由核 | `largemodel/router` | 策略、健康三态、调用内重试、failover;不见 request/response 类型 |
-| provider 绑定 | `largemodel/provider/openais`、`provider/anthropics` | wire 类型复制、canonical message codec、model 覆盖、capability 谓词 |
-| 并发池 | `largemodel/compose_pool.go` | 一 router 池同时只服务一次调用;Caller 按需建池、读时合并健康 |
+| 路由核 | `largemodel/model/router` | 策略、健康三态、调用内重试、failover;不见 request/response 类型 |
+| provider 绑定 | `largemodel/model/provider/openais`、`provider/anthropics` | wire 类型复制、canonical message codec、model 覆盖、capability 谓词 |
+| 并发池 | `largemodel/model/compose_pool.go` | 一 router 池同时只服务一次调用;Caller 按需建池、读时合并健康 |
 | Caller adapter | `largemodel/openai_compose.go`、`anthropic_compose.go` | 把 provider router 池适配到根包 Backend 接口与公开 `Caller` facade |
-| 构造入口 | `largemodel/compose_caller.go` | `NewCaller` / `BuildCaller` / `WrapCaller` 与 `ComposeCaller` 契约 |
+| 构造入口 | `largemodel/model/compose_caller.go` | `NewCaller` / `BuildCaller` / `WrapCaller` 与 `ComposeCaller` 契约 |
 
-底层 HTTP 仍由 `github.com/vogo/aimodel/openai`、`anthropic` 发出;aimodel **不含** retry 与路由。
+底层 HTTP 仍由 `github.com/vogo/largemodel/openai`、`anthropic` 发出;这两个 native package **不含** retry 与路由,相关能力集中在 `github.com/vogo/largemodel/model/router`。
 
 ## 公开 API
 
-应用代码 import `largemodel` 构建 Caller 与配置;观测路由健康或自定义 routed backend 时 import `largemodel/router`:
+应用代码 import `largemodel` 构建 Caller 与配置;观测路由健康或自定义 routed backend 时 import `largemodel/model/router`:
 
 ```go
 import (
-    "github.com/vogo/vage/largemodel"
-    "github.com/vogo/vage/largemodel/router"
+    "github.com/vogo/largemodel/model/model"
+    "github.com/vogo/largemodel/model/router"
 )
 caller, err := largemodel.BuildCaller(largemodel.OpenAIConfig{
     Strategy: largemodel.StrategyFailover,
@@ -72,7 +72,7 @@ stats := caller.EndpointStats() // []router.EndpointStat
 
 **根包 re-export(Caller 契约):** `Strategy`、`EndpointCost`、`StrategyFailover` / `StrategyWeight` / …、`ErrNoActiveEndpoints`、`DefaultEndpointAlias`、`ComposeCaller`。
 
-**router 包(观测与扩展):** `EndpointStat`、`AttemptResult`、`StatusAvailable` / `StatusDead` / `StatusProbation`、`WithAttemptObserver` 回调参数类型等 —— 由 `largemodel/router` 直接 import,根包不再再导出以免与 router 演进漂移。
+**router 包(观测与扩展):** `EndpointStat`、`AttemptResult`、`StatusAvailable` / `StatusDead` / `StatusProbation`、`WithAttemptObserver` 回调参数类型等 —— 由 `largemodel/model/router` 直接 import,根包不再再导出以免与 router 演进漂移。
 
 ## Active endpoint 与 dispatch 链
 
@@ -150,4 +150,4 @@ router 在每次选定或复用 active endpoint 时同步通知只读 `RouteObse
 
 - **无跨协议 failover** — OpenAI 池与 Anthropic 池独立
 - **中间件链不含 retry** — 避免与 router 重试相乘
-- **Responses API** — `largemodel/provider/openais` 保留包内 Responses 路由(无公开入口);vage 公开 `Caller` 当前仅接 Chat / Messages
+- **Responses API** — `largemodel/model/provider/openais` 保留包内 Responses 路由(无公开入口);vage 公开 `Caller` 当前仅接 Chat / Messages

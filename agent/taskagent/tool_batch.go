@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // executeToolCall runs a single tool call and returns the result.

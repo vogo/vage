@@ -21,8 +21,8 @@ import (
 	"errors"
 	"math"
 
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/schema"
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/schema"
 )
 
 // makeResponse creates a RunResponse with a single assistant message.

@@ -20,7 +20,7 @@ package taskagent
 import (
 	"context"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // InterruptPolicy decides, for one batch of model-requested tool calls,

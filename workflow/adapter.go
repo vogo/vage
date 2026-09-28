@@ -21,7 +21,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Runner is the minimum execution surface an Agent already satisfies.

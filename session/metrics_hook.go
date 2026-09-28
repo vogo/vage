@@ -21,7 +21,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // PricingFunc returns the per-1k-token USD price for a given model.

@@ -21,10 +21,10 @@ import (
 	"context"
 	"testing"
 
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

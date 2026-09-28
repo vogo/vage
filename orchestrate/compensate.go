@@ -24,7 +24,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Compensatable is implemented by Runners that support compensation (rollback).

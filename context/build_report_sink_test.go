@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // captureSink is a BuildReportSink test double that records every Save

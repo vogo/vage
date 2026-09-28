@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/workflowagent"
 	"github.com/vogo/vage/orchestrate"
-	"github.com/vogo/vage/schema"
 )
 
 // --- Integration test helpers (black-box, external package) ---

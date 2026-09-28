@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/model/middleware/contexteditor"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/largemodel/middleware/contexteditor"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

@@ -26,16 +26,16 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/model/middleware"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/integrations/internal/testenv"
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/largemodel/middleware"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

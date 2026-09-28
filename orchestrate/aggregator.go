@@ -21,7 +21,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Aggregator merges terminal node results into a single response.

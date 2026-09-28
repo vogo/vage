@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // estimateTextTokens returns an approximate token count for plain text.

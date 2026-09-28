@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/hook"
-	"github.com/vogo/vage/schema"
 )
 
 // MapTreeStore is the in-memory SessionTreeStore. A single sync.RWMutex

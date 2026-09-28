@@ -22,10 +22,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 func TestSharedManager_RunBPromptExcludesRunA(t *testing.T) {

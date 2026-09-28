@@ -25,11 +25,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 // loadOverrideStore returns a fixed checkpoint from Load so tests can

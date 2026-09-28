@@ -27,12 +27,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/largemodel/middleware/contexteditor"
+	"github.com/vogo/largemodel/model/middleware/contexteditor"
 	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 
 const modulePath = "github.com/vogo/vage"
+
+// modelSchemaPath holds the canonical model-contract layer, which the schema
+// facade re-exports unchanged.
+const modelSchemaPath = "github.com/vogo/largemodel/schema"
 
 // component describes an architecture component from doc/architecture/architecture.md.
 type component struct {
@@ -63,7 +67,6 @@ var componentRules = []struct {
 	{modulePath + "/session", component{"session", 1}},
 	{modulePath + "/workspace", component{"workspace", 1}},
 	{modulePath + "/sessionview", component{"sessionview", 1}},
-	{modulePath + "/largemodel", component{"largemodel", 2}},
 	{modulePath + "/tool", component{"tool", 2}},
 	{modulePath + "/mcp", component{"mcp", 2}},
 	{modulePath + "/skill", component{"skill", 2}},
@@ -82,7 +85,7 @@ var allowedCrossComponent = map[string]map[string]struct{}{
 	"taskagent":     {"agent": {}, "hook": {}},
 	"workflowagent": {"agent": {}},
 	"context":       {"hook": {}, "memory": {}, "session": {}, "vector": {}, "workspace": {}},
-	"session":       {"hook": {}, "largemodel": {}, "memory": {}, "vector": {}},
+	"session":       {"hook": {}, "memory": {}, "vector": {}},
 	"tool":          {"agent": {}, "session": {}, "sessionview": {}, "vector": {}, "workspace": {}},
 	"mcp":           {"security": {}, "tool": {}, "agent": {}},
 	"vector":        {"hook": {}},
@@ -90,8 +93,7 @@ var allowedCrossComponent = map[string]map[string]struct{}{
 
 // forbiddenCrossComponent encodes hard red lines; these override allowlists.
 var forbiddenCrossComponent = map[string]map[string]struct{}{
-	"tool":       {"memory": {}},
-	"largemodel": {"tool": {}, "memory": {}},
+	"tool": {"memory": {}},
 }
 
 // edgeExemption records a reviewed, single-edge exception with its ADR path.
@@ -355,11 +357,36 @@ func TestArchitectureProductionDependencies(t *testing.T) {
 	}
 }
 
+// TestArchitectureSchemaIsRootContract verifies the schema facade stays a pure
+// re-export. Its canonical definitions now live in
+// github.com/vogo/largemodel/schema, so that one import is the only edge this
+// package may have; anything else would mean vage started growing contract
+// definitions of its own again.
 func TestArchitectureSchemaIsRootContract(t *testing.T) {
 	root := repoRoot(t)
 	pkgs := productionPackages(t, root)
 
-	assertComponentL0StdlibOnly(t, pkgs, "schema")
+	found := false
+
+	for pkg, imports := range pkgs {
+		comp, ok := resolveComponent(pkg)
+		if !ok || comp.name != "schema" {
+			continue
+		}
+		found = true
+
+		for path := range imports {
+			if isStdlibImport(path) || path == modelSchemaPath {
+				continue
+			}
+			t.Errorf("%s must import only the standard library and %s, found %q",
+				pkg, modelSchemaPath, path)
+		}
+	}
+
+	if !found {
+		t.Fatal("no production packages mapped to \"schema\" component")
+	}
 }
 
 func TestArchitecturePromptIsRootContract(t *testing.T) {
@@ -378,7 +405,7 @@ func TestArchitectureL0SubpackageStdlibSynthetic(t *testing.T) {
 		{
 			name: "schema subpackage third-party import",
 			pkg:  modulePath + "/schema/experimental",
-			imp:  "github.com/vogo/aimodel",
+			imp:  "github.com/vogo/largemodel",
 		},
 		{
 			name: "prompt subpackage third-party import",
@@ -425,8 +452,6 @@ func TestArchitectureSyntheticViolations(t *testing.T) {
 		toPkg   string
 	}{
 		{name: "tool must not import memory", fromPkg: modulePath + "/tool", toPkg: modulePath + "/memory"},
-		{name: "largemodel must not import tool", fromPkg: modulePath + "/largemodel", toPkg: modulePath + "/tool"},
-		{name: "largemodel must not import memory", fromPkg: modulePath + "/largemodel", toPkg: modulePath + "/memory"},
 	}
 
 	for _, tc := range cases {
@@ -448,7 +473,7 @@ func TestArchitectureSyntheticAllowances(t *testing.T) {
 		{name: "taskagent integrates tool", fromPkg: modulePath + "/agent/taskagent", toPkg: modulePath + "/tool"},
 		{name: "context reaches vector", fromPkg: modulePath + "/context", toPkg: modulePath + "/vector"},
 		{name: "same component subpackage", fromPkg: modulePath + "/tool/read", toPkg: modulePath + "/tool"},
-		{name: "L2 descends to schema", fromPkg: modulePath + "/largemodel", toPkg: modulePath + "/schema"},
+		{name: "L2 descends to schema", fromPkg: modulePath + "/tool", toPkg: modulePath + "/schema"},
 		{name: "typed workflow descends to schema", fromPkg: modulePath + "/workflow", toPkg: modulePath + "/schema"},
 	}
 

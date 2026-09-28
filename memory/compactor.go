@@ -21,7 +21,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // ConversationCompactor compresses a conversation history by summarizing

@@ -24,7 +24,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // mockRegistry is a minimal mock for testing TruncatingToolRegistry.

@@ -21,7 +21,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func TestClamp(t *testing.T) {

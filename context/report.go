@@ -18,7 +18,7 @@
 package vctx
 
 import (
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // BuildReport is the audit payload emitted by a Builder.Build call. The

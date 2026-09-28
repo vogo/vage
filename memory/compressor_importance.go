@@ -21,7 +21,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // MessageScorer assigns an importance score to a message.

@@ -24,8 +24,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/schema"
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/schema"
 )
 
 // FirstFunc always selects the first route.

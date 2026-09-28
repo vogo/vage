@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // errPrompt is a PromptTemplate whose Render always returns the configured

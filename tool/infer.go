@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Compile derives a schema.ToolDef and ToolHandler from a parameter struct T

@@ -24,7 +24,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 type entry struct {

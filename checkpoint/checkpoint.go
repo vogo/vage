@@ -37,7 +37,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Checkpoint is a complete, restorable snapshot of one ReAct iteration.

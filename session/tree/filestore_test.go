@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/hook"
-	"github.com/vogo/vage/schema"
 )
 
 // reentrantHookManager wires a sync hook that calls back into the store

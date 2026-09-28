@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // extraSystemSource is a custom Source used to verify pluggability — its

@@ -54,7 +54,7 @@ hook 消费 `schema.Event`(Agent 全生命周期事件),向订阅者分发;可�
 ## 与其他领域的交互
 
 - **agent-core**:service 调用 Agent 执行;hook 消费其生命周期事件。
-- **model**:LLMJudge 评测器调用 `largemodel` 的聊天能力。嵌入不走这条路 —— Embedder 是独立的一层,不经 `largemodel`/`aimodel`,也不复用聊天的 schema、预算与路由语义。
+- **model**:LLMJudge 评测器调用 `largemodel` 的聊天能力。嵌入不走这条路 —— Embedder 是独立的一层,不经 `largemodel`/`largemodel`,也不复用聊天的 schema、预算与路由语义。
 - **Anthropic / Claude 生态**:Anthropic 不提供原生 embedding API,其官方文档把 Claude 应用指向 Voyage。因此本领域没有 anthropics 嵌入 provider,Claude 侧的答案就是 Voyage。
 - **memory**:向量召回为上下文装配的 Source 提供检索(见 [memory](../../memory/memory/memory.md))。
 

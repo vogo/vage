@@ -23,10 +23,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/routeragent"
 	"github.com/vogo/vage/integrations/internal/subagent"
-	"github.com/vogo/vage/schema"
 )
 
 // TestRouter_SuspendedSubAgent_ReturnsError: the router forwards a request and

@@ -37,7 +37,7 @@ import (
 	"maps"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // CurrentVersion is the Record schema version this package writes. Stores

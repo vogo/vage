@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func setupTestRegistry(t *testing.T) Registry {

@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // ErrInterruptedRunner marks a Runner that suspended for a human decision

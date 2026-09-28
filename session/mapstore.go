@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // MapSessionStore is an in-process SessionStore backed by a map. It is the

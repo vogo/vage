@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 // newSessionMemoryWithMsgs returns a memory.Manager whose session tier has

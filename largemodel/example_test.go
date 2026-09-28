@@ -24,14 +24,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/vogo/aimodel/anthropic"
-	"github.com/vogo/aimodel/openai"
+	"github.com/vogo/largemodel/anthropic"
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/model/middleware"
+	"github.com/vogo/largemodel/model/provider/openais"
+	"github.com/vogo/largemodel/openai"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/largemodel/middleware"
-	"github.com/vogo/vage/largemodel/provider/openais"
-	"github.com/vogo/vage/schema"
 )
 
 // ExampleNewCaller builds a caller over a single OpenAI endpoint. The type of

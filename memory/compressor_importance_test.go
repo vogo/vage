@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func newSystemMessage(text string) schema.Message {

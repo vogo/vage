@@ -26,9 +26,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/largemodel/middleware"
-	"github.com/vogo/vage/schema"
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/model/middleware"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Test 2a: MetricsMiddleware propagates CacheReadTokens in sync path.

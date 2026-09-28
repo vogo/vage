@@ -21,7 +21,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // DefaultStreamBufferSize is the default channel buffer size for streaming events.

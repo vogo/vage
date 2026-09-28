@@ -27,8 +27,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/interrupt"
-	"github.com/vogo/vage/schema"
 )
 
 // Sentinel errors for the interrupt/resume path. Match with errors.Is.

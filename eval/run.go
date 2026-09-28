@@ -21,7 +21,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // AgentRunFunc is the function signature for running an agent.

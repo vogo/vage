@@ -24,8 +24,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/schema"
 )
 
 // handleHealth responds with a simple health check.

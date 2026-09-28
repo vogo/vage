@@ -26,9 +26,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vogo/largemodel/schema"
 	mcpclient "github.com/vogo/vage/mcp/client"
 	mcpserver "github.com/vogo/vage/mcp/server"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/security/credscrub"
 )
 

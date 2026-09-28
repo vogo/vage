@@ -11,7 +11,7 @@ A TaskAgent Run merges Agent defaults with `schema.RunOptions` inside `resolveRu
 - Agent Middleware wraps the ReAct loop after context and tools are already built; a rewrite of `req.Messages` does not un-disclose tools already placed on the outbound request.
 - Tool execute middleware and InterruptPolicy run after the model has already been shown the tool list.
 
-A related but orthogonal gap sits in Caller assembly: hosts that used `NewCaller` (a pool of one) had to construct parallel Agent/Caller instances per credential or endpoint. Multi-endpoint failover already exists in `largemodel/router` via `BuildCaller` / `ComposeCaller`; it is not a Run-parameter problem and must not be solved by injecting Caller or endpoint into `RunRequest`.
+A related but orthogonal gap sits in Caller assembly: hosts that used `NewCaller` (a pool of one) had to construct parallel Agent/Caller instances per credential or endpoint. Multi-endpoint failover already exists in `largemodel/model/router` via `BuildCaller` / `ComposeCaller`; it is not a Run-parameter problem and must not be solved by injecting Caller or endpoint into `RunRequest`.
 
 The seam-admission rule in [adr.md](adr.md) requires an ADR before any *new* ReAct hot-path interception plane. This change needs a recorded decision on whether a pre-context parameter hook is a new plane or a parameterization of the existing preflight.
 
@@ -31,7 +31,7 @@ Routing Caller assembly stays in the host/integration layer: `largemodel.BuildCa
 
 Extending input guards would overload a user-text policy engine with authorization and budget semantics it does not own. Extending Agent Middleware would be too late: tools are already frozen and sent. A chained preflight middleware plane would be the right shape *if* multiple independent policies had to wrap control flow; that is exactly the "new plane" trigger, and this change does not have that requirement. One construction-time function that returns a `RunParams` value is enough to let a host apply tenant policy without a second interception API.
 
-Keeping Caller routing out of ParamResolver preserves [constitution.md](../../constitution.md) § retry/routing: `largemodel/router` remains the only retry and same-protocol failover source. ParamResolver cannot substitute for endpoint selection.
+Keeping Caller routing out of ParamResolver preserves [constitution.md](../../constitution.md) § retry/routing: `largemodel/model/router` remains the only retry and same-protocol failover source. ParamResolver cannot substitute for endpoint selection.
 
 Pointer `Limits` plus `ToolMode` avoid a breaking `int` → `*int` migration. The cost is two input locations for the same ideas, resolved by a fixed priority: non-nil Limits field, else a positive old field, else Agent default. `ptr(0)` is the only way to say "explicit unlimited / omit vendor cap"; old `0` keeps the Agent default, including `RunTokenBudget: 0`.
 

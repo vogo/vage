@@ -41,7 +41,7 @@ import (
 	"fmt"
 
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func main() {
@@ -73,8 +73,8 @@ func main() {
 
 ## Connecting a Model
 
-vage speaks each vendor's native protocol directly. A model endpoint is a
-`largemodel.Caller` bound to one protocol at construction time, wrapped in
+vage consumes the canonical model layer from `github.com/vogo/largemodel/model`.
+A model endpoint is a `largemodel.Caller` bound to one protocol at construction time, wrapped in
 whichever governance middlewares you want:
 
 ```go
@@ -91,7 +91,7 @@ caller, err := largemodel.NewCaller(
 
 model := largemodel.New(caller,
 	largemodel.WithMiddleware(
-		largemodel.NewTimeoutMiddleware(30*time.Second),
+		middleware.NewTimeoutMiddleware(30*time.Second),
 	),
 )
 
@@ -121,7 +121,7 @@ option overrides the matching preset.
 
 There is no retry middleware in the `largemodel.New` chain above, and no
 circuit breaker: a caller reaches its endpoint through a **router pool** inside
-`largemodel`, and the pool owns the retries, the endpoint health and the
+the external `largemodel/model` module, and the pool owns the retries, endpoint health and
 failover.
 `WithRetryPolicy` and `WithRecoverTime` tune them:
 

@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // TestBuilder_SessionMemory_WithSlidingWindowCompressor verifies AC-3.1 +

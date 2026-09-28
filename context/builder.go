@@ -24,9 +24,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 // DefaultBuilderName is the BuilderName written into BuildReport.BuilderName

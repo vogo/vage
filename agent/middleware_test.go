@@ -23,7 +23,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // recorder builds a Middleware that appends "<name>:pre" before calling next

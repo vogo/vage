@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/hook"
-	"github.com/vogo/vage/schema"
 )
 
 // DefaultHookBufferSize matches the default used by a compatible external trace log so

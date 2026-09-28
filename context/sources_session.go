@@ -24,8 +24,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 // DefaultSessionMemoryPrefix is the key prefix SessionMemorySource scans by

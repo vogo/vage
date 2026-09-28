@@ -25,7 +25,7 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/security/credscrub"
 	"github.com/vogo/vage/tool"
 )

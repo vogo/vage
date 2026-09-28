@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Runner executes a unit of work. agent.Agent satisfies this interface.

@@ -22,7 +22,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func TestSummarizeAndTruncCompressor(t *testing.T) {

@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/orchestrate"
-	"github.com/vogo/vage/schema"
 )
 
 type workflowMode int

@@ -21,7 +21,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // TestRequestMessagesSource_Pass verifies request messages flow through.

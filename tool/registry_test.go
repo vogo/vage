@@ -24,7 +24,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 func echoHandler(_ context.Context, name, args string) (schema.ToolResult, error) {

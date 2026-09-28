@@ -17,7 +17,7 @@
 
 package tool
 
-import "github.com/vogo/vage/schema"
+import "github.com/vogo/largemodel/schema"
 
 // ResourceTracker is implemented by tools that read or write identifiable
 // resources (files, db rows, network endpoints, etc.). The canonical

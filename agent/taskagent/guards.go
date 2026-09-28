@@ -24,8 +24,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/guard"
-	"github.com/vogo/vage/schema"
 )
 
 // GuardsConfig aggregates the three execution-position guard lists —

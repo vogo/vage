@@ -23,12 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/interrupt"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // noopPolicy is a non-nil InterruptPolicy that never flags anything; it is

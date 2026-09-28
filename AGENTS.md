@@ -3,7 +3,8 @@
 ## Project
 
 `github.com/vogo/vage` — a composable, observable, operable Go framework for LLM agent systems.
-Builds Task / Router / Workflow / Custom agents on `github.com/vogo/aimodel` native protocol clients.
+Builds Task / Router / Workflow / Custom agents on `github.com/vogo/largemodel/model` callers and
+`github.com/vogo/largemodel/schema` contracts. `vage/schema` is a compatibility alias facade only.
 
 - **Doc entry:** `doc/overview.md` — knowledge-base rules and domain map
 - **Hard constraints:** `doc/constitution.md` — highest-priority red lines; read before any design change
@@ -43,7 +44,7 @@ Read the relevant page before changing behavior — this file does not restate t
 - **DAG orchestration, checkpoints** — `doc/domains/agent/orchestration/` · packages `orchestrate`, `checkpoint`
 - **Memory & context** — `doc/domains/memory/` · packages `memory`, `context`
 - **Session, workspace, sessionview** — `doc/domains/memory/session/` · packages `session`, `workspace`, `sessionview`
-- **LLM middleware & router** — `doc/domains/capability/model/` · package `largemodel`
+- **LLM integration** — `doc/domains/capability/model/` · external package `github.com/vogo/largemodel/model`
 - **Tools, MCP, skills** — `doc/domains/capability/tooling/` · packages `tool`, `mcp`, `skill`
 - **Guards & credential scrubbing** — `doc/domains/platform/guard/` · packages `guard`, `security`
 - **HTTP service, hooks, eval, vector** — `doc/domains/platform/` · packages `service`, `hook`, `eval`, `vector`

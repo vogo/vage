@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 var _ Evaluator = (*CompositeEvaluator)(nil)

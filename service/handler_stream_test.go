@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/schema"
 )
 
 // floodAgent streams events as fast as the channel accepts them, so a client

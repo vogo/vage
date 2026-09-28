@@ -23,11 +23,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/workflowagent"
 	"github.com/vogo/vage/integrations/internal/subagent"
 	"github.com/vogo/vage/orchestrate"
-	"github.com/vogo/vage/schema"
 )
 
 // countingAgent records how many times it ran, so tests can prove the steps

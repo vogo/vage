@@ -6,26 +6,26 @@
 
 | 文件 | 职责 |
 |------|------|
-| `largemodel/call.go` | `Caller` 接口与 `Request`/`Response`/`Chunk` 信封;中间件只看见这一层;`BindCaller`/`DelegateCaller` 透传能力接缝 |
-| `largemodel/capability.go` | Caller 层 `Capabilities`/`Requirements`/`CapabilityProvider`/`EndpointCapabilityProvider` |
-| `largemodel/capability_policy.go` | `RequireNativeCapabilities` / `AllowPromptFallback`;严格模式在 backend 前筛选合格 alias |
-| `largemodel/structured/` | 类型化 `Call[T]`、schema 推导/校验、内容修复 |
-| `largemodel/codec_caller.go` | 唯一的协议中立 adapter:信封字段机械投影 + `APIError` 包装 + 交给 `Stream` 管生命周期,不读任何厂商字段;无原生 SO 映射时默认 fail-closed |
-| `largemodel/internal/modelcore/` | 根包与 provider codec 之间的窄桥接契约(canonical Request/Result/Chunk/Stream、`Codec` 接口、归一错误分类);非公开 API,不解释任何 wire |
-| `largemodel/openai_chat.go` | 只剩 `OpenAIChatBackend`(= `openais.ChatCompleter` 别名)与 caller 接线;无 aimodel import |
-| `largemodel/anthropic_messages.go` | 只剩 `AnthropicMessagesBackend`(= `anthropics.Messenger` 别名)与 caller 接线;无 aimodel import |
-| `largemodel/router/` | 协议中立路由核:策略、健康、重试、failover |
-| `largemodel/provider/openais/` | OpenAI 全部 wire 知识:`chat_codec.go`(请求组装、response/usage/finish 归一、chunk 解码、错误分类、`response_format`、`tool_choice`)、`message_codec.go`、`capability.go`、路由池 |
-| `largemodel/provider/anthropics/` | Anthropic 全部 wire 知识:`messages_codec.go`(请求组装、system 提升与 prompt-cache block、必填 max_tokens、usage/stop_reason 归一、SSE 有状态解码、流内 error 事件与状态映射)、`message_codec.go`、`capability.go`、路由池 |
-| `largemodel/compose_options.go` | 池化 Caller 的中立选项(并发、重试、恢复时间);厂商 client option 只以各 provider 胶水自有的结构体字段出现 |
-| `largemodel/compose_pool.go` | provider-neutral 池集合与端点健康视图合并 |
-| `largemodel/openai_compose.go`、`anthropic_compose.go` | **唯一允许 import aimodel 的根包文件**:池 backend 绑定、`With*ClientOptions`、native client 构造、endpoint→provider spec 转换与按协议私有的 config 构造路径(公开入口在 `compose_caller.go`) |
-| `largemodel/endpoint_config.go` | 中立端点配置与 Caller 契约类型(`OpenAIConfig`、`WithRetryPolicy`、`Strategy`、`EndpointCost`);路由观测类型(`EndpointStat`、`AttemptResult`、状态常量)在 `largemodel/router` |
-| `largemodel/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
-| `largemodel/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
-| `largemodel/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
-| `largemodel/response_schema.go` | 包内 ResponseSchema 提示降级:仅当 `AllowPromptFallback` 显式开启时,无原生映射的 codec 才走这条路径 |
-| `largemodel/provider/openais/extra_body.go` | `openais.WithExtraBody` 与 `openais` namespace 扩展 |
+| `largemodel/model/call.go` | `Caller` 接口与 `Request`/`Response`/`Chunk` 信封;中间件只看见这一层;`BindCaller`/`DelegateCaller` 透传能力接缝 |
+| `largemodel/model/capability.go` | Caller 层 `Capabilities`/`Requirements`/`CapabilityProvider`/`EndpointCapabilityProvider` |
+| `largemodel/model/capability_policy.go` | `RequireNativeCapabilities` / `AllowPromptFallback`;严格模式在 backend 前筛选合格 alias |
+| `largemodel/model/structured/` | 类型化 `Call[T]`、schema 推导/校验、内容修复 |
+| `largemodel/model/codec_caller.go` | 唯一的协议中立 adapter:信封字段机械投影 + `APIError` 包装 + 交给 `Stream` 管生命周期,不读任何厂商字段;无原生 SO 映射时默认 fail-closed |
+| `largemodel/model/internal/modelcore/` | 根包与 provider codec 之间的窄桥接契约(canonical Request/Result/Chunk/Stream、`Codec` 接口、归一错误分类);非公开 API,不解释任何 wire |
+| `largemodel/openai_chat.go` | 只剩 `OpenAIChatBackend`(= `openais.ChatCompleter` 别名)与 caller 接线;无 largemodel import |
+| `largemodel/anthropic_messages.go` | 只剩 `AnthropicMessagesBackend`(= `anthropics.Messenger` 别名)与 caller 接线;无 largemodel import |
+| `largemodel/model/router/` | 协议中立路由核:策略、健康、重试、failover |
+| `largemodel/model/provider/openais/` | OpenAI 全部 wire 知识:`chat_codec.go`(请求组装、response/usage/finish 归一、chunk 解码、错误分类、`response_format`、`tool_choice`)、`message_codec.go`、`capability.go`、路由池 |
+| `largemodel/model/provider/anthropics/` | Anthropic 全部 wire 知识:`messages_codec.go`(请求组装、system 提升与 prompt-cache block、必填 max_tokens、usage/stop_reason 归一、SSE 有状态解码、流内 error 事件与状态映射)、`message_codec.go`、`capability.go`、路由池 |
+| `largemodel/model/compose_options.go` | 池化 Caller 的中立选项(并发、重试、恢复时间);厂商 client option 只以各 provider 胶水自有的结构体字段出现 |
+| `largemodel/model/compose_pool.go` | provider-neutral 池集合与端点健康视图合并 |
+| `largemodel/openai_compose.go`、`anthropic_compose.go` | **唯一允许 import largemodel 的根包文件**:池 backend 绑定、`With*ClientOptions`、native client 构造、endpoint→provider spec 转换与按协议私有的 config 构造路径(公开入口在 `compose_caller.go`) |
+| `largemodel/endpoint_config.go` | 中立端点配置与 Caller 契约类型(`OpenAIConfig`、`WithRetryPolicy`、`Strategy`、`EndpointCost`);路由观测类型(`EndpointStat`、`AttemptResult`、状态常量)在 `largemodel/model/router` |
+| `largemodel/model/stream.go` | `Stream` 生命周期(close 一次、终态 usage 捕获)与 `StreamAccumulator` 增量合并 |
+| `largemodel/model/errors.go` | `APIError` 归一化与 `IsRetryable` 错误判读,供溢出处理与上层决策使用 |
+| `largemodel/model/fake.go` | `FakeCaller` 脚本化测试替身,跨包共用 |
+| `largemodel/model/response_schema.go` | 包内 ResponseSchema 提示降级:仅当 `AllowPromptFallback` 显式开启时,无原生映射的 codec 才走这条路径 |
+| `largemodel/model/provider/openais/extra_body.go` | `openais.WithExtraBody` 与 `openais` namespace 扩展 |
 
 ## 多模态消息编码(image/file)
 
@@ -73,27 +73,27 @@
 
 | 包 / 文件 | 中间件 | 作用 |
 |-----------|--------|------|
-| `largemodel/middleware/timeout.go` | 超时 | 单次调用时限 |
-| `largemodel/middleware/ratelimit.go` | 限流 | 调用速率控制 |
-| `largemodel/middleware/cache.go` | 缓存 | 相同请求复用响应 |
-| `largemodel/middleware/log.go`、`debug.go`、`metrics.go` | 可观测 | 日志、调试、指标 |
-| `largemodel/middleware/budget_middleware.go` | 预算 | token 消耗核算,配合 Agent 预算终止 |
-| `largemodel/middleware/contexteditor/` | 上下文编辑 | 折叠旧工具结果、外置超大结果;含 `context_editor_compat.go` V1 兼容层 |
-| `largemodel/middleware.go`/`model.go` | 链装配 | 中间件组合入口 |
-| `largemodel/overflow.go` | (工具函数) | `IsContextOverflowError`;非中间件 |
+| `largemodel/model/middleware/timeout.go` | 超时 | 单次调用时限 |
+| `largemodel/model/middleware/ratelimit.go` | 限流 | 调用速率控制 |
+| `largemodel/model/middleware/cache.go` | 缓存 | 相同请求复用响应 |
+| `largemodel/model/middleware/log.go`、`debug.go`、`metrics.go` | 可观测 | 日志、调试、指标 |
+| `largemodel/model/middleware/budget_middleware.go` | 预算 | token 消耗核算,配合 Agent 预算终止 |
+| `largemodel/model/middleware/contexteditor/` | 上下文编辑 | 折叠旧工具结果、外置超大结果;含 `context_editor_compat.go` V1 兼容层 |
+| `largemodel/model/middleware.go`/`model.go` | 链装配 | 中间件组合入口 |
+| `largemodel/model/overflow.go` | (工具函数) | `IsContextOverflowError`;非中间件 |
 
 ## 关键设计决策
 
 - **协议直连而非中立抽象**:每种厂商协议一个 `Caller` 实现,发出的是该 provider 的 native 请求。代价是调用层感知协议差异,收益是不必为了统一而做有损归一,厂商新能力也不必先等一层中立抽象补齐。
-- **后端接口化,重试与路由整块外包给 router**:`Caller` 持有的不是具体客户端而是最小方法集接口,而 `largemodel/provider/{openais,anthropics}` 路由池实现的正是同一组方法。于是重试、端点存活判定、多端点选择与故障转移整块取自 `largemodel/router`,vage 删除了自己的 Retry / CircuitBreaker 中间件 —— 两套机制并存只会把尝试次数相乘。单端点走"一个端点的池",与多端点同形,可靠性行为不因端点数量而换一套说法。
-- **provider 边界是硬规则,由依赖门禁固化**:凡是依赖厂商 wire 形状或语义的判定 —— request 组装、response/message/usage/finish-reason 归一、chunk 与 SSE 解码、error 分类与状态映射、system 字段、`response_format`/`output_config`、capability 推导 —— 只能位于 `largemodel/provider/{openais,anthropics}`。根包唯一的例外是显式列举的 compose 胶水文件(`openai_compose.go`、`anthropic_compose.go`),因为它们实现的 backend 方法集本身就以厂商 wire 类型署名。`largemodel/dependency_test.go` 按**文件名 + 允许的 import** 精确白名单断言这条规则:任何未白名单的根包生产文件 import `aimodel/openai` 或 `aimodel/anthropic` 即 CI 失败;白名单条目失效(文件消失或不再需要该 import)同样失败,避免留下"再次 import 的许可证"。白名单不是扩展点 —— 新增厂商或新胶水文件必须经边界评审并显式更新测试,不能靠间接 re-export、宽前缀规则或换个根包文件绕过。
-- **Caller facade 与 provider codec 分层**:`largemodel/provider/*` 拥有完整的 native codec、endpoint construction 与 routed backend,不反向依赖根包;实现公开 `Caller` 的 adapter 留在 `largemodel`。为打断 `largemodel → provider → largemodel` 的 import cycle,两侧通过 `largemodel/internal/modelcore` 的窄桥接契约通信:它只承载公开信封已经能表达的数据与归一后的错误分类,不是新的公开 API,也不把两种厂商 wire 合并成一套有损模型。代价是少量机械字段转换,换来公开类型稳定与单向依赖。根包侧因此只有一个 `codecCaller`,两种协议共用 —— 新增 provider 不需要再写一份 adapter。
+- **后端接口化,重试与路由整块外包给 router**:`Caller` 持有的不是具体客户端而是最小方法集接口,而 `largemodel/model/provider/{openais,anthropics}` 路由池实现的正是同一组方法。于是重试、端点存活判定、多端点选择与故障转移整块取自 `largemodel/model/router`,vage 删除了自己的 Retry / CircuitBreaker 中间件 —— 两套机制并存只会把尝试次数相乘。单端点走"一个端点的池",与多端点同形,可靠性行为不因端点数量而换一套说法。
+- **provider 边界是硬规则,由依赖门禁固化**:凡是依赖厂商 wire 形状或语义的判定 —— request 组装、response/message/usage/finish-reason 归一、chunk 与 SSE 解码、error 分类与状态映射、system 字段、`response_format`/`output_config`、capability 推导 —— 只能位于 `largemodel/model/provider/{openais,anthropics}`。根包唯一的例外是显式列举的 compose 胶水文件(`openai_compose.go`、`anthropic_compose.go`),因为它们实现的 backend 方法集本身就以厂商 wire 类型署名。`largemodel/dependency_test.go` 按**文件名 + 允许的 import** 精确白名单断言这条规则:任何未白名单的根包生产文件 import `largemodel/openai` 或 `largemodel/anthropic` 即 CI 失败;白名单条目失效(文件消失或不再需要该 import)同样失败,避免留下"再次 import 的许可证"。白名单不是扩展点 —— 新增厂商或新胶水文件必须经边界评审并显式更新测试,不能靠间接 re-export、宽前缀规则或换个根包文件绕过。
+- **Caller facade 与 provider codec 分层**:`largemodel/model/provider/*` 拥有完整的 native codec、endpoint construction 与 routed backend,不反向依赖根包;实现公开 `Caller` 的 adapter 留在 `largemodel`。为打断 `largemodel → provider → largemodel` 的 import cycle,两侧通过 `largemodel/internal/modelcore` 的窄桥接契约通信:它只承载公开信封已经能表达的数据与归一后的错误分类,不是新的公开 API,也不把两种厂商 wire 合并成一套有损模型。代价是少量机械字段转换,换来公开类型稳定与单向依赖。根包侧因此只有一个 `codecCaller`,两种协议共用 —— 新增 provider 不需要再写一份 adapter。
 - **已知代价:400 被当作可重试**。router 只把 401/403 判为不可重试,其余(含确定性的 400/404/422)一律重试满再判死端点。一个格式错误的请求因此要付掉整轮退避,并让端点进入恢复窗口。这是"取单一来源"的代价,vage 侧可通过可注入 failure classifier 改进(待做)。`IsRetryable` 保留了 vage 更窄的判读供上层使用。
 - **池集合而非单池**:router 池一次只服务一个调用(并发调用被拒为 `ErrCallInProgress`),而 vage 把一个 `Caller` 注入给并行运行的 Agent。Caller 因此按需建池、用完归还(one pool per concurrent worker)。代价是健康状态按池分散;`EndpointStats()` 在读取时按别名合并出整体视图。流式调用在流建立后立即归还池 —— 路由只覆盖建流那一次。
 - **信封隔离厂商类型**:`Request`/`Response`/`Chunk` 是 vage 自己的调用信封,厂商 wire 类型只出现在 provider 实现内部,因此中间件对协议无感、可跨协议复用。
 - **prompt caching 下沉到 provider**:调用层只在请求上表达"要缓存"的意图,cache_control 断点由 Anthropic provider 渲染;OpenAI 自动缓存相同前缀,该意图无 wire 效果。
 - **装饰器链而非配置开关**:每个治理关注点是一个独立中间件,使用方按需组合、自定排序。语义由组合顺序显式表达,而非隐藏在标志位里。
-- **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到 `largemodel/middleware/contexteditor` 的兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
+- **上下文编辑:收敛策略单一判定点**:折叠哪些工具结果的判定收敛到单一入口,V1 旧行为被隔离到 `largemodel/model/middleware/contexteditor` 的兼容层(`context_editor_compat.go`)。这是近期"收敛策略优先级为单一判定点,隔离 V1 兼容层"的核心 —— 避免多处判定漂移。
 - **浅拷贝编辑**:编辑作用于 `Request` 的浅拷贝(`Request.Clone`),绝不篡改调用方原始请求。
 - **资源感知折叠**:stale_resource 判定通过 `ResourceLookupFunc`(`schema.ResourceTracker` 契约;`tool.ResourceTracker` 为兼容别名)查询工具资源语义(每个被检查的工具调用查一次,须廉价,在热路径上),识别被后续写操作作废的旧读结果。
 - **工件外置**:超过单条字节上限的工具结果经 `ArtifactWriter` 按 (sessionID, name) 外置,提示里留短引用;写入须对跨会话并发安全。

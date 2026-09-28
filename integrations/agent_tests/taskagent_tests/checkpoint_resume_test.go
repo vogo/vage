@@ -25,12 +25,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	largemodel "github.com/vogo/largemodel/model"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/checkpoint"
 	"github.com/vogo/vage/hook"
-	"github.com/vogo/vage/largemodel"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

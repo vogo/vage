@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 type fetchRequest struct {

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	vctx "github.com/vogo/vage/context"
-	"github.com/vogo/vage/schema"
 )
 
 // TestBuilder_SystemPromptRenderError_FailClosed exercises design §7 +

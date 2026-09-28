@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // ExecuteDAG runs a DAG of nodes with the given config and initial request.

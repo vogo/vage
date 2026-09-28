@@ -20,7 +20,7 @@ package taskagent
 import (
 	"strings"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/skill"
 	"github.com/vogo/vage/tool"
 )

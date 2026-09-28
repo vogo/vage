@@ -24,8 +24,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/hook"
-	"github.com/vogo/vage/schema"
 )
 
 // stubSource is a Source whose behaviour is fully driven by fixture fields.

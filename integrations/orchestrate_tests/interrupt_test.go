@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/integrations/internal/subagent"
 	"github.com/vogo/vage/orchestrate"
-	"github.com/vogo/vage/schema"
 )
 
 // countingRunner records invocations so tests can prove downstream work never

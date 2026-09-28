@@ -22,9 +22,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/checkpoint"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

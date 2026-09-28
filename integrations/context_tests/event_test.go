@@ -21,11 +21,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // TestTaskAgent_EmitsEventContextBuilt covers AC-2.2: when TaskAgent runs

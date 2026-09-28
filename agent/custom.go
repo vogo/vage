@@ -21,7 +21,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // CustomAgent delegates its Run to a user-provided RunFunc.

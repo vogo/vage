@@ -24,10 +24,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // TestBuildReport_JSONRoundTrip covers AC-2.3: a populated BuildReport

@@ -2,9 +2,9 @@ module github.com/vogo/vage
 
 go 1.26.0
 
-require github.com/vogo/aimodel v0.8.0
+require github.com/vogo/largemodel v0.9.0
 
-require github.com/google/jsonschema-go v0.4.2
+require github.com/google/jsonschema-go v0.4.2 // indirect
 
 require gopkg.in/yaml.v3 v3.0.1
 

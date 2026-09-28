@@ -21,7 +21,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // TokenBudgetCompressor keeps the most recent messages that fit within a token budget.

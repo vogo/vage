@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // TestMetricsHook_Filter_LimitedToCounters guards the contract that

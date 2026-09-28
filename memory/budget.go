@@ -20,7 +20,7 @@ package memory
 import (
 	"fmt"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Budget is the value object for one context build. ModelContextTokens is the

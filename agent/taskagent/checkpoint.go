@@ -24,8 +24,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/checkpoint"
-	"github.com/vogo/vage/schema"
 )
 
 // ErrEmptyLLMResponse is returned by Resume when the chat completion

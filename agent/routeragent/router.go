@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/schema"
 )
 
 // Route pairs an Agent with a description used for routing decisions.

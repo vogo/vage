@@ -20,7 +20,7 @@ package session
 import (
 	"context"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // SessionFilter narrows the result of List. Zero-valued fields are ignored

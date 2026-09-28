@@ -21,7 +21,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // EvalCase represents a single evaluation test case.

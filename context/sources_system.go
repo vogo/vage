@@ -21,8 +21,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // SystemPromptSource renders a prompt.PromptTemplate into a single

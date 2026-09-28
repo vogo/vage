@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/agent/taskagent"
 	"github.com/vogo/vage/memory"
 	"github.com/vogo/vage/prompt"
-	"github.com/vogo/vage/schema"
 )
 
 // TestTaskAgent_ContextAssembly_BehaviorCompat verifies that running a

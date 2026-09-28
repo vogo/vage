@@ -29,7 +29,7 @@
 - **评测器可组合**:每个评测器单一标准,Composite/Weighted 把多标准汇总为综合评分,支持批量报告。
 - **向量接口刻意最小**:只定义存取与嵌入的最小面,让 qdrant/pgvector/chroma/pinecone 等无扭曲实现;内存 MapVectorStore 覆盖测试与本地实验。
 - **后端为 thin HTTP 客户端**:qdrant、openais、voyages 后端刻意是 net/http + JSON 的薄封装,不引重依赖,便于替换。
-- **嵌入按厂商分层**:目录形态对齐 `largemodel/provider/`,但不并入 `largemodel` —— 嵌入与聊天是两条独立协议,合并会把聊天的 schema/预算/路由语义强加给嵌入。
+- **嵌入按厂商分层**:目录形态对齐 `largemodel/model/provider/`,但不并入 `largemodel` —— 嵌入与聊天是两条独立协议,合并会把聊天的 schema/预算/路由语义强加给嵌入。
 - **共同配置只取交集**:`EmbedderConfig` 只承载 `Provider`/`APIKey`/`BaseURL`/`Model`。厂商专属参数(OpenAI `dimensions`,Voyage `input_type`/`truncation`/`output_dimension`)不进统一配置 —— 塞进去要么有损归一,要么留下一半场景被静默忽略的字段。
 - **Voyage 用途固定在实例上**:`input_type` 的 query/document 优化无法从 `Embed`/`BatchEmbed` 方法名推断(两者入库与召回都在用)。因此它是实例级选项:检索优化场景建两个同模型同维度的实例,入库注入 document 实例,召回注入 query 实例,接口本身不动。
 - **模型默认值不对称是有意的**:空模型时 OpenAI 保留既有默认值以维持兼容,Voyage 则在构造期报错 —— 其 API 要求该字段,且推荐模型逐代变化,框架硬编码会悄悄改变调用方实际嵌入用的模型。
@@ -49,7 +49,7 @@ flowchart TD
 
 - 根包的配置门面要 import 两家 provider,provider 因此**不得**反向 import 根包。两侧都要认的 `ErrEmptyQuery` 只有一个底层实例,放在 `internal/embedcore`,根包按原名导出同一实例 —— `errors.Is(err, vector.ErrEmptyQuery)` 语义不变。
 - 连带结果:provider 的接口符合性断言放在根包的外部测试里,而不是各 provider 内部的 `var _ vector.Embedder` 块。
-- 两家 provider 互不 import,也都不碰 `largemodel`/`aimodel`。以上四条由 `vector/dependency_test.go` 解析生产文件 import 强制。
+- 两家 provider 互不 import,也都不碰 `largemodel`/`largemodel`。以上四条由 `vector/dependency_test.go` 解析生产文件 import 强制。
 
 ## 嵌入器构造方式
 

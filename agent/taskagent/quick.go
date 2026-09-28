@@ -18,8 +18,8 @@
 package taskagent
 
 import (
+	largemodel "github.com/vogo/largemodel/model"
 	"github.com/vogo/vage/agent"
-	"github.com/vogo/vage/largemodel"
 	"github.com/vogo/vage/prompt"
 )
 

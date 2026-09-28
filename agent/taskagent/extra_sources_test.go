@@ -21,9 +21,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	vctx "github.com/vogo/vage/context"
-	"github.com/vogo/vage/schema"
 )
 
 // markerSource emits a single system message containing a recognisable

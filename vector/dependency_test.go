@@ -126,12 +126,14 @@ func TestProvidersDoNotImportRoot(t *testing.T) {
 }
 
 // TestProvidersStayOutOfTheChatStack verifies embedding remains layered
-// apart from the chat protocol stack: no largemodel, no aimodel, no
-// router. This is the topology the intent's non-goals pin down.
+// apart from the chat protocol stack: no caller/router layer, no protocol
+// clients. This is the topology the intent's non-goals pin down.
 func TestProvidersStayOutOfTheChatStack(t *testing.T) {
 	forbidden := []string{
-		modulePath + "/largemodel",
-		"github.com/vogo/aimodel",
+		"github.com/vogo/largemodel/model",
+		"github.com/vogo/largemodel/model/router",
+		"github.com/vogo/largemodel/openai",
+		"github.com/vogo/largemodel/anthropic",
 	}
 
 	for _, dir := range []string{".", "provider/openais", "provider/voyages"} {

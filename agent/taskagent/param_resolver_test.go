@@ -24,12 +24,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	vctx "github.com/vogo/vage/context"
 	"github.com/vogo/vage/guard"
 	"github.com/vogo/vage/hook"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 	"github.com/vogo/vage/tool"
 )
 

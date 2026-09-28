@@ -28,8 +28,8 @@ package vctx
 import (
 	"context"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 // Source-name constants provide a single source of truth for hook payloads,

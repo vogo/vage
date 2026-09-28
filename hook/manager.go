@@ -24,7 +24,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // Manager dispatches events to registered sync and async hooks.

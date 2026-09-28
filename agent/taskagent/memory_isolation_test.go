@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/agent"
 	"github.com/vogo/vage/memory"
-	"github.com/vogo/vage/schema"
 )
 
 func TestAgent_SharedManager_DoesNotLeakAcrossSessions(t *testing.T) {

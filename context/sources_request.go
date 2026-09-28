@@ -20,7 +20,7 @@ package vctx
 import (
 	"context"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 )
 
 // RequestMessagesSource emits the messages carried in BuildInput.Request.

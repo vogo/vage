@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vogo/vage/schema"
+	"github.com/vogo/largemodel/schema"
 	"github.com/vogo/vage/tool"
 	"github.com/vogo/vage/tool/toolkit"
 )
