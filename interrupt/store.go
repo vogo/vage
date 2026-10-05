@@ -75,7 +75,7 @@ type Store interface {
 	//
 	// Each decision must address a ToolCallID in the record's Pending
 	// set: ErrUnknownToolCall otherwise. Resubmitting an identical
-	// decision (same Content and IsError) for an already-decided
+	// decision (same Content, IsError and Execute) for an already-decided
 	// ToolCallID is idempotent: it persists nothing, leaves Revision
 	// unchanged and is absent from committed. Resubmitting a different
 	// one returns ErrDecisionConflict without changing that decision.

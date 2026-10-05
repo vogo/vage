@@ -1179,6 +1179,190 @@ func TestInterrupt_IdempotentResubmit_EmitsNoDuplicateEvents(t *testing.T) {
 	}
 }
 
+// TestInterrupt_ResumeExecute_RunsHandler covers the approve-then-run path:
+// SubmitDecisions with Execute=true, then ResumeInterrupt with no wire
+// decisions, must actually invoke the pending tool's handler.
+func TestInterrupt_ResumeExecute_RunsHandler(t *testing.T) {
+	var handlerRuns atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(_ context.Context, _, args string) (schema.ToolResult, error) {
+		handlerRuns.Add(1)
+		return schema.TextResult("", "executed:"+args), nil
+	})
+
+	mock := newMock(
+		makeToolCallResponse("tc-1", "bash", `{"command":"rm -rf ./dist"}`, 30),
+		makeStopResponse("done", 20),
+	)
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-exec"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("bash"),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-exec",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean dist")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if first.StopReason != schema.StopReasonInterrupted {
+		t.Fatalf("StopReason = %q, want interrupted", first.StopReason)
+	}
+	if handlerRuns.Load() != 0 {
+		t.Fatalf("handler ran %d times before resume, want 0", handlerRuns.Load())
+	}
+
+	if _, _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
+		ToolCallID: "tc-1",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	resp, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+	})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resp.StopReason != schema.StopReasonComplete {
+		t.Errorf("StopReason = %q, want complete", resp.StopReason)
+	}
+	if handlerRuns.Load() != 1 {
+		t.Errorf("handler ran %d times after execute-resume, want 1", handlerRuns.Load())
+	}
+}
+
+// TestInterrupt_ResumeExecute_IsErrorWins ensures a rejected decision never
+// runs the handler even if Execute is also set.
+func TestInterrupt_ResumeExecute_IsErrorWins(t *testing.T) {
+	var handlerRuns atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(_ context.Context, _, _ string) (schema.ToolResult, error) {
+		handlerRuns.Add(1)
+		return schema.TextResult("", "should-not-run"), nil
+	})
+
+	mock := newMock(
+		makeToolCallResponse("tc-1", "bash", `{"command":"rm -rf ./dist"}`, 30),
+		makeStopResponse("acknowledged deny", 10),
+	)
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-deny"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("bash"),
+	)
+
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-deny",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean dist")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if _, _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
+		ToolCallID: "tc-1",
+		Content:    "rejected by human",
+		IsError:    true,
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	resp, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+	})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resp.StopReason != schema.StopReasonComplete {
+		t.Errorf("StopReason = %q, want complete", resp.StopReason)
+	}
+	if handlerRuns.Load() != 0 {
+		t.Errorf("handler ran %d times on reject, want 0", handlerRuns.Load())
+	}
+}
+
+// TestInterrupt_RunStream_EmitsCreatedOnStream pins the streaming HITL
+// contract: interrupt_created must appear on the live stream (not only the
+// hook bus) so an HTTP SSE client can recover interrupt_id.
+func TestInterrupt_RunStream_EmitsCreatedOnStream(t *testing.T) {
+	var handlerRuns atomic.Int32
+	store := interrupt.NewMapStore()
+	fake := &largemodel.FakeCaller{
+		Responses: []*largemodel.Response{
+			makeToolCallResponse("tc-1", "ask_user", `{"question":"proceed?"}`, 30),
+		},
+		Chunks: []*largemodel.Chunk{{
+			ToolCallDeltas: []largemodel.ToolCallDelta{{
+				Index:          0,
+				ID:             "tc-1",
+				Name:           "ask_user",
+				ArgumentsDelta: `{"question":"proceed?"}`,
+			}},
+			FinishReason: largemodel.FinishReasonToolCalls,
+			Usage:        &schema.Usage{PromptTokens: 15, CompletionTokens: 15, TotalTokens: 30},
+		}},
+	}
+	a := taskagent.New(
+		agent.Config{ID: "agent-stream-i"},
+		taskagent.WithCaller(&mockCaller{FakeCaller: fake}),
+		taskagent.WithToolRegistry(askUserReg(&handlerRuns)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("ask_user"),
+	)
+
+	stream, err := a.RunStream(context.Background(), &schema.RunRequest{
+		SessionID: "sess-stream-i",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "please ask")},
+	})
+	if err != nil {
+		t.Fatalf("RunStream: %v", err)
+	}
+
+	var types []string
+	var created schema.InterruptCreatedData
+	if err := stream.ForEach(func(e schema.Event) error {
+		types = append(types, e.Type)
+		if e.Type == schema.EventInterruptCreated {
+			data, ok := e.Data.(schema.InterruptCreatedData)
+			if !ok {
+				t.Errorf("interrupt_created data type = %T", e.Data)
+			} else {
+				created = data
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ForEach: %v", err)
+	}
+
+	if !containsStr(types, schema.EventInterruptCreated) {
+		t.Fatalf("stream events = %v, want interrupt_created", types)
+	}
+	if created.InterruptID == "" {
+		t.Fatal("interrupt_created missing interrupt_id")
+	}
+	if len(created.PendingToolCallIDs) != 1 || created.PendingToolCallIDs[0] != "tc-1" {
+		t.Errorf("PendingToolCallIDs = %v, want [tc-1]", created.PendingToolCallIDs)
+	}
+	if handlerRuns.Load() != 0 {
+		t.Errorf("handler ran %d times, want 0", handlerRuns.Load())
+	}
+	if !containsStr(types, schema.EventAgentEnd) {
+		t.Errorf("stream events = %v, want agent_end", types)
+	}
+}
+
 func containsStr(list []string, want string) bool {
 	return slices.Contains(list, want)
 }

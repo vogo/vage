@@ -113,6 +113,11 @@ type reactMode interface {
 	// mode sends an EventIterationStart; the sync mode is a no-op.
 	emitIterationStart(rc *runContext, iter int) error
 
+	// emitInterruptCreated fires after a suspending batch has been persisted.
+	// The streaming mode sends interrupt_created on the live stream (hooks
+	// ride along via buildSend); the sync mode dispatches to hooks only.
+	emitInterruptCreated(rc *runContext, desc *schema.InterruptDescriptor) error
+
 	// executeTurn performs one LLM call for the current message set,
 	// updating rc's usage and budget tracker as a side effect, and returns
 	// the accumulated assistant message together with its finish reason.
@@ -198,6 +203,9 @@ func (a *Agent) runReactLoop(
 				return "", err
 			}
 			if interrupted {
+				if err := mode.emitInterruptCreated(rc, desc); err != nil {
+					return "", err
+				}
 				rc.interruptDesc = desc
 				return schema.StopReasonInterrupted, nil
 			}
@@ -277,6 +285,11 @@ type syncMode struct {
 
 func (m *syncMode) emitIterationStart(_ *runContext, _ int) error { return nil }
 
+func (m *syncMode) emitInterruptCreated(rc *runContext, desc *schema.InterruptDescriptor) error {
+	m.a.dispatch(m.ctx, interruptCreatedEvent(m.a.ID(), rc.sessionID, rc.iteration, desc))
+	return nil
+}
+
 func (m *syncMode) executeTurn(rc *runContext, chatReq *largemodel.Request) (schema.Message, largemodel.FinishReason, error) {
 	resp, err := m.a.caller.Call(m.ctx, chatReq)
 	if err != nil {
@@ -312,6 +325,10 @@ func (m *streamMode) emitIterationStart(rc *runContext, iter int) error {
 	return m.send(schema.NewEvent(schema.EventIterationStart, m.agentID, rc.sessionID, schema.IterationStartData{
 		Iteration: iter,
 	}))
+}
+
+func (m *streamMode) emitInterruptCreated(rc *runContext, desc *schema.InterruptDescriptor) error {
+	return m.send(interruptCreatedEvent(m.agentID, rc.sessionID, rc.iteration, desc))
 }
 
 func (m *streamMode) executeTurn(rc *runContext, chatReq *largemodel.Request) (schema.Message, largemodel.FinishReason, error) {

@@ -656,10 +656,17 @@ resp, err := a2.ResumeInterrupt(ctx, schema.ResumeInterruptRequest{
 
 A request with a partial decision set returns the same `interrupt_id` and the
 still-pending calls without starting any tool or model call; only once every
-flagged call in the batch has a decision does `ResumeInterrupt` execute the
-batch's ordinary sibling calls, feed everything back through the model, and
-continue the ReAct loop — with the suspended run's token budget carried over,
-not restarted. `Decisions` commit in order, so a rejected entry leaves its
+flagged call in the batch has a decision does `ResumeInterrupt` continue the
+ReAct loop. Injected decisions (`Execute` unset) become the tool result
+without running the handler — that remains the `ask_user` path. An approved
+execute decision (`Execute: true` on `interrupt.Decision`, typically via
+`Store.SubmitDecisions`) runs the original handler instead. `IsError` always
+wins over `Execute`. Host permission layers that hard-reject Dangerous tools
+in non-interactive mode should honour `interrupt.IsApprovedExecute(ctx)` so
+the approved handler can run without widening that skip to calls that never
+froze. Sibling tools in the original batch then run, everything
+feeds back through the model, and the suspended run's token budget is carried
+over, not restarted. `Decisions` commit in order, so a rejected entry leaves its
 valid prefix committed. Omitting `Decisions` entirely resumes on what is
 already committed, which is how a resume that failed part-way is retried
 without asking the human again. `ResumeInterrupt` does not run the agent middleware
