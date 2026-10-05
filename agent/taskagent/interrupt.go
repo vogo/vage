@@ -47,11 +47,9 @@ var (
 	ErrInterruptAgentMismatch = errors.New("vage: interrupt record belongs to a different agent")
 
 	// ErrIncompatibleInterruptTools is returned by ResumeInterrupt when a
-	// non-pending tool call in the record's batch names a tool this
-	// Agent's registry does not recognize. Pending calls need no
-	// registered handler — their result comes from the submitted
-	// decision, not execution — so only the ordinary sibling calls in the
-	// same batch are checked.
+	// tool call that will run a handler names a tool this Agent's registry
+	// does not recognize. Injected pending calls need no handler; approved
+	// Execute pending calls are checked together with ordinary siblings.
 	ErrIncompatibleInterruptTools = errors.New("vage: interrupt record references tools this agent cannot execute")
 )
 
@@ -225,13 +223,24 @@ func (a *Agent) maybeInterrupt(
 		return nil, false, fmt.Errorf("vage: persist interrupt: %w", err)
 	}
 
-	a.dispatch(ctx, schema.NewEvent(schema.EventInterruptCreated, a.ID(), rc.sessionID, schema.InterruptCreatedData{
-		InterruptID:        rec.ID,
-		Iteration:          rec.Iteration,
-		PendingToolCallIDs: rec.Pending,
-	}))
-
 	return interruptDescriptorFromRecord(rec), true, nil
+}
+
+func interruptCreatedEvent(agentID, sessionID string, iteration int, desc *schema.InterruptDescriptor) schema.Event {
+	var pending []string
+	var interruptID string
+	if desc != nil {
+		interruptID = desc.InterruptID
+		pending = make([]string, 0, len(desc.Pending))
+		for _, tc := range desc.Pending {
+			pending = append(pending, tc.ID)
+		}
+	}
+	return schema.NewEvent(schema.EventInterruptCreated, agentID, sessionID, schema.InterruptCreatedData{
+		InterruptID:        interruptID,
+		Iteration:          iteration,
+		PendingToolCallIDs: pending,
+	})
 }
 
 // validateBatchAddressable enforces the framework's addressing contract for
@@ -471,9 +480,10 @@ func (a *Agent) emitInterruptDecisionEvents(ctx context.Context, rec *interrupt.
 }
 
 // validateInterruptToolCompatibility fails before anything executes when a
-// non-pending (ordinary sibling) tool call in the batch names a tool this
-// Agent's registry cannot recognize. Pending calls need no handler — the
-// committed decision replaces execution — so only siblings are checked.
+// call that will actually run a handler names a tool this Agent's registry
+// does not recognize. Injected pending calls (Execute == false, or IsError)
+// need no handler — the committed decision replaces execution. Approved
+// Execute pending calls are checked together with ordinary siblings.
 func (a *Agent) validateInterruptToolCompatibility(rec *interrupt.Record) error {
 	pendingSet := make(map[string]struct{}, len(rec.Pending))
 	for _, id := range rec.Pending {
@@ -482,7 +492,10 @@ func (a *Agent) validateInterruptToolCompatibility(rec *interrupt.Record) error 
 
 	for _, tc := range rec.ToolCalls {
 		if _, isPending := pendingSet[tc.ID]; isPending {
-			continue
+			dec := rec.Decisions[tc.ID]
+			if !dec.Execute || dec.IsError {
+				continue
+			}
 		}
 		if a.toolRegistry == nil {
 			return fmt.Errorf("%w: no tool registry configured", ErrIncompatibleInterruptTools)
@@ -594,14 +607,14 @@ func (a *Agent) completeInterruptRecord(ctx context.Context, id, owner string) {
 	}
 }
 
-// reconcileInterruptBatch replays the suspended tool batch: pending calls
-// resolve from their committed decisions (no handler runs, no
-// tool_call_start/end events — consistent with none having been emitted at
-// suspend time either), ordinary sibling calls execute exactly as
-// executeToolBatch would in a live Run (with events, dispatched via hooks
-// only — ResumeInterrupt is a synchronous entry point). Both kinds pass
-// through the same tool-result guards. The returned messages/results are
-// aligned with rec.ToolCalls, preserving the model's original order.
+// reconcileInterruptBatch replays the suspended tool batch. Injected pending
+// calls (Execute == false, or IsError) resolve from their committed
+// decisions — no handler runs, no tool_call_start/end events, matching
+// suspend-time. Ordinary siblings and approved Execute pending calls run
+// through executeToolBatch (events dispatched via hooks only —
+// ResumeInterrupt is a synchronous entry point). Both kinds pass through
+// the same tool-result guards. The returned messages/results are aligned
+// with rec.ToolCalls, preserving the model's original order.
 func (a *Agent) reconcileInterruptBatch(
 	ctx context.Context,
 	rc *runContext,
@@ -613,11 +626,19 @@ func (a *Agent) reconcileInterruptBatch(
 		pendingSet[id] = struct{}{}
 	}
 
-	siblings := make([]schema.ToolCall, 0, len(rec.ToolCalls))
+	injectIDs := make(map[string]struct{}, len(rec.Pending))
+	toExecute := make([]schema.ToolCall, 0, len(rec.ToolCalls))
 	for _, tc := range rec.ToolCalls {
-		if _, isPending := pendingSet[tc.ID]; !isPending {
-			siblings = append(siblings, tc)
+		if _, isPending := pendingSet[tc.ID]; isPending {
+			dec := rec.Decisions[tc.ID]
+			if dec.Execute && !dec.IsError {
+				toExecute = append(toExecute, tc)
+				continue
+			}
+			injectIDs[tc.ID] = struct{}{}
+			continue
 		}
+		toExecute = append(toExecute, tc)
 	}
 
 	sink := func(ev schema.Event) error {
@@ -625,15 +646,15 @@ func (a *Agent) reconcileInterruptBatch(
 		return nil
 	}
 
-	siblingMsgs, siblingResults, err := a.executeToolBatch(ctx, rc, agentID, siblings, false, sink)
+	execMsgs, execResults, err := a.executeToolBatch(interrupt.WithApprovedExecute(ctx), rc, agentID, toExecute, false, sink)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	decisionMsgs := make(map[string]schema.Message, len(rec.Pending))
-	decisionResults := make(map[string]schema.ToolResult, len(rec.Pending))
+	injectedMsgs := make(map[string]schema.Message, len(injectIDs))
+	injectedResults := make(map[string]schema.ToolResult, len(injectIDs))
 	for _, tc := range rec.ToolCalls {
-		if _, isPending := pendingSet[tc.ID]; !isPending {
+		if _, ok := injectIDs[tc.ID]; !ok {
 			continue
 		}
 
@@ -651,22 +672,22 @@ func (a *Agent) reconcileInterruptBatch(
 			a.dispatch(ctx, *guardEvt)
 		}
 
-		decisionResults[tc.ID] = guarded
-		decisionMsgs[tc.ID] = schema.NewToolResultMessage(a.Protocol(), guarded.ToolCallID, guarded.Text(), guarded.IsError)
+		injectedResults[tc.ID] = guarded
+		injectedMsgs[tc.ID] = schema.NewToolResultMessage(a.Protocol(), guarded.ToolCallID, guarded.Text(), guarded.IsError)
 	}
 
 	toolMsgs := make([]schema.Message, 0, len(rec.ToolCalls))
 	results := make([]schema.ToolResult, 0, len(rec.ToolCalls))
-	siblingIdx := 0
+	execIdx := 0
 	for _, tc := range rec.ToolCalls {
-		if _, isPending := pendingSet[tc.ID]; isPending {
-			toolMsgs = append(toolMsgs, decisionMsgs[tc.ID])
-			results = append(results, decisionResults[tc.ID])
+		if _, ok := injectIDs[tc.ID]; ok {
+			toolMsgs = append(toolMsgs, injectedMsgs[tc.ID])
+			results = append(results, injectedResults[tc.ID])
 			continue
 		}
-		toolMsgs = append(toolMsgs, siblingMsgs[siblingIdx])
-		results = append(results, siblingResults[siblingIdx])
-		siblingIdx++
+		toolMsgs = append(toolMsgs, execMsgs[execIdx])
+		results = append(results, execResults[execIdx])
+		execIdx++
 	}
 
 	return toolMsgs, results, nil

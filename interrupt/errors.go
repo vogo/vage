@@ -38,7 +38,7 @@ var (
 
 	// ErrDecisionConflict is returned by SubmitDecisions when a decision
 	// resubmits a ToolCallID that already has a committed Decision with
-	// different Content/IsError. Resubmitting an identical decision is
+	// different Content/IsError/Execute. Resubmitting an identical decision is
 	// idempotent and returns nil.
 	ErrDecisionConflict = errors.New("interrupt: conflicting decision for tool call")
 

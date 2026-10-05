@@ -158,7 +158,7 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) ([]string,
 
 		existing, has := rec.Decisions[d.ToolCallID]
 		if has {
-			if existing.Content == d.Content && existing.IsError == d.IsError {
+			if existing.Content == d.Content && existing.IsError == d.IsError && existing.Execute == d.Execute {
 				continue // idempotent resubmission
 			}
 			if len(committed) > 0 {
@@ -174,6 +174,7 @@ func applyDecisions(rec *Record, decisions []Decision, now time.Time) ([]string,
 			ToolCallID: d.ToolCallID,
 			Content:    d.Content,
 			IsError:    d.IsError,
+			Execute:    d.Execute,
 			DecidedAt:  now,
 		}
 		committed = append(committed, d.ToolCallID)

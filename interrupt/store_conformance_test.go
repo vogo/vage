@@ -469,6 +469,39 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 	})
 
+	t.Run(name+"/submit_decisions_execute_identity", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+
+		rec := newTestRecord("sess-exec", []string{"call-1", "call-2"})
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{
+			ToolCallID: "call-1", Execute: true,
+		}}); err != nil {
+			t.Fatalf("first Execute submit: %v", err)
+		}
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{
+			ToolCallID: "call-1", Execute: true,
+		}}); err != nil {
+			t.Errorf("identical Execute resubmit err = %v, want nil", err)
+		}
+		if _, _, err := s.SubmitDecisions(ctx, rec.ID, []Decision{{
+			ToolCallID: "call-1", Content: "injected",
+		}}); !errors.Is(err, ErrDecisionConflict) {
+			t.Errorf("Execute vs inject err = %v, want ErrDecisionConflict", err)
+		}
+		got, gerr := s.Get(ctx, rec.ID)
+		if gerr != nil {
+			t.Fatalf("Get: %v", gerr)
+		}
+		if !got.Decisions["call-1"].Execute {
+			t.Errorf("stored Execute = false, want true")
+		}
+	})
+
 	// An idempotent SubmitDecisions after AcquireLease must not demote
 	// Resuming back to Ready, or a second owner can take a live lease.
 	t.Run(name+"/submit_decisions_does_not_demote_resuming", func(t *testing.T) {

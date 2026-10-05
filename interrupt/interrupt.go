@@ -84,10 +84,19 @@ type EffectiveParams struct {
 
 // Decision is one committed external decision for a pending tool call.
 // DecidedAt is stamped by the Store, not the caller.
+//
+// Two resume shapes share this record:
+//   - Inject (Execute == false): Content becomes the tool result, and
+//     the original handler does not run. This is the ask_user path.
+//   - Execute (Execute == true && IsError == false): ResumeInterrupt
+//     runs the original handler. Content is ignored. This is the
+//     "human approved, now run it" path for side-effecting tools.
+// IsError always wins: a rejected call is never executed.
 type Decision struct {
 	ToolCallID string    `json:"tool_call_id"`
 	Content    string    `json:"content"`
 	IsError    bool      `json:"is_error,omitempty"`
+	Execute    bool      `json:"execute,omitempty"`
 	DecidedAt  time.Time `json:"decided_at"`
 }
 
