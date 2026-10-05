@@ -14,7 +14,7 @@
 
 本领域是 Agent "会做什么"的来源。
 
-- `tool`:工具注册表与执行,及一批内建工具(文件读写/编辑/查找、bash、web、todo、workspace、sessiontree、vectorsearch、agenttool、askuser 等)。
+- `tool`:工具注册表与执行,及一批内建工具(文件读写/编辑/查找、bash、web、todo、workspace、sessiontree、vectorsearch、memory、agenttool、askuser 等)。
 - `mcp`:Model Context Protocol 的 client(消费外部工具)与 server(把 Agent 能力暴露为 MCP 工具)。
 - `skill`:兼容 [Agent Skills](https://agentskills.io) 开放标准的技能包,向 Agent 注入提示并过滤可用工具。
 
@@ -27,7 +27,7 @@
 - **结果取值与截断助手**:工具结果取文本(`ToolResult.Text`)与字节级 UTF-8 截断(`TruncateUTF8`)是框架自带的通用能力,与"多大算大"的治理策略分开;前者只解释数据,后者才是策略。
 - **工具三来源**:本地函数、MCP 远程、agent-as-tool(把一个 Agent 当工具)。
 - **ResourceTracker(资源追踪)**:工具声明其读/写的资源(如文件),供上下文编辑判定 stale_resource、供编排做资源限流。
-- **内建工具族**:文件类(read/write/edit/glob/grep)、执行类(bash,进程隔离)、协作类(agenttool 子代理、askuser 询问用户)、状态类(todo、workspace、sessiontree)、检索类(vectorsearch、webfetch、websearch)。 `askuser` has two non-substitutable collaboration paths; see TOOL-9 and [tooling-design](tooling-design.md).
+- **内建工具族**:文件类(read/write/edit/glob/grep)、执行类(bash,进程隔离)、协作类(agenttool 子代理、askuser 询问用户)、状态类(todo、workspace、sessiontree、memory)、检索类(vectorsearch、webfetch、websearch)。 `askuser` has two non-substitutable collaboration paths; see TOOL-9 and [tooling-design](tooling-design.md).
 - **MCPClient / MCPServer**:MCP 协议两端,带生命周期管理与凭证扫描(ScanEvent)。
 - **Skill(技能)**:Def(定义)+ Resource(资源)+ Activation(激活条件);经 Loader 加载、Registry 索引、Manager 激活、Validator 校验。
 
