@@ -59,6 +59,40 @@ func runStoreContract(t *testing.T, name string, factory func(t *testing.T) Stor
 		}
 	})
 
+	t.Run(name+"/create_roundtrips_policy_and_supersedes", func(t *testing.T) {
+		s := factory(t)
+		ctx := context.Background()
+		rec := newTestRecord("sess-pol", []string{"call-1"})
+		rec.Supersedes = "prev-id"
+		rec.Policy = PolicySnapshot{
+			Fingerprint: "fp-1",
+			Calls: []CallAssessment{{
+				ToolCallID:     "call-1",
+				Flagged:        true,
+				Classification: "tier=dangerous",
+			}},
+		}
+		if err := s.Create(ctx, rec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := s.Get(ctx, rec.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Supersedes != "prev-id" {
+			t.Errorf("Supersedes = %q, want prev-id", got.Supersedes)
+		}
+		if got.Policy.Fingerprint != "fp-1" {
+			t.Errorf("Fingerprint = %q, want fp-1", got.Policy.Fingerprint)
+		}
+		if len(got.Policy.Calls) != 1 || got.Policy.Calls[0].Classification != "tier=dangerous" || !got.Policy.Calls[0].Flagged {
+			t.Errorf("Policy.Calls = %+v", got.Policy.Calls)
+		}
+		if len(got.Decisions) != 0 {
+			t.Errorf("Decisions = %+v, want empty", got.Decisions)
+		}
+	})
+
 	t.Run(name+"/create_rejects_empty_or_duplicate_pending", func(t *testing.T) {
 		s := factory(t)
 		ctx := context.Background()

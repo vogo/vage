@@ -243,7 +243,7 @@ func (s *FileStore) readRecord(id string) (*Record, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("interrupt: decode %q: %w", id, err)
 	}
-	if r.Version != CurrentVersion {
+	if !versionReadable(r.Version) {
 		return nil, ErrUnknownVersion
 	}
 	return &r, nil
@@ -469,4 +469,77 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+}
+
+// maxAuditUnknownIDs caps how many unreadable ids AuditVersions records.
+// The count itself is not capped; the id list is, so a directory full of
+// bad files cannot blow up a startup log line.
+const maxAuditUnknownIDs = 20
+
+// VersionAudit is the startup scan of interrupt files under a FileStore
+// root. It is not part of Store: listing metadata skips unreadable files,
+// and this scan exists to make those files visible.
+type VersionAudit struct {
+	Current    int
+	Legacy     int // version 2
+	Unknown    int
+	UnknownIDs []string // at most maxAuditUnknownIDs
+}
+
+// AuditVersions reads the directory and decodes only the version field of
+// each record file. It uses the same name filter as List: *.json, skipping
+// *.json.tmp and *.lock. A single file that does not yield a version is
+// counted as Unknown and does not fail the scan. A directory read failure
+// returns an error. Unknown version files are left in place.
+func (s *FileStore) AuditVersions(ctx context.Context) (VersionAudit, error) {
+	if err := ctx.Err(); err != nil {
+		return VersionAudit{}, err
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return VersionAudit{}, fmt.Errorf("interrupt: read dir %q: %w", s.root, err)
+	}
+
+	var audit VersionAudit
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return VersionAudit{}, err
+		}
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, recordFileExt) || strings.HasSuffix(name, recordTmpExt) {
+			continue
+		}
+		id := name[:len(name)-len(recordFileExt)]
+		data, err := os.ReadFile(s.recordPath(id))
+		if err != nil {
+			audit.noteUnknown(id)
+			continue
+		}
+		var probe struct {
+			Version int `json:"version"`
+		}
+		if err := json.Unmarshal(data, &probe); err != nil {
+			audit.noteUnknown(id)
+			continue
+		}
+		switch probe.Version {
+		case CurrentVersion:
+			audit.Current++
+		case 2:
+			audit.Legacy++
+		default:
+			audit.noteUnknown(id)
+		}
+	}
+	return audit, nil
+}
+
+func (a *VersionAudit) noteUnknown(id string) {
+	a.Unknown++
+	if len(a.UnknownIDs) < maxAuditUnknownIDs {
+		a.UnknownIDs = append(a.UnknownIDs, id)
+	}
 }

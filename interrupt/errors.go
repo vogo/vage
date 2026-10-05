@@ -60,8 +60,8 @@ var (
 	// that never resumes again.
 	ErrAlreadyCompleted = errors.New("interrupt: record already completed")
 
-	// ErrUnknownVersion is returned when a stored record's Version does
-	// not match a version this package knows how to read. Stores must
-	// fail rather than guess-read an unfamiliar layout.
+	// ErrUnknownVersion is returned when a stored record's Version is not
+	// in the set this package can read (version 2 and CurrentVersion).
+	// Stores must fail rather than guess-read an unfamiliar layout.
 	ErrUnknownVersion = errors.New("interrupt: unknown record version")
 )

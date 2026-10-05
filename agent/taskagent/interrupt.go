@@ -51,6 +51,13 @@ var (
 	// does not recognize. Injected pending calls need no handler; approved
 	// Execute pending calls are checked together with ordinary siblings.
 	ErrIncompatibleInterruptTools = errors.New("vage: interrupt record references tools this agent cannot execute")
+
+	// ErrInterruptPolicyDrift is returned when a frozen record carries a
+	// policy fingerprint the current policy cannot confirm, and no
+	// successor interrupt is created. Handlers do not run and the record
+	// is left Ready. maybeInterrupt also returns it, wrapped, when
+	// InterruptWitness and Intercept disagree — that path does not Create.
+	ErrInterruptPolicyDrift = errors.New("vage: interrupt policy fingerprint does not match the frozen record")
 )
 
 // checkInterruptConfig enforces the interrupt invariants on the final
@@ -187,6 +194,13 @@ func (a *Agent) maybeInterrupt(
 	calls []schema.ToolCall,
 ) (*schema.InterruptDescriptor, bool, error) {
 	pending := a.interruptPolicy.Intercept(ctx, rc.sessionID, calls)
+	var snap interrupt.PolicySnapshot
+	if w, ok := a.interruptPolicy.(InterruptWitness); ok {
+		snap = w.Witness(ctx, rc.sessionID, calls)
+		if err := consistentAssessments(calls, pending, snap); err != nil {
+			return nil, false, fmt.Errorf("%w: %s", ErrInterruptPolicyDrift, err.Error())
+		}
+	}
 	if len(pending) == 0 {
 		return nil, false, nil
 	}
@@ -217,6 +231,7 @@ func (a *Agent) maybeInterrupt(
 		Usage:           rc.totalUsage,
 		Estimated:       rc.estimated,
 		TokensConsumed:  rc.tracker.Consumed(),
+		Policy:          snap,
 	}
 
 	if err := a.interruptStore.Create(ctx, rec); err != nil {
@@ -382,6 +397,8 @@ func generateLeaseOwner() string {
 //     ErrAlreadyCompleted from SubmitDecisions.
 //   - interrupt.ErrLeaseHeld when another resumer already holds a live
 //     lease.
+//   - ErrInterruptPolicyDrift when a frozen fingerprint cannot be
+//     confirmed and no successor interrupt is created. Handlers do not run.
 //   - ErrIncompatibleInterruptTools when a sibling call in the batch names
 //     a tool this Agent's registry does not have.
 //
@@ -432,6 +449,40 @@ func (a *Agent) ResumeInterrupt(ctx context.Context, req schema.ResumeInterruptR
 		if submitErr != nil {
 			return nil, submitErr
 		}
+	}
+
+	// Still undecided: probe only. Do not look for a successor and do not
+	// take a lease. A fingerprint mismatch is applied on the resume that
+	// first observes Ready, which discards decisions committed before that.
+	if rec.Status == interrupt.StatusPending {
+		return &schema.RunResponse{
+			SessionID:  rec.SessionID,
+			StopReason: schema.StopReasonInterrupted,
+			Interrupt:  interruptDescriptorFromRecord(rec),
+		}, nil
+	}
+
+	// Successor lookup is before every execute path, including a fingerprint
+	// that once again matches the old record. A successor means the old
+	// decisions are abandoned even if the rules change back.
+	succ, succErr := a.earliestSuccessor(ctx, rec.SessionID, rec.ID)
+	if succErr != nil {
+		return nil, succErr
+	}
+	if succ != nil {
+		return a.finishSuperseded(ctx, rec, succ)
+	}
+
+	if rec.Status == interrupt.StatusCompleted {
+		return nil, interrupt.ErrAlreadyCompleted
+	}
+
+	execute, pendingIDs, snap, driftErr := a.classifyFrozenPolicy(ctx, rec)
+	if driftErr != nil {
+		return nil, driftErr
+	}
+	if !execute {
+		return a.supersedeInterrupt(ctx, rec, pendingIDs, snap)
 	}
 
 	// A fresh generated-per-call token: ResumeInterrupt does not offer a
@@ -515,6 +566,237 @@ func toStoreDecisions(in []schema.InterruptDecision) []interrupt.Decision {
 		out[i] = interrupt.Decision{ToolCallID: d.ToolCallID, Content: d.Content, IsError: d.IsError}
 	}
 	return out
+}
+
+// consistentAssessments checks that snap covers calls exactly once and that
+// the flagged ids equal pending. Empty pending is valid when nothing is
+// flagged. The helper does not Create.
+func consistentAssessments(calls []schema.ToolCall, pending []string, snap interrupt.PolicySnapshot) error {
+	if err := validatePendingSubset(calls, pending); err != nil {
+		return err
+	}
+	flaggedByID := make(map[string]bool, len(snap.Calls))
+	for _, c := range snap.Calls {
+		if c.ToolCallID == "" {
+			return fmt.Errorf("%w: assessment id is empty", interrupt.ErrInvalidArgument)
+		}
+		if _, dup := flaggedByID[c.ToolCallID]; dup {
+			return fmt.Errorf("%w: duplicate assessment %q", interrupt.ErrInvalidArgument, c.ToolCallID)
+		}
+		flaggedByID[c.ToolCallID] = c.Flagged
+	}
+	if len(flaggedByID) != len(calls) {
+		return fmt.Errorf("%w: assessments do not cover the tool batch", interrupt.ErrInvalidArgument)
+	}
+	pendingSet := make(map[string]struct{}, len(pending))
+	for _, id := range pending {
+		pendingSet[id] = struct{}{}
+	}
+	flagged := 0
+	for _, tc := range calls {
+		isFlagged, ok := flaggedByID[tc.ID]
+		if !ok {
+			return fmt.Errorf("%w: missing assessment for %q", interrupt.ErrInvalidArgument, tc.ID)
+		}
+		if isFlagged {
+			flagged++
+		}
+		_, want := pendingSet[tc.ID]
+		if isFlagged != want {
+			return fmt.Errorf("%w: witness flagged set does not match intercept", interrupt.ErrInvalidArgument)
+		}
+	}
+	if flagged != len(pendingSet) {
+		return fmt.Errorf("%w: witness flagged set does not match intercept", interrupt.ErrInvalidArgument)
+	}
+	return nil
+}
+
+// classifyFrozenPolicy decides whether a Ready or Resuming record with no
+// successor may execute. An empty fingerprint skips the check. A mismatch
+// that still flags at least one frozen call returns execute=false so the
+// caller can create a successor. Failures return ErrInterruptPolicyDrift
+// and must not take a lease.
+func (a *Agent) classifyFrozenPolicy(ctx context.Context, rec *interrupt.Record) (execute bool, pending []string, snap interrupt.PolicySnapshot, err error) {
+	if rec.Policy.Fingerprint == "" {
+		return true, nil, interrupt.PolicySnapshot{}, nil
+	}
+	w, ok := a.interruptPolicy.(InterruptWitness)
+	if !ok {
+		return false, nil, interrupt.PolicySnapshot{}, ErrInterruptPolicyDrift
+	}
+	snap = w.Witness(ctx, rec.SessionID, rec.ToolCalls)
+	pending = a.interruptPolicy.Intercept(ctx, rec.SessionID, rec.ToolCalls)
+	if err := consistentAssessments(rec.ToolCalls, pending, snap); err != nil {
+		return false, nil, interrupt.PolicySnapshot{}, fmt.Errorf("%w: %s", ErrInterruptPolicyDrift, err.Error())
+	}
+	if snap.Fingerprint == rec.Policy.Fingerprint {
+		return true, nil, interrupt.PolicySnapshot{}, nil
+	}
+	if len(pending) == 0 {
+		return false, nil, interrupt.PolicySnapshot{}, ErrInterruptPolicyDrift
+	}
+	return false, slices.Clone(pending), cloneSnapshot(snap), nil
+}
+
+func cloneSnapshot(snap interrupt.PolicySnapshot) interrupt.PolicySnapshot {
+	out := snap
+	if len(snap.Calls) == 0 {
+		out.Calls = nil
+		return out
+	}
+	out.Calls = make([]interrupt.CallAssessment, len(snap.Calls))
+	copy(out.Calls, snap.Calls)
+	return out
+}
+
+// earliestSuccessor returns the oldest record in the session whose
+// Supersedes is oldID. More than one is logged; the earliest CreatedAt
+// wins and no further record is created by the caller.
+func (a *Agent) earliestSuccessor(ctx context.Context, sessionID, oldID string) (*interrupt.Record, error) {
+	metas, err := a.interruptStore.List(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var chosen *interrupt.Record
+	extra := 0
+	for _, m := range metas {
+		if m == nil || m.ID == oldID {
+			continue
+		}
+		r, err := a.interruptStore.Get(ctx, m.ID)
+		if err != nil {
+			if errors.Is(err, interrupt.ErrNotFound) || errors.Is(err, interrupt.ErrUnknownVersion) {
+				continue
+			}
+			return nil, err
+		}
+		if r.Supersedes != oldID {
+			continue
+		}
+		if chosen == nil || successorEarlier(r, chosen) {
+			if chosen != nil {
+				extra++
+			}
+			chosen = r
+			continue
+		}
+		extra++
+	}
+	if extra > 0 && chosen != nil {
+		slog.Error("vage: multiple interrupt successors", "supersedes", oldID, "chosen", chosen.ID, "extra", extra)
+	}
+	return chosen, nil
+}
+
+func successorEarlier(a, b *interrupt.Record) bool {
+	if a.CreatedAt.Before(b.CreatedAt) {
+		return true
+	}
+	if b.CreatedAt.Before(a.CreatedAt) {
+		return false
+	}
+	return a.ID < b.ID
+}
+
+// finishSuperseded returns an existing successor without running the old
+// record's handlers. Lease conflicts and Complete failures are logged;
+// the successor is still returned. A successor that is already Completed
+// yields ErrAlreadyCompleted.
+func (a *Agent) finishSuperseded(ctx context.Context, old, succ *interrupt.Record) (*schema.RunResponse, error) {
+	if succ.Status == interrupt.StatusCompleted {
+		a.completeSuperseded(ctx, old, succ.ID)
+		return nil, interrupt.ErrAlreadyCompleted
+	}
+	a.completeSuperseded(ctx, old, succ.ID)
+	return &schema.RunResponse{
+		SessionID:  old.SessionID,
+		StopReason: schema.StopReasonInterrupted,
+		Interrupt:  interruptDescriptorFromRecord(succ),
+	}, nil
+}
+
+// completeSuperseded tries to move old to Completed. It does not
+// ReleaseLease: releasing a Resuming record would restore Ready and the
+// old decisions. ErrLeaseHeld and Complete errors are logged only.
+func (a *Agent) completeSuperseded(ctx context.Context, old *interrupt.Record, succID string) {
+	if old.Status == interrupt.StatusCompleted {
+		return
+	}
+	owner := generateLeaseOwner()
+	if _, err := a.interruptStore.AcquireLease(ctx, old.ID, owner, a.interruptLeaseTTL); err != nil {
+		if !errors.Is(err, interrupt.ErrAlreadyCompleted) {
+			slog.Error("vage: could not lease superseded interrupt", "error", err, "interrupt_id", old.ID, "successor_id", succID)
+		}
+		return
+	}
+	if err := a.interruptStore.Complete(ctx, old.ID, owner); err != nil {
+		slog.Error("vage: could not complete superseded interrupt", "error", err, "interrupt_id", old.ID, "successor_id", succID)
+	}
+}
+
+// supersedeInterrupt creates a fresh Pending record for a fingerprint
+// mismatch. The new record is a field whitelist: Decisions and the lease
+// stay zero. Create failure releases the lease. Complete failure does not.
+func (a *Agent) supersedeInterrupt(ctx context.Context, old *interrupt.Record, pending []string, snap interrupt.PolicySnapshot) (*schema.RunResponse, error) {
+	owner := generateLeaseOwner()
+	if _, err := a.interruptStore.AcquireLease(ctx, old.ID, owner, a.interruptLeaseTTL); err != nil {
+		return nil, err
+	}
+
+	succ, err := a.earliestSuccessor(ctx, old.SessionID, old.ID)
+	if err != nil {
+		_ = a.interruptStore.ReleaseLease(ctx, old.ID, owner)
+		return nil, err
+	}
+	if succ != nil {
+		if succ.Status == interrupt.StatusCompleted {
+			if cerr := a.interruptStore.Complete(ctx, old.ID, owner); cerr != nil {
+				slog.Error("vage: could not complete superseded interrupt", "error", cerr, "interrupt_id", old.ID, "successor_id", succ.ID)
+			}
+			return nil, interrupt.ErrAlreadyCompleted
+		}
+		if cerr := a.interruptStore.Complete(ctx, old.ID, owner); cerr != nil {
+			slog.Error("vage: could not complete superseded interrupt", "error", cerr, "interrupt_id", old.ID, "successor_id", succ.ID)
+		}
+		return &schema.RunResponse{
+			SessionID:  old.SessionID,
+			StopReason: schema.StopReasonInterrupted,
+			Interrupt:  interruptDescriptorFromRecord(succ),
+		}, nil
+	}
+
+	newRec := &interrupt.Record{
+		SessionID:       old.SessionID,
+		AgentID:         old.AgentID,
+		Protocol:        old.Protocol,
+		ToolCalls:       old.ToolCalls,
+		Messages:        old.Messages,
+		SessionMsgCount: old.SessionMsgCount,
+		Params:          old.Params,
+		Iteration:       old.Iteration,
+		Usage:           old.Usage,
+		Estimated:       old.Estimated,
+		TokensConsumed:  old.TokensConsumed,
+		Pending:         pending,
+		Policy:          snap,
+		Supersedes:      old.ID,
+	}
+	if err := a.interruptStore.Create(ctx, newRec); err != nil {
+		_ = a.interruptStore.ReleaseLease(ctx, old.ID, owner)
+		return nil, err
+	}
+	if err := a.interruptStore.Complete(ctx, old.ID, owner); err != nil {
+		slog.Error("vage: complete superseded interrupt", "error", err, "interrupt_id", old.ID, "successor_id", newRec.ID)
+	}
+	desc := interruptDescriptorFromRecord(newRec)
+	a.dispatch(ctx, interruptCreatedEvent(a.ID(), old.SessionID, old.Iteration, desc))
+	slog.Info("vage: interrupt superseded", "old_id", old.ID, "new_id", newRec.ID)
+	return &schema.RunResponse{
+		SessionID:  old.SessionID,
+		StopReason: schema.StopReasonInterrupted,
+		Interrupt:  desc,
+	}, nil
 }
 
 // resumeFromInterrupt re-enters the ReAct loop at the suspended tool batch
@@ -628,11 +910,15 @@ func (a *Agent) reconcileInterruptBatch(
 
 	injectIDs := make(map[string]struct{}, len(rec.Pending))
 	toExecute := make([]schema.ToolCall, 0, len(rec.ToolCalls))
+	approved := make([]string, 0, len(rec.Pending))
 	for _, tc := range rec.ToolCalls {
 		if _, isPending := pendingSet[tc.ID]; isPending {
 			dec := rec.Decisions[tc.ID]
 			if dec.Execute && !dec.IsError {
 				toExecute = append(toExecute, tc)
+				if tc.ID != "" {
+					approved = append(approved, tc.ID)
+				}
 				continue
 			}
 			injectIDs[tc.ID] = struct{}{}
@@ -646,7 +932,8 @@ func (a *Agent) reconcileInterruptBatch(
 		return nil
 	}
 
-	execMsgs, execResults, err := a.executeToolBatch(interrupt.WithApprovedExecute(ctx), rc, agentID, toExecute, false, sink)
+	execCtx := interrupt.WithApprovedCalls(ctx, approved)
+	execMsgs, execResults, err := a.executeToolBatch(execCtx, rc, agentID, toExecute, false, sink)
 	if err != nil {
 		return nil, nil, err
 	}
