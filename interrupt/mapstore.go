@@ -88,7 +88,7 @@ func (s *MapStore) Get(ctx context.Context, id string) (*Record, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if r.Version != CurrentVersion {
+	if !versionReadable(r.Version) {
 		return nil, ErrUnknownVersion
 	}
 	return cloneRecord(r), nil

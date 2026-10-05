@@ -44,6 +44,11 @@ func (s *mapStore) Set(_ context.Context, key string, value any, _ int64) error 
 	return nil
 }
 
+func (s *mapStore) Delete(_ context.Context, key string) error {
+	delete(s.m, key)
+	return nil
+}
+
 func (s *mapStore) List(_ context.Context, prefix string) ([]Entry, error) {
 	out := make([]Entry, 0, len(s.m))
 	for k, v := range s.m {
@@ -199,6 +204,97 @@ func TestMemorySet_RejectsBadIdent(t *testing.T) {
 	res := callTool(t, reg, context.Background(), SetToolName, string(body))
 	if !res.IsError {
 		t.Fatal("expected error for namespace with colon")
+	}
+}
+
+type recordingStore struct {
+	*mapStore
+	lastTTL int64
+}
+
+func (s *recordingStore) Set(ctx context.Context, key string, value any, ttl int64) error {
+	s.lastTTL = ttl
+	return s.mapStore.Set(ctx, key, value, ttl)
+}
+
+func TestMemorySet_DeleteAndTTL(t *testing.T) {
+	store := &recordingStore{mapStore: newMapStore()}
+	reg := newRegistry()
+	if err := Register(reg, store); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	ctx := context.Background()
+
+	setRes := callTool(t, reg, ctx, SetToolName, mustJSON(setArgs{Namespace: "project", Key: "style", Value: "gofumpt", TTL: 30}))
+	if setRes.IsError {
+		t.Fatalf("set: %s", resultText(setRes))
+	}
+	if store.lastTTL != 30 {
+		t.Fatalf("ttl passed to Set = %d, want 30", store.lastTTL)
+	}
+
+	recall := callTool(t, reg, ctx, RecallToolName, `{"namespace":"project","prefix":"style"}`)
+	if recall.IsError || !strings.Contains(resultText(recall), "style") {
+		t.Fatalf("recall before delete: %s", resultText(recall))
+	}
+
+	del := callTool(t, reg, ctx, SetToolName, `{"op":"delete","namespace":"project","key":"style"}`)
+	if del.IsError {
+		t.Fatalf("delete: %s", resultText(del))
+	}
+	recall = callTool(t, reg, ctx, RecallToolName, `{"namespace":"project","prefix":"style"}`)
+	if recall.IsError {
+		t.Fatalf("recall: %s", resultText(recall))
+	}
+	if strings.Contains(resultText(recall), "style") && !strings.Contains(resultText(recall), "no entries") {
+		t.Fatalf("key still recalled after delete: %s", resultText(recall))
+	}
+
+	missing := callTool(t, reg, ctx, SetToolName, `{"op":"delete","namespace":"project","key":"missing"}`)
+	if missing.IsError {
+		t.Fatalf("delete missing key: %s", resultText(missing))
+	}
+
+	withValue := callTool(t, reg, ctx, SetToolName, `{"op":"delete","namespace":"project","key":"style","value":"nope"}`)
+	if !withValue.IsError {
+		t.Fatal("delete with value must fail")
+	}
+	neg := callTool(t, reg, ctx, SetToolName, `{"namespace":"project","key":"style","value":"x","ttl":-1}`)
+	if !neg.IsError {
+		t.Fatal("negative ttl must fail")
+	}
+	unknown := callTool(t, reg, ctx, SetToolName, `{"op":"clear","namespace":"project","key":"style"}`)
+	if !unknown.IsError {
+		t.Fatal("unknown op must fail")
+	}
+}
+
+func TestMemorySet_DeleteEmitsEventWithoutValue(t *testing.T) {
+	reg, _ := fixture(t)
+	var events []schema.Event
+	ctx := schema.WithEmitter(context.Background(), func(e schema.Event) error {
+		events = append(events, e)
+		return nil
+	})
+	_ = callTool(t, reg, ctx, SetToolName, mustJSON(setArgs{Namespace: "notes", Key: "old", Value: "secret-should-not-log"}))
+	events = nil
+	res := callTool(t, reg, ctx, SetToolName, `{"op":"delete","namespace":"notes","key":"old"}`)
+	if res.IsError {
+		t.Fatalf("delete: %s", resultText(res))
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	data, ok := events[0].Data.(schema.CustomEventData)
+	if !ok {
+		t.Fatalf("data type %T", events[0].Data)
+	}
+	if data.Name != EventDelete {
+		t.Errorf("name = %q, want %q", data.Name, EventDelete)
+	}
+	raw, _ := json.Marshal(data.Payload)
+	if strings.Contains(string(raw), "secret-should-not-log") {
+		t.Errorf("value leaked into delete event: %s", raw)
 	}
 }
 

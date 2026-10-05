@@ -24,10 +24,15 @@ import (
 	"time"
 
 	"github.com/vogo/largemodel/schema"
+	"github.com/vogo/vage/interrupt"
 )
 
 // executeToolCall runs a single tool call and returns the result.
+// The executing id is derived on a child context so a parallel batch
+// does not share one id across goroutines, and so the batch context
+// itself stays unmarked.
 func (a *Agent) executeToolCall(ctx context.Context, tc schema.ToolCall) schema.ToolResult {
+	ctx = interrupt.WithExecutingCall(ctx, tc.ID)
 	if a.toolRegistry == nil {
 		return schema.ErrorResult(tc.ID, fmt.Sprintf("tool %q: no registry configured", tc.Name))
 	}

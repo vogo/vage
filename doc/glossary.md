@@ -26,7 +26,7 @@
 | **技能(Skill)** | 兼容 [Agent Skills](https://agentskills.io) 开放标准的能力包,可向 Agent 注入提示与过滤工具。 |
 | **MCP** | Model Context Protocol。vage 既做 client(消费外部工具)也做 server(暴露 Agent 能力)。 |
 | **ParamResolver** | TaskAgent 构造期单槽:在输入护栏之后、上下文与工具冻结之前,收紧本次新 Run 的模型、限额与工具范围。后写覆盖先写,不可链;`Resume` 不调用。见 [agent-core](domains/agent/agent-core/agent-core.md) AC-19 与 [ADR 0003](architecture/adr/0003-run-param-resolver.md)。 |
-| **ToolMode** | `schema.RunOptions` 的工具披露模式:`""`(兼容)、`none`(显式无工具)、`allow`(请求白名单,空即空)、`all`(显式不限制)。与冻结后的最终工具名一起写入 interrupt v2 快照。 |
+| **ToolMode** | `schema.RunOptions` 的工具披露模式:`""`(兼容)、`none`(显式无工具)、`allow`(请求白名单,空即空)、`all`(显式不限制)。Frozen final tool names are stored with it on the interrupt record. The written version is 3. Version 2 remains readable and has no policy fingerprint. Version 1 is rejected. |
 | **ComposeCaller** | 带 `EndpointStats` 的 `largemodel.Caller`。`BuildCaller` 把同协议多 endpoint 收成一个可共享池;宿主在 Agent 构造期按租户/凭证域绑定,不在 ReAct 循环内换 Caller。 |
 | **CapabilityProvider** | Caller 可选的本地能力查询:按请求返回 endpoint/model 对结构化输出、tool calling 与输入 modality 的声明支持级别。严格策略下 unknown ≠ 满足。见 [model](domains/capability/model/model.md)。 |
 | **ProviderExtensions** | `largemodel.Request` 上按 provider namespace 隔离的私有参数。不是凭证通道;正式跨 provider 字段(`TopP`/`Seed`/…/`ToolChoice`)不经此覆盖。 |

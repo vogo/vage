@@ -18,7 +18,7 @@
 | `tool/agenttool` | agent-as-tool,发布 `sessionview` 到子代理 context |
 | `tool/askuser` | 向用户提问 |
 | `tool/todo`/`workspace`/`sessiontree` | 会话级状态工具 |
-| `tool/memory` | 持久记忆工具(`memory_set` / `memory_recall`);依赖本包 `Store` 接口,不 import `vage/memory`(L2 不得反向依赖 L1) |
+| `tool/memory` | 持久记忆工具(`memory_set` / `memory_recall`)。`memory_set` 的 `op` 为 `set`(默认)或 `delete`,可选 `ttl`(秒;0 或省略表示不过期)。依赖本包 `Store` 接口,不 import `vage/memory`(L2 不得反向依赖 L1) |
 | `tool/vectorsearch`/`webfetch`/`websearch` | 检索类工具 |
 | `mcp/client`(`MCPClient`/`Lifecycle`/`ScanEvent`) | 消费外部 MCP 工具,带生命周期与凭证扫描 |
 | `mcp/server`(`MCPServer`/`ToolRegistration`/`ScanEvent`) | 暴露 Agent 能力为 MCP 工具 |

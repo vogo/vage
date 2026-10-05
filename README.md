@@ -662,9 +662,11 @@ without running the handler — that remains the `ask_user` path. An approved
 execute decision (`Execute: true` on `interrupt.Decision`, typically via
 `Store.SubmitDecisions`) runs the original handler instead. `IsError` always
 wins over `Execute`. Host permission layers that hard-reject Dangerous tools
-in non-interactive mode should honour `interrupt.IsApprovedExecute(ctx)` so
-the approved handler can run without widening that skip to calls that never
-froze. Sibling tools in the original batch then run, everything
+in non-interactive mode should honour `interrupt.IsApprovedCall(ctx, interrupt.ExecutingCallID(ctx))` so
+the approved handler can run. `WithApprovedCalls` receives only the pending
+ids whose decision is `Execute` and not `IsError`. `executeToolCall` stamps
+the executing id on a child context, including an ordinary Run, so a sibling
+in the same batch is not approved. Sibling tools in the original batch then run, everything
 feeds back through the model, and the suspended run's token budget is carried
 over, not restarted. `Decisions` commit in order, so a rejected entry leaves its
 valid prefix committed. Omitting `Decisions` entirely resumes on what is

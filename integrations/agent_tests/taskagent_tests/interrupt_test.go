@@ -19,7 +19,10 @@ package taskagent_tests //nolint:revive // integration test package
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1360,6 +1363,474 @@ func TestInterrupt_RunStream_EmitsCreatedOnStream(t *testing.T) {
 	}
 	if !containsStr(types, schema.EventAgentEnd) {
 		t.Errorf("stream events = %v, want agent_end", types)
+	}
+}
+
+// witnessPolicy flags call IDs and optionally snapshots a fingerprint.
+// witnessFlag, when non-nil, is what Witness reports instead of flag, so
+// tests can force the two to disagree.
+type witnessPolicy struct {
+	flag        map[string]struct{}
+	witnessFlag map[string]struct{}
+	fp          string
+}
+
+func (p *witnessPolicy) Intercept(_ context.Context, _ string, calls []schema.ToolCall) []string {
+	var out []string
+	for _, c := range calls {
+		if _, ok := p.flag[c.ID]; ok {
+			out = append(out, c.ID)
+		}
+	}
+	return out
+}
+
+func (p *witnessPolicy) Witness(_ context.Context, _ string, calls []schema.ToolCall) interrupt.PolicySnapshot {
+	flags := p.flag
+	if p.witnessFlag != nil {
+		flags = p.witnessFlag
+	}
+	snap := interrupt.PolicySnapshot{Fingerprint: p.fp}
+	for _, c := range calls {
+		_, flagged := flags[c.ID]
+		snap.Calls = append(snap.Calls, interrupt.CallAssessment{
+			ToolCallID:     c.ID,
+			Flagged:        flagged,
+			Classification: "tier=test",
+		})
+	}
+	return snap
+}
+
+func approvalBashReg(seen map[string]bool, mu *sync.Mutex, runs *atomic.Int32) *tool.Registry {
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(ctx context.Context, _, _ string) (schema.ToolResult, error) {
+		runs.Add(1)
+		id := interrupt.ExecutingCallID(ctx)
+		ok := interrupt.IsApprovedCall(ctx, id)
+		mu.Lock()
+		seen[id] = ok
+		mu.Unlock()
+		return schema.TextResult("", "ran"), nil
+	})
+	return reg
+}
+
+func TestInterrupt_ApprovedCall_SiblingNotApproved(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen = map[string]bool{}
+		runs atomic.Int32
+	)
+	policy := &witnessPolicy{
+		flag: map[string]struct{}{"tc-a": {}},
+		fp:   "fp-stable",
+	}
+	mock := newMock(
+		makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-a", Name: "bash", Arguments: `{"command":"rm dist"}`},
+			schema.ToolCall{ID: "tc-b", Name: "bash", Arguments: `{"command":"rm build"}`},
+		),
+		makeStopResponse("done", 10),
+	)
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-scope"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(approvalBashReg(seen, &mu, &runs)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+	)
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-scope",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if first.StopReason != schema.StopReasonInterrupted {
+		t.Fatalf("StopReason = %q, want interrupted", first.StopReason)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran %d times before resume, want 0", runs.Load())
+	}
+
+	if _, _, err := store.SubmitDecisions(context.Background(), first.Interrupt.InterruptID, []interrupt.Decision{{
+		ToolCallID: "tc-a",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	resp, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{
+		InterruptID: first.Interrupt.InterruptID,
+	})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resp.StopReason != schema.StopReasonComplete {
+		t.Fatalf("StopReason = %q, want complete", resp.StopReason)
+	}
+	if runs.Load() != 2 {
+		t.Fatalf("handler ran %d times, want 2", runs.Load())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !seen["tc-a"] {
+		t.Errorf("approved call tc-a seen=%v, want true", seen["tc-a"])
+	}
+	if seen["tc-b"] {
+		t.Errorf("sibling tc-b was approved")
+	}
+}
+
+func TestInterrupt_FingerprintDrift_CreatesSuccessor(t *testing.T) {
+	var runs atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(context.Context, string, string) (schema.ToolResult, error) {
+		runs.Add(1)
+		return schema.TextResult("", "ran"), nil
+	})
+	policy := &witnessPolicy{flag: map[string]struct{}{"tc-a": {}}, fp: "fp-v1"}
+	mock := newMock(makeToolCallResponse("tc-a", "bash", `{"command":"rm dist"}`, 30))
+	store := interrupt.NewMapStore()
+	hookMgr, events := eventCollector()
+	a := taskagent.New(
+		agent.Config{ID: "agent-drift"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+		taskagent.WithHookManager(hookMgr),
+	)
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-drift",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	oldID := first.Interrupt.InterruptID
+	if _, _, err := store.SubmitDecisions(context.Background(), oldID, []interrupt.Decision{{
+		ToolCallID: "tc-a",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	policy.fp = "fp-v2"
+	before := len(events())
+	resp, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: oldID})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resp.StopReason != schema.StopReasonInterrupted {
+		t.Fatalf("StopReason = %q, want interrupted", resp.StopReason)
+	}
+	newID := resp.Interrupt.InterruptID
+	if newID == "" || newID == oldID {
+		t.Fatalf("successor id = %q, old = %q", newID, oldID)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran %d times, want 0", runs.Load())
+	}
+	delta := events()[before:]
+	if containsStr(delta, schema.EventInterruptResumed) {
+		t.Errorf("drift resume emitted interrupt_resumed: %v", delta)
+	}
+	if !containsStr(delta, schema.EventInterruptCreated) {
+		t.Errorf("drift resume events = %v, want interrupt_created", delta)
+	}
+
+	succ, err := store.Get(context.Background(), newID)
+	if err != nil {
+		t.Fatalf("Get successor: %v", err)
+	}
+	if succ.Supersedes != oldID {
+		t.Errorf("Supersedes = %q, want %q", succ.Supersedes, oldID)
+	}
+	if len(succ.Decisions) != 0 {
+		t.Errorf("successor Decisions = %+v, want empty", succ.Decisions)
+	}
+	if succ.LeaseOwner != "" || !succ.LeaseExpiresAt.IsZero() {
+		t.Errorf("successor lease = %q %v, want zero", succ.LeaseOwner, succ.LeaseExpiresAt)
+	}
+	if len(succ.Pending) != 1 || succ.Pending[0] != "tc-a" {
+		t.Errorf("successor Pending = %v, want [tc-a]", succ.Pending)
+	}
+	if succ.Status != interrupt.StatusPending {
+		t.Errorf("successor status = %q, want pending", succ.Status)
+	}
+	old, err := store.Get(context.Background(), oldID)
+	if err != nil {
+		t.Fatalf("Get old: %v", err)
+	}
+	if old.Status != interrupt.StatusCompleted {
+		t.Errorf("old status = %q, want completed", old.Status)
+	}
+
+	again, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: oldID})
+	if err != nil {
+		t.Fatalf("second resume: %v", err)
+	}
+	if again.Interrupt == nil || again.Interrupt.InterruptID != newID {
+		t.Fatalf("second resume id = %+v, want %s", again.Interrupt, newID)
+	}
+	metas, err := store.List(context.Background(), "sess-drift")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 2 {
+		t.Fatalf("records = %d, want 2", len(metas))
+	}
+
+	policy.fp = "fp-v1"
+	restored, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: oldID})
+	if err != nil {
+		t.Fatalf("restored-fingerprint resume: %v", err)
+	}
+	if restored.Interrupt == nil || restored.Interrupt.InterruptID != newID {
+		t.Fatalf("restored resume id = %+v, want successor %s", restored.Interrupt, newID)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran after fingerprint restored: %d", runs.Load())
+	}
+}
+
+func TestInterrupt_FingerprintDrift_EmptyFlag_NoExecute(t *testing.T) {
+	var runs atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(context.Context, string, string) (schema.ToolResult, error) {
+		runs.Add(1)
+		return schema.TextResult("", "ran"), nil
+	})
+	policy := &witnessPolicy{flag: map[string]struct{}{"tc-a": {}}, fp: "fp-v1"}
+	mock := newMock(makeToolCallResponse("tc-a", "bash", `{"command":"rm dist"}`, 30))
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-empty"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+	)
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-empty",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	oldID := first.Interrupt.InterruptID
+	if _, _, err := store.SubmitDecisions(context.Background(), oldID, []interrupt.Decision{{
+		ToolCallID: "tc-a",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	policy.flag = map[string]struct{}{}
+	policy.fp = "fp-v2"
+	_, err = a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: oldID})
+	if !errors.Is(err, taskagent.ErrInterruptPolicyDrift) {
+		t.Fatalf("ResumeInterrupt err = %v, want ErrInterruptPolicyDrift", err)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran %d times, want 0", runs.Load())
+	}
+	old, err := store.Get(context.Background(), oldID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if old.Status != interrupt.StatusReady {
+		t.Errorf("status = %q, want ready", old.Status)
+	}
+	metas, err := store.List(context.Background(), "sess-empty")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Errorf("records = %d, want 1 (no successor)", len(metas))
+	}
+}
+
+func TestInterrupt_V2Record_ExecutesApprovedWithoutFingerprint(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen = map[string]bool{}
+		runs atomic.Int32
+	)
+	policy := &witnessPolicy{flag: map[string]struct{}{"tc-a": {}}, fp: "fp-v1"}
+	mock := newMock(
+		makeMultiToolCallResponse(
+			30,
+			schema.ToolCall{ID: "tc-a", Name: "bash", Arguments: `{"command":"rm dist"}`},
+			schema.ToolCall{ID: "tc-b", Name: "bash", Arguments: `{"command":"rm build"}`},
+		),
+		makeStopResponse("done", 10),
+	)
+	root := t.TempDir()
+	store, err := interrupt.NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	a := taskagent.New(
+		agent.Config{ID: "agent-v2"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(approvalBashReg(seen, &mu, &runs)),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+	)
+	first, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-v2",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	id := first.Interrupt.InterruptID
+	path := filepath.Join(store.Root(), id+".json")
+	rawBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rawBytes, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	raw["version"] = 2
+	delete(raw, "policy")
+	delete(raw, "supersedes")
+	rewritten, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, rewritten, 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	policy.flag = map[string]struct{}{"tc-a": {}, "tc-b": {}}
+	policy.fp = "fp-v2"
+	if _, _, err := store.SubmitDecisions(context.Background(), id, []interrupt.Decision{{
+		ToolCallID: "tc-a",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	resp, err := a.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: id})
+	if err != nil {
+		t.Fatalf("ResumeInterrupt: %v", err)
+	}
+	if resp.StopReason != schema.StopReasonComplete {
+		t.Fatalf("StopReason = %q, want complete", resp.StopReason)
+	}
+	if runs.Load() != 2 {
+		t.Fatalf("handler ran %d times, want 2", runs.Load())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !seen["tc-a"] {
+		t.Error("approved pending tc-a was not approved on ctx")
+	}
+	if seen["tc-b"] {
+		t.Error("sibling tc-b was approved on a v2 resume")
+	}
+}
+
+func TestInterrupt_FingerprintWithoutWitness_Drift(t *testing.T) {
+	var runs atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(context.Context, string, string) (schema.ToolResult, error) {
+		runs.Add(1)
+		return schema.TextResult("", "ran"), nil
+	})
+	policy := &witnessPolicy{flag: map[string]struct{}{"tc-1": {}}, fp: "fp-v1"}
+	mock := newMock(makeToolCallResponse("tc-1", "bash", `{"command":"rm dist"}`, 30))
+	store := interrupt.NewMapStore()
+	a1 := taskagent.New(
+		agent.Config{ID: "agent-nowitness"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+	)
+	first, err := a1.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-nowitness",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	id := first.Interrupt.InterruptID
+	if _, _, err := store.SubmitDecisions(context.Background(), id, []interrupt.Decision{{
+		ToolCallID: "tc-1",
+		Execute:    true,
+	}}); err != nil {
+		t.Fatalf("SubmitDecisions: %v", err)
+	}
+
+	a2 := taskagent.New(
+		agent.Config{ID: "agent-nowitness"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptToolNames("bash"),
+	)
+	_, err = a2.ResumeInterrupt(context.Background(), schema.ResumeInterruptRequest{InterruptID: id})
+	if !errors.Is(err, taskagent.ErrInterruptPolicyDrift) {
+		t.Fatalf("ResumeInterrupt err = %v, want ErrInterruptPolicyDrift", err)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran %d times, want 0", runs.Load())
+	}
+	rec, err := store.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if rec.Status != interrupt.StatusReady {
+		t.Errorf("status = %q, want ready", rec.Status)
+	}
+}
+
+func TestInterrupt_WitnessMismatch_DoesNotPersist(t *testing.T) {
+	var runs atomic.Int32
+	reg := tool.NewRegistry()
+	_ = reg.Register(schema.ToolDef{Name: "bash"}, func(context.Context, string, string) (schema.ToolResult, error) {
+		runs.Add(1)
+		return schema.TextResult("", "ran"), nil
+	})
+	policy := &witnessPolicy{
+		flag:        map[string]struct{}{"tc-1": {}},
+		witnessFlag: map[string]struct{}{},
+		fp:          "fp",
+	}
+	mock := newMock(makeToolCallResponse("tc-1", "bash", `{"command":"rm dist"}`, 30))
+	store := interrupt.NewMapStore()
+	a := taskagent.New(
+		agent.Config{ID: "agent-mismatch"},
+		taskagent.WithCaller(mock),
+		taskagent.WithToolRegistry(reg),
+		taskagent.WithInterruptStore(store),
+		taskagent.WithInterruptPolicy(policy),
+	)
+	_, err := a.Run(context.Background(), &schema.RunRequest{
+		SessionID: "sess-mismatch",
+		Messages:  []schema.Message{schema.NewUserMessage(schema.ProtocolOpenAIChat, "clean")},
+	})
+	if !errors.Is(err, taskagent.ErrInterruptPolicyDrift) {
+		t.Fatalf("Run err = %v, want ErrInterruptPolicyDrift", err)
+	}
+	if runs.Load() != 0 {
+		t.Fatalf("handler ran %d times, want 0", runs.Load())
+	}
+	metas, err := store.List(context.Background(), "sess-mismatch")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Fatalf("persisted %d records, want 0", len(metas))
 	}
 }
 

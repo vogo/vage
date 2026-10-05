@@ -21,6 +21,7 @@ import (
 	"context"
 
 	"github.com/vogo/largemodel/schema"
+	"github.com/vogo/vage/interrupt"
 )
 
 // InterruptPolicy decides, for one batch of model-requested tool calls,
@@ -38,6 +39,20 @@ type InterruptPolicy interface {
 	// means "do not interrupt": the batch executes normally, exactly as
 	// if no InterruptPolicy were configured.
 	Intercept(ctx context.Context, sessionID string, calls []schema.ToolCall) []string
+}
+
+// InterruptWitness is the optional snapshot a policy can attach to a
+// frozen batch. vage stores the snapshot and compares Fingerprint for
+// equality; it does not interpret Classification. A policy that does not
+// implement InterruptWitness persists an empty fingerprint, and resume
+// does not re-check the flag basis.
+//
+// Witness and Intercept must agree for the same calls: the set of
+// assessments with Flagged set must equal the IDs Intercept returns, and
+// there must be exactly one assessment per tool call. A mismatch fails
+// the Run before Create.
+type InterruptWitness interface {
+	Witness(ctx context.Context, sessionID string, calls []schema.ToolCall) interrupt.PolicySnapshot
 }
 
 // InterruptPolicyFunc adapts a plain function to InterruptPolicy.

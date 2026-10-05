@@ -57,8 +57,8 @@ type Store interface {
 
 	// Get returns the full record identified by id, including Messages
 	// and Decisions. Returns ErrNotFound when id is unknown, and
-	// ErrUnknownVersion when the persisted record's Version does not
-	// match CurrentVersion.
+	// ErrUnknownVersion when the persisted record's Version is not in
+	// the set this package can read.
 	Get(ctx context.Context, id string) (*Record, error)
 
 	// SubmitDecisions atomically merges decisions into the record's

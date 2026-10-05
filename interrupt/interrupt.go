@@ -40,11 +40,19 @@ import (
 	"github.com/vogo/largemodel/schema"
 )
 
-// CurrentVersion is the Record schema version this package writes. Stores
-// must reject records whose Version does not match a version they know how
-// to read rather than guessing at an unfamiliar layout — see
-// ErrUnknownVersion.
-const CurrentVersion = 2
+// CurrentVersion is the Record schema version this package writes.
+// Readers accept this version and legacy version 2, which has no policy
+// fingerprint. Every other version, including 1, is ErrUnknownVersion.
+// There is no migration that guesses an older layout.
+const CurrentVersion = 3
+
+// versionReadable reports whether v is a record version this package can
+// decode. Version 2 is the legacy layout (no Policy fingerprint). Version
+// 3 is CurrentVersion. FileStore and MapStore must both use this function
+// so the readable set cannot drift between backends.
+func versionReadable(v int) bool {
+	return v == 2 || v == CurrentVersion
+}
 
 // Status is the interrupt state-machine position of a Record.
 type Status string
@@ -82,6 +90,24 @@ type EffectiveParams struct {
 	StopSequences  []string `json:"stop_sequences,omitempty"`
 }
 
+// CallAssessment is one tool call's flag as stored on a Record.
+// Classification is defined by the host; this package stores the string
+// and does not interpret it.
+type CallAssessment struct {
+	ToolCallID     string `json:"tool_call_id"`
+	Flagged        bool   `json:"flagged"`
+	Classification string `json:"classification,omitempty"`
+}
+
+// PolicySnapshot is the host policy's view of a frozen tool batch.
+// Fingerprint is an opaque string. This package compares it for equality
+// and does not parse its contents. An empty Fingerprint means resume
+// skips the fingerprint check.
+type PolicySnapshot struct {
+	Fingerprint string           `json:"fingerprint,omitempty"`
+	Calls       []CallAssessment `json:"calls,omitempty"`
+}
+
 // Decision is one committed external decision for a pending tool call.
 // DecidedAt is stamped by the Store, not the caller.
 //
@@ -91,6 +117,7 @@ type EffectiveParams struct {
 //   - Execute (Execute == true && IsError == false): ResumeInterrupt
 //     runs the original handler. Content is ignored. This is the
 //     "human approved, now run it" path for side-effecting tools.
+//
 // IsError always wins: a rejected call is never executed.
 type Decision struct {
 	ToolCallID string    `json:"tool_call_id"`
@@ -151,6 +178,17 @@ type Record struct {
 	// the budget from Usage would silently hand the resumed half of the
 	// same logical Run more tokens than it has left.
 	TokensConsumed int `json:"tokens_consumed,omitempty"`
+
+	// Policy is the host snapshot of why this batch was flagged. An empty
+	// Fingerprint (legacy version 2, or a policy that does not witness)
+	// means resume does not re-check the flag basis.
+	Policy PolicySnapshot `json:"policy,omitempty,omitzero"`
+
+	// Supersedes is the interrupt id this record replaces. Empty means
+	// this record is not a successor. A successor is a new Pending
+	// record: Decisions and the lease stay zero so an old Execute
+	// decision cannot ride along.
+	Supersedes string `json:"supersedes,omitempty"`
 
 	// State machine.
 	Status   Status `json:"status"`
@@ -240,6 +278,24 @@ func cloneMessages(in []schema.Message) []schema.Message {
 	return out
 }
 
+// cloneAssessments copies the policy call list so a caller cannot mutate
+// the store's copy through the slice header.
+func cloneAssessments(in []CallAssessment) []CallAssessment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]CallAssessment, len(in))
+	copy(out, in)
+	return out
+}
+
+// clonePolicy deep-copies a snapshot, including Calls.
+func clonePolicy(p PolicySnapshot) PolicySnapshot {
+	out := p
+	out.Calls = cloneAssessments(p.Calls)
+	return out
+}
+
 // cloneDecisions deep-copies the decision map.
 func cloneDecisions(in map[string]Decision) map[string]Decision {
 	if len(in) == 0 {
@@ -280,5 +336,6 @@ func cloneRecord(r *Record) *Record {
 	out.Decisions = cloneDecisions(r.Decisions)
 	out.Messages = cloneMessages(r.Messages)
 	out.Params = cloneParams(r.Params)
+	out.Policy = clonePolicy(r.Policy)
 	return &out
 }

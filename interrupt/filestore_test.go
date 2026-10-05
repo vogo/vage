@@ -20,8 +20,10 @@ package interrupt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -605,5 +607,110 @@ func TestFileStore_V1RejectedByV2Reader(t *testing.T) {
 
 	if _, err := s.Get(ctx, rec.ID); !errors.Is(err, ErrUnknownVersion) {
 		t.Errorf("Get v1 record err = %v, want ErrUnknownVersion", err)
+	}
+}
+
+func TestFileStore_V2ReadableWithoutFingerprint(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	s, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	rec := newTestRecord("sess-v2", []string{"call-1"})
+	if err := s.Create(ctx, rec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	rec.Version = 2
+	rec.Policy = PolicySnapshot{}
+	if err := s.writeRecord(rec); err != nil {
+		t.Fatalf("writeRecord: %v", err)
+	}
+	raw, err := os.ReadFile(s.recordPath(rec.ID))
+	if err != nil {
+		t.Fatalf("read rewritten v2: %v", err)
+	}
+	if strings.Contains(string(raw), `"policy"`) {
+		t.Fatalf("rewritten v2 record emitted policy: %s", raw)
+	}
+	got, err := s.Get(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("Get v2: %v", err)
+	}
+	if got.Version != 2 {
+		t.Errorf("Version = %d, want 2", got.Version)
+	}
+	if got.Policy.Fingerprint != "" {
+		t.Errorf("Fingerprint = %q, want empty", got.Policy.Fingerprint)
+	}
+}
+
+func TestFileStore_AuditVersionsSkipsLockAndTmp(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	s, err := NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	current := newTestRecord("sess-cur", []string{"call-1"})
+	if err := s.Create(ctx, current); err != nil {
+		t.Fatalf("Create current: %v", err)
+	}
+	legacy := newTestRecord("sess-leg", []string{"call-1"})
+	if err := s.Create(ctx, legacy); err != nil {
+		t.Fatalf("Create legacy: %v", err)
+	}
+	legacy.Version = 2
+	legacy.Policy = PolicySnapshot{}
+	if err := s.writeRecord(legacy); err != nil {
+		t.Fatalf("writeRecord legacy: %v", err)
+	}
+
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("v1rec.json", `{"version":1,"id":"v1rec"}`)
+	write("bad.json", `{`)
+	write("v1rec.lock", `not a record`)
+	write("partial.json.tmp", `{"version":9}`)
+	for i := range maxAuditUnknownIDs {
+		write(fmt.Sprintf("extra-%02d.json", i), `{"version":1}`)
+	}
+
+	audit, err := s.AuditVersions(ctx)
+	if err != nil {
+		t.Fatalf("AuditVersions: %v", err)
+	}
+	if audit.Current != 1 {
+		t.Errorf("Current = %d, want 1", audit.Current)
+	}
+	if audit.Legacy != 1 {
+		t.Errorf("Legacy = %d, want 1", audit.Legacy)
+	}
+	// v1rec + bad + maxAuditUnknownIDs extras
+	wantUnknown := 2 + maxAuditUnknownIDs
+	if audit.Unknown != wantUnknown {
+		t.Errorf("Unknown = %d, want %d", audit.Unknown, wantUnknown)
+	}
+	if len(audit.UnknownIDs) != maxAuditUnknownIDs {
+		t.Errorf("UnknownIDs len = %d, want %d", len(audit.UnknownIDs), maxAuditUnknownIDs)
+	}
+	for _, id := range audit.UnknownIDs {
+		if strings.HasSuffix(id, ".lock") || strings.Contains(id, ".tmp") {
+			t.Errorf("lock or tmp counted as unknown id %q", id)
+		}
+	}
+
+	gone := filepath.Join(root, "missing-dir")
+	s.root = gone
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if _, err := s.AuditVersions(ctx); err == nil {
+		t.Fatal("AuditVersions on missing directory must return an error")
 	}
 }

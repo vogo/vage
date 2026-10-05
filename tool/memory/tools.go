@@ -18,7 +18,7 @@
 // Package memory implements two LLM-facing tools over a caller-supplied
 // Store:
 //
-//   - memory_set    — write one durable fact (namespace + key + value);
+//   - memory_set    — write or delete one durable fact (op=set|delete);
 //   - memory_recall — list facts by namespace / key prefix / limit.
 //
 // The package does not import vage/memory (L2 tool must not depend on L1
@@ -48,9 +48,14 @@ const (
 )
 
 // EventSet is the CustomEventData.Name emitted after a successful
-// memory_set. Payload is map[string]any with keys namespace, key,
+// memory_set op=set. Payload is map[string]any with keys namespace, key,
 // shared — never value.
 const EventSet = "memory.set"
+
+// EventDelete is the CustomEventData.Name emitted after a successful
+// memory_set op=delete. Payload is map[string]any with keys namespace,
+// key, shared — never value.
+const EventDelete = "memory.delete"
 
 // Size / result caps keep a single tool call from dominating the
 // context window. 16 KiB matches vector_add; 20/50 match typical
@@ -97,6 +102,10 @@ var (
 type Store interface {
 	Get(ctx context.Context, key string) (any, error)
 	Set(ctx context.Context, key string, value any, ttl int64) error
+	// Delete removes one logical key. A missing key returns nil.
+	// Implementations apply their own session ACL. This package never
+	// calls a clear-all operation.
+	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, prefix string) ([]Entry, error)
 }
 
